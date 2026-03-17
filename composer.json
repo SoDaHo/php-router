@@ -1,0 +1,49 @@
+{
+    "name": "sodaho/php-router",
+    "description": "Lightweight PHP Router for REST APIs and SPAs. Standardized JSON responses, middleware, caching.",
+    "type": "library",
+    "license": "MIT",
+    "keywords": ["router", "psr-7", "psr-11", "psr-15", "api", "rest", "middleware", "json", "php"],
+    "require": {
+        "php": "^8.1",
+        "psr/http-message": "^2.0",
+        "psr/http-server-handler": "^1.0",
+        "psr/http-server-middleware": "^1.0",
+        "psr/container": "^2.0",
+        "psr/http-factory": "^1.0",
+        "nyholm/psr7": "^1.8",
+        "nyholm/psr7-server": "^1.1"
+    },
+    "require-dev": {
+        "friendsofphp/php-cs-fixer": "^3.64",
+        "mikey179/vfsstream": "^1.6",
+        "phpstan/phpstan": "^2.0",
+        "phpunit/phpunit": "^10.5"
+    },
+    "autoload": {
+        "psr-4": {
+            "Sodaho\\Router\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Sodaho\\Router\\Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "test": "vendor/bin/phpunit --testsuite=Unit",
+        "test:unit": "vendor/bin/phpunit --testsuite=Unit",
+        "test:integration": "vendor/bin/phpunit --testsuite=Integration",
+        "test:feature": "vendor/bin/phpunit --testsuite=Feature",
+        "test:security": "vendor/bin/phpunit --testsuite=Security",
+        "test:all": "vendor/bin/phpunit",
+        "test:coverage": "vendor/bin/phpunit --coverage-html coverage",
+        "analyse": "vendor/bin/phpstan analyse",
+        "cs": "vendor/bin/php-cs-fixer fix --dry-run --diff",
+        "cs:fix": "vendor/bin/php-cs-fixer fix",
+        "ci": ["@cs", "@analyse", "@test"]
+    },
+    "config": {
+        "sort-packages": true
+    }
+}
