@@ -326,6 +326,8 @@ class Router implements RequestHandlerInterface
             $data = $data['dispatchData'] ?? $data;
         }
 
+        assert(is_array($data));
+        /** @var array{0: array<string, array<string, Route>>, 1: array<string, array<int, array{regex: string, route: Route, casts: array<string, string>}>>} $data */
         $this->dispatcher = new RouteDispatcher(
             $data,
             $this->container,
