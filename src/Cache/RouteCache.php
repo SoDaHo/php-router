@@ -81,8 +81,9 @@ class RouteCache
         $content .= "return {$export};";
 
         // Atomic write (prevents partial reads)
-        $tempFile = $this->cacheFile . '.tmp.' . uniqid('', true);
+        $tempFile = $this->cacheFile . '.tmp.' . bin2hex(random_bytes(8));
         if (file_put_contents($tempFile, $content) === false) {
+            @unlink($tempFile);
             throw CacheException::writeFailed($this->cacheFile);
         }
 
@@ -91,6 +92,13 @@ class RouteCache
             @unlink($tempFile);
             throw CacheException::writeFailed($this->cacheFile);
         }
+
+        // Invalidate OPcache so the new file is picked up immediately
+        // @codeCoverageIgnoreStart
+        if (function_exists('opcache_invalidate')) {
+            opcache_invalidate($this->cacheFile, true);
+        }
+        // @codeCoverageIgnoreEnd
     }
 
     /**
