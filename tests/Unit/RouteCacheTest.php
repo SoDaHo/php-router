@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Sodaho\Router\Tests\Unit;
 
+use PHPUnit\Framework\Attributes\RequiresOperatingSystem;
 use PHPUnit\Framework\TestCase;
 use Sodaho\Router\Cache\RouteCache;
 use Sodaho\Router\Exception\CacheException;
@@ -247,9 +248,7 @@ class RouteCacheTest extends TestCase
         $this->assertSame($this->cacheFile, $cache->getCacheFile());
     }
 
-    /**
-     * @requires OS Linux|Darwin
-     */
+    #[RequiresOperatingSystem('Linux|Darwin')]
     public function testLoadReturnsNullOnUnreadableFile(): void
     {
         if (PHP_OS_FAMILY === 'Windows') {
