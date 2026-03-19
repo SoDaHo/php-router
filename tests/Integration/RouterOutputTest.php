@@ -67,36 +67,6 @@ class RouterOutputTest extends TestCase
     }
 
     #[RunInSeparateProcess]
-    public function testEmitSendsHeaders(): void
-    {
-        $this->createRoutesFile(
-            <<<'PHP'
-                <?php
-                use Sodaho\Router\RouteCollector;
-                use Sodaho\Router\Response;
-
-                return function (RouteCollector $r) {
-                    $r->get('/test', fn($req) => Response::success(['ok' => true]));
-                };
-                PHP
-        );
-
-        $_SERVER['REQUEST_METHOD'] = 'GET';
-        $_SERVER['REQUEST_URI'] = '/test';
-        $_SERVER['SERVER_PROTOCOL'] = 'HTTP/1.1';
-
-        $router = Router::create(['debug' => true])->loadRoutes($this->routesFile);
-
-        ob_start();
-        $router->run();
-        ob_end_clean();
-
-        // Verify no exception was thrown; header assertions are unreliable
-        // in PHPUnit subprocess isolation (xdebug_get_headers() may return empty)
-        $this->assertTrue(true);
-    }
-
-    #[RunInSeparateProcess]
     public function testBootStaticMethod(): void
     {
         $this->createRoutesFile(

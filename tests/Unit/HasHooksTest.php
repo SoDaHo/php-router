@@ -76,9 +76,8 @@ class HasHooksTest extends TestCase
             }
         };
 
-        // Should not throw
+        $this->expectNotToPerformAssertions();
         $obj->fireEvent();
-        $this->assertTrue(true);
     }
 
     public function testHookExceptionDoesNotInterruptExecution(): void
