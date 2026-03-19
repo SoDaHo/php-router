@@ -7,7 +7,7 @@ namespace Sodaho\Router;
 /**
  * Value object representing a single route.
  *
- * Immutable container for route configuration.
+ * Partially mutable: middleware and name can be set via fluent setters.
  */
 class Route
 {

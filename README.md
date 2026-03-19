@@ -102,11 +102,12 @@ $r->get('/codes/{code:alphanum}', $handler); // Alphanumeric
 |-----------|-------|---------|
 | `int` | `-?\d+` | `{id:int}` → 123, -5 |
 | `float` | `-?\d+(?:\.\d+)?` | `{price:float}` → 19.99 |
-| `bool` | `true\|false\|0\|1` | `{active:bool}` → true |
+| `bool` | `true\|false\|0\|1` (case-insensitive) | `{active:bool}` → true, TRUE |
 | `alpha` | `[a-zA-Z]+` | `{name:alpha}` → abc |
 | `alphanum` | `[a-zA-Z0-9]+` | `{code:alphanum}` → abc123 |
 | `slug` | `[a-z0-9-]+` | `{slug:slug}` → my-post |
-| `uuid` | `[0-9a-f]{8}-...` | `{id:uuid}` → 550e8400-... |
+| `uuid` | `[0-9a-fA-F]{8}-...` | `{id:uuid}` → 550e8400-... |
+| `ulid` | `[0-9A-Za-z]{26}` | `{id:ulid}` → 01ARZ3NDEKTSV4RRFFQ69G5FAV |
 | `any` | `.*` | `{path:any}` → anything/here |
 
 ### Custom Patterns
