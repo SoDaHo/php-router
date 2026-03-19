@@ -217,6 +217,66 @@ class UrlGeneratorTest extends TestCase
         $this->assertSame('/posts/2025/hello', $generator->url('posts.show', ['year' => 2025, 'slug' => 'hello']));
     }
 
+    // ==================== Parameter Type Tests ====================
+
+    public function testGenerateUrlWithIntParameter(): void
+    {
+        $routes = [
+            new Route(['GET'], '/users/{id:int}', 'handler', [], 'users.show'),
+        ];
+        $generator = new UrlGenerator($routes);
+
+        $this->assertSame('/users/42', $generator->url('users.show', ['id' => 42]));
+        $this->assertSame('/users/0', $generator->url('users.show', ['id' => 0]));
+        $this->assertSame('/users/-5', $generator->url('users.show', ['id' => -5]));
+    }
+
+    public function testGenerateUrlWithFloatParameter(): void
+    {
+        $routes = [
+            new Route(['GET'], '/products/{price:float}', 'handler', [], 'products.show'),
+        ];
+        $generator = new UrlGenerator($routes);
+
+        $this->assertSame('/products/19.99', $generator->url('products.show', ['price' => 19.99]));
+        $this->assertSame('/products/0', $generator->url('products.show', ['price' => 0.0]));
+        $this->assertSame('/products/-3.14', $generator->url('products.show', ['price' => -3.14]));
+    }
+
+    public function testGenerateUrlWithBoolParameterTrue(): void
+    {
+        $routes = [
+            new Route(['GET'], '/users/activate/{flag:bool}', 'handler', [], 'users.activate'),
+        ];
+        $generator = new UrlGenerator($routes);
+
+        $url = $generator->url('users.activate', ['flag' => true]);
+        $this->assertSame('/users/activate/1', $url);
+    }
+
+    public function testGenerateUrlWithBoolParameterFalse(): void
+    {
+        $routes = [
+            new Route(['GET'], '/users/activate/{flag:bool}', 'handler', [], 'users.activate'),
+        ];
+        $generator = new UrlGenerator($routes);
+
+        $url = $generator->url('users.activate', ['flag' => false]);
+        $this->assertSame('/users/activate/0', $url);
+    }
+
+    public function testThrowsOnMissingBoolParameter(): void
+    {
+        $routes = [
+            new Route(['GET'], '/users/activate/{flag:bool}', 'handler', [], 'users.activate'),
+        ];
+        $generator = new UrlGenerator($routes);
+
+        $this->expectException(RouterException::class);
+        $this->expectExceptionMessage('Missing parameter "flag"');
+        $generator->url('users.activate', []);
+    }
+
     // ==================== URL Encoding Tests ====================
 
     public function testUrlEncodingEnabledByDefault(): void

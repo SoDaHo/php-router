@@ -76,7 +76,7 @@ final class UrlGenerator
      * Generate a relative URL for a named route.
      *
      * @param string $name Route name
-     * @param array<string, string|int> $params Route parameters
+     * @param array<string, string|int|float|bool> $params Route parameters
      *
      * @throws RouteNotFoundException If route name does not exist
      *
@@ -94,7 +94,7 @@ final class UrlGenerator
      * Generate an absolute URL for a named route.
      *
      * @param string $name Route name
-     * @param array<string, string|int> $params Route parameters
+     * @param array<string, string|int|float|bool> $params Route parameters
      *
      * @throws RouteNotFoundException If route name does not exist
      * @throws RouterException If baseUrl is not configured
@@ -140,7 +140,7 @@ final class UrlGenerator
     }
 
     /**
-     * @param array<string, string|int> $params
+     * @param array<string, string|int|float|bool> $params
      */
     private function replaceParameters(string $pattern, array $params): string
     {
@@ -160,13 +160,14 @@ final class UrlGenerator
             function (array $matches) use ($params): string {
                 $name = $matches[1];
 
-                if (!isset($params[$name])) {
+                if (!isset($params[$name]) && !array_key_exists($name, $params)) {
                     throw new RouterException(
                         sprintf('Missing parameter "%s" for URL generation', $name)
                     );
                 }
 
-                $value = (string) $params[$name];
+                $rawValue = $params[$name];
+                $value = is_bool($rawValue) ? ($rawValue ? '1' : '0') : (string) $rawValue;
 
                 return $this->encodeParams ? rawurlencode($value) : $value;
             },
