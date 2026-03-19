@@ -120,6 +120,10 @@ final class Response
         int $page,
         int $perPage,
     ): ResponseInterface {
+        if ($perPage < 1) {
+            throw new \InvalidArgumentException('$perPage must be at least 1');
+        }
+
         $lastPage = (int) ceil($total / $perPage);
 
         return self::json(200, self::getResponder()->formatSuccess($items, null, [

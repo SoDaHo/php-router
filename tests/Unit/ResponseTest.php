@@ -154,6 +154,21 @@ class ResponseTest extends TestCase
         $this->assertSame(20, $body['meta']['pagination']['to']);
     }
 
+    public function testPaginatedRejectsZeroPerPage(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('$perPage must be at least 1');
+
+        Response::paginated([], 10, 1, 0);
+    }
+
+    public function testPaginatedRejectsNegativePerPage(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+
+        Response::paginated([], 10, 1, -5);
+    }
+
     public function testErrorResponse(): void
     {
         $response = Response::error('Something failed', 400, 'CUSTOM_ERROR', ['field' => 'value']);
