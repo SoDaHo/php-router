@@ -138,7 +138,7 @@ class Router implements RequestHandlerInterface
      * Enable route caching.
      *
      * @param string $file Path to cache file
-     * @param string|null $signature Cache invalidation key (e.g., app version)
+     * @param string|null $signature HMAC key for integrity verification (required in production)
      */
     public function enableCache(string $file, ?string $signature = null): self
     {

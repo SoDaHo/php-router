@@ -218,24 +218,24 @@ class RouteCache
         return hash_equals($expected, $signature);
     }
 
-    /**
-     * Check if caching is enabled.
-     */
-    public function isEnabled(): bool
-    {
-        return $this->enabled;
-    }
+    // /**
+    //  * Check if caching is enabled.
+    //  */
+    // public function isEnabled(): bool
+    // {
+    //     return $this->enabled;
+    // }
 
-    /**
-     * Enable or disable caching.
-     *
-     * @param bool $enabled Enable caching
-     */
-    public function setEnabled(bool $enabled): self
-    {
-        $this->enabled = $enabled;
-        return $this;
-    }
+    // /**
+    //  * Enable or disable caching.
+    //  *
+    //  * @param bool $enabled Enable caching
+    //  */
+    // public function setEnabled(bool $enabled): self
+    // {
+    //     $this->enabled = $enabled;
+    //     return $this;
+    // }
 
     /**
      * Get the cache file path.

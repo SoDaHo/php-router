@@ -132,8 +132,8 @@ final class Response
                 'per_page' => $perPage,
                 'current_page' => $page,
                 'last_page' => $lastPage,
-                'from' => ($page - 1) * $perPage + 1,
-                'to' => min($page * $perPage, $total),
+                'from' => $total > 0 ? ($page - 1) * $perPage + 1 : 0,
+                'to' => $total > 0 ? min($page * $perPage, $total) : 0,
             ],
         ]));
     }

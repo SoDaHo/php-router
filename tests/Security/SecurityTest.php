@@ -94,10 +94,10 @@ class SecurityTest extends TestCase
 
         foreach ($attacks as $path) {
             $response = $dispatcher->handle(new ServerRequest('GET', $path));
-            // Should be 404 (regex doesn't match) or 500 (casting fails)
+            // Should be 404 (regex doesn't match) or 400 (casting fails)
             $this->assertContains(
                 $response->getStatusCode(),
-                [404, 500],
+                [400, 404],
                 "SQL/XSS injection should be rejected: {$path}"
             );
         }

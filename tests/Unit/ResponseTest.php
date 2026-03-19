@@ -154,6 +154,17 @@ class ResponseTest extends TestCase
         $this->assertSame(20, $body['meta']['pagination']['to']);
     }
 
+    public function testPaginatedEmptyResult(): void
+    {
+        $response = Response::paginated([], 0, 1, 10);
+
+        $body = json_decode((string) $response->getBody(), true);
+        $this->assertSame(0, $body['meta']['pagination']['total']);
+        $this->assertSame(0, $body['meta']['pagination']['from']);
+        $this->assertSame(0, $body['meta']['pagination']['to']);
+        $this->assertSame(0, $body['meta']['pagination']['last_page']);
+    }
+
     public function testPaginatedRejectsZeroPerPage(): void
     {
         $this->expectException(\InvalidArgumentException::class);

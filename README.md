@@ -407,8 +407,8 @@ try {
 
 | Exception | When |
 |-----------|------|
-| `NotFoundException` | Route not found (404) |
-| `MethodNotAllowedException` | Wrong HTTP method (405) |
+| `NotFoundException` | Available for application use (router returns 404 response directly) |
+| `MethodNotAllowedException` | Available for application use (router returns 405 response directly) |
 | `RouteNotFoundException` | Named route doesn't exist (URL generation) |
 | `DuplicateRouteException` | Same method+pattern registered twice |
 | `CacheException` | Cache read/write/signature failure |
