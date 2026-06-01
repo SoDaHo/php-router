@@ -255,6 +255,10 @@ class RouteCacheTest extends TestCase
             $this->markTestSkipped('chmod not supported on Windows');
         }
 
+        if (function_exists('posix_getuid') && posix_getuid() === 0) {
+            $this->markTestSkipped('Permission checks are bypassed by root; covered by RouteCacheVfsTest.');
+        }
+
         $cache = new RouteCache($this->cacheFile, self::TEST_KEY);
         $cache->save(['test' => true]);
 
