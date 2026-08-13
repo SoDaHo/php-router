@@ -288,6 +288,15 @@ class FileStreamTest extends TestCase
         $this->assertTrue($stream->eof());
     }
 
+    public function testZeroLengthReadReturnsEmptyStringInsteadOfThrowing(): void
+    {
+        // fread($h, 0) raises a ValueError on PHP 8 — the shortcut in read() is load-bearing.
+        $stream = new FileStream($this->path);
+
+        $this->assertSame('', $stream->read(0));
+        $this->assertSame('0123456789', $stream->getContents());
+    }
+
     public function testMissingFileThrows(): void
     {
         $this->expectException(RouterException::class);

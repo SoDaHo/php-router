@@ -12,6 +12,9 @@
 - `Router::emit()` writes the body in 8 KB pieces instead of one `echo`. Byte output is
   unchanged, but `ob_start($callback, $chunkSize)` callbacks now see several smaller chunks —
   register them with chunk size 0 if they are not chunk-safe.
+- `Router::emit()` stops after three consecutive empty reads from a body that never reports
+  `eof()`. v1.0.0 would have kept asking forever (pinning the worker); custom stream
+  implementations that stall for longer than three reads are now cut short.
 - A response whose body was closed or detached before emit now raises `RouterException`
   instead of dying inside `__toString()` — the failure stays loud rather than sending an
   empty 200 under a Content-Length promising more. The check runs before status and headers

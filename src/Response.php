@@ -26,7 +26,7 @@ final class Response
     /** Upper bound for the filename inside Content-Disposition (see contentDisposition()). */
     private const FILENAME_MAX_BYTES = 200;
 
-    /** Longest suffix still treated as a file extension when truncating (".tar.gz" fits). */
+    /** Longest suffix still treated as a file extension when truncating (last dot wins, so ".gz" — not ".tar.gz"). */
     private const FILENAME_MAX_EXT_BYTES = 16;
 
     private static ?ResponderInterface $responder = null;

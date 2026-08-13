@@ -219,6 +219,73 @@ class ResponseFileTest extends TestCase
         $this->assertSame(416, $r->getStatusCode());
     }
 
+    public function testTruncationRepairsACutMultiByteSequence(): void
+    {
+        // 4-byte emoji at an offset where the 200-byte cut lands INSIDE a codepoint: the
+        // repair loop has to peel three bytes. Without it (or with fewer iterations) the stem
+        // stays invalid UTF-8, the RFC 8187 gate blocks, and the client only gets a name made
+        // of underscores. The umlaut test alone never reaches this — it cuts on a boundary.
+        $r = Response::file($this->path, 'x' . str_repeat("\u{1F600}", 100) . '.pdf');
+        $disposition = $r->getHeaderLine('Content-Disposition');
+
+        $this->assertStringContainsString("filename*=UTF-8''", $disposition, 'extended form must survive truncation');
+        $encoded = explode("UTF-8''", $disposition)[1] ?? '';
+        $this->assertSame(1, preg_match('//u', rawurldecode($encoded)), 'truncated name must stay valid UTF-8');
+    }
+
+    public function testTruncationRepairsAThreeByteSequenceToo(): void
+    {
+        $r = Response::file($this->path, 'xx' . str_repeat("\u{4E2D}", 100) . '.pdf');
+        $encoded = explode("UTF-8''", $r->getHeaderLine('Content-Disposition'))[1] ?? '';
+
+        $this->assertNotSame('', $encoded);
+        $this->assertSame(1, preg_match('//u', rawurldecode($encoded)));
+    }
+
+    public function testFilenameNeverExceedsTheCapEvenWithAnEarlyDot(): void
+    {
+        // A dot near the front must not turn the whole rest into an "extension" and smuggle
+        // a 400-byte value into the header.
+        $r = Response::file($this->path, 'a.' . str_repeat('b', 400));
+        preg_match('/filename="([^"]*)"/', $r->getHeaderLine('Content-Disposition'), $m);
+
+        $this->assertLessThanOrEqual(200, strlen($m[1] ?? ''));
+    }
+
+    public function testWhitespaceOnlyFilenameFallsBackToDownload(): void
+    {
+        $r = Response::file($this->path, "\u{202E}   \u{202E}");
+
+        $this->assertSame('attachment; filename="download"', $r->getHeaderLine('Content-Disposition'));
+    }
+
+    public function testMaxChunkLargerThanTheRangeLeavesItAlone(): void
+    {
+        $r = Response::file($this->path, null, 'application/octet-stream', false, 'bytes=10-19', 5000);
+
+        $this->assertSame('bytes 10-19/1000', $r->getHeaderLine('Content-Range'));
+        $this->assertSame(substr($this->payload, 10, 10), (string) $r->getBody());
+    }
+
+    public function testMaxChunkNeverRunsPastEndOfFile(): void
+    {
+        $r = Response::file($this->path, null, 'application/octet-stream', false, 'bytes=950-', 5000);
+
+        $this->assertSame('bytes 950-999/1000', $r->getHeaderLine('Content-Range'));
+        $this->assertSame('50', $r->getHeaderLine('Content-Length'));
+        $this->assertSame(50, strlen((string) $r->getBody()));
+    }
+
+    public function testReversedRangeIsUnsatisfiable(): void
+    {
+        // Without the start > end guard this produced a 206 with Content-Length: -1.
+        foreach (['bytes=5-3', 'bytes=100-99'] as $range) {
+            $r = Response::file($this->path, null, 'application/octet-stream', false, $range);
+
+            $this->assertSame(416, $r->getStatusCode(), $range);
+        }
+    }
+
     public function testMissingFileThrows(): void
     {
         $this->expectException(RouterException::class);

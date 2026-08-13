@@ -7,6 +7,7 @@ namespace Sodaho\Router\Tests\Integration;
 use PHPUnit\Framework\Attributes\RunInSeparateProcess;
 use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 use PHPUnit\Framework\TestCase;
+use Sodaho\Router\Exception\RouterException;
 use Sodaho\Router\Router;
 
 /**
@@ -208,6 +209,90 @@ class StreamedDownloadTest extends TestCase
         );
 
         $this->assertSame('hello world', $this->serve('/consumed'));
+    }
+
+    #[RunInSeparateProcess]
+    public function testStalledBodyTerminatesInsteadOfSpinningForever(): void
+    {
+        // A stream that never reports eof and never returns bytes must not pin the worker
+        // until max_execution_time — the empty-read limit is the brake.
+        $this->createRoutes(
+            <<<'PHP'
+                <?php
+                use Sodaho\Router\RouteCollector;
+                use Nyholm\Psr7\Response as Psr7Response;
+                use Psr\Http\Message\StreamInterface;
+
+                return function (RouteCollector $r) {
+                    $r->get('/stall', function ($req) {
+                        $body = new class implements StreamInterface {
+                            public function __toString(): string { return ''; }
+                            public function close(): void {}
+                            public function detach() { return null; }
+                            public function getSize(): ?int { return null; }
+                            public function tell(): int { return 0; }
+                            public function eof(): bool { return false; }
+                            public function isSeekable(): bool { return false; }
+                            public function seek(int $o, int $w = SEEK_SET): void {}
+                            public function rewind(): void {}
+                            public function isWritable(): bool { return false; }
+                            public function write(string $s): int { return 0; }
+                            public function isReadable(): bool { return true; }
+                            // Self-limiting: with the brake in place emit() gives up long
+                            // before this. Without it, the test FAILS loudly instead of
+                            // hanging the suite until someone kills CI.
+                            private int $reads = 0;
+                            public function read(int $length): string {
+                                if (++$this->reads > 100) {
+                                    throw new RuntimeException('emit() kept reading a stalled body');
+                                }
+                                return '';
+                            }
+                            public function getContents(): string { return ''; }
+                            public function getMetadata(?string $key = null) { return $key === null ? [] : null; }
+                        };
+                        return new Psr7Response(200, [], $body);
+                    });
+                };
+                PHP
+        );
+
+        $this->assertSame('', $this->serve('/stall'));
+    }
+
+    #[RunInSeparateProcess]
+    public function testClosedBodyFailsLoudlyInsteadOfSendingAnEmptyResponse(): void
+    {
+        $this->createRoutes(
+            <<<'PHP'
+                <?php
+                use Sodaho\Router\RouteCollector;
+                use Sodaho\Router\Response;
+
+                return function (RouteCollector $r) {
+                    $r->get('/closed', function ($req) {
+                        $res = Response::text('gone');
+                        $res->getBody()->close();
+                        return $res;
+                    });
+                };
+                PHP
+        );
+
+        // The exception escapes mid-emit, so the output buffer opened by serve() has to be
+        // cleaned up here — otherwise PHPUnit (rightly) flags the test as risky.
+        $level = ob_get_level();
+
+        try {
+            $this->serve('/closed');
+            $this->fail('emit() must refuse a body that was closed before it ran');
+        } catch (RouterException $e) {
+            $this->assertStringContainsString('not readable', $e->getMessage());
+        } finally {
+            while (ob_get_level() > $level) {
+                ob_end_clean();
+            }
+        }
     }
 
     #[RunInSeparateProcess]
