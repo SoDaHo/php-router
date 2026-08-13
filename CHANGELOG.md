@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-08-13
+
 ### Added
 - `Response::file()` — streamed file responses that never hold the file in memory.
   Supports inline disposition, a single HTTP `Range` (206, with automatic 416 for
@@ -69,5 +71,6 @@
 - **Configuration** via constructor array, environment variables, or fluent API.
 - **Strict parameter validation**: invalid types return 400 (not 500), controller TypeErrors bubble up as 500.
 
-[Unreleased]: https://github.com/sodaho/php-router/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/sodaho/php-router/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/sodaho/php-router/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/sodaho/php-router/releases/tag/v1.0.0
