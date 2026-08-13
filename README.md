@@ -126,10 +126,12 @@ public function show(ServerRequestInterface $request, int $id): ResponseInterfac
     // $id is already typed and validated
 }
 
-// Option B: From request attributes
-public function show(ServerRequestInterface $request): ResponseInterface
+// Option B: From request attributes — additionally available, e.g. inside middleware.
+// The handler must still declare every placeholder of its route; a handler that omits
+// one fails with "Unknown named parameter".
+public function show(ServerRequestInterface $request, int $id): ResponseInterface
 {
-    $id = $request->getAttribute('id');
+    $id === $request->getAttribute('id');   // same value
 }
 ```
 
@@ -238,9 +240,63 @@ Response::html($content, 404);                           // text/html with statu
 Response::text($content);                                // text/plain
 Response::redirect('/new-url');                          // 302
 Response::redirect('/new-url', 301);                     // 301
-Response::download($content, 'file.pdf');                // Attachment
+Response::download($content, 'file.pdf');                // Attachment (in-memory string, filename sanitized)
 Response::download($content, 'file.pdf', 'application/pdf');
+Response::file('/path/to/file.pdf', 'file.pdf');         // Streamed attachment
 ```
+
+### Large Files
+
+`download()` takes the whole body as a string — fine for generated content, but a file of
+size N costs roughly N bytes of memory (plus the copy the emitter used to make). Use
+`file()` for anything that can grow: the body is a `FileStream`, the emitter pulls it in
+8 KB chunks, and peak memory stays flat no matter how large the file is.
+
+```php
+// Full file, forced download
+Response::file($path, 'invoice.pdf', 'application/pdf');
+
+// Inline preview (images, PDF, audio, video)
+Response::file($path, 'clip.mp4', 'video/mp4', inline: true);
+
+// Single HTTP Range (206) — what <audio>/<video> use for seeking.
+// Pass the raw Range header; unsatisfiable ranges answer 416 automatically,
+// anything unparseable falls back to the full 200 response.
+Response::file($path, 'clip.mp4', 'video/mp4', inline: true, range: $request->getHeaderLine('Range') ?: null);
+
+// Optional cap for a single 206 body (clients fetch the rest with follow-up ranges)
+Response::file($path, 'clip.mp4', 'video/mp4', inline: true, range: $range, maxChunk: 1024 * 1024);
+```
+
+`file()` sets `Content-Length`, `Accept-Ranges: bytes` and `X-Content-Type-Options: nosniff`,
+and throws `RouterException` when the path is not a readable file, or when `maxChunk` is below
+1 — check existence first and answer `Response::notFound()` yourself if you want a 404 instead
+of a 500.
+
+### Filenames
+
+Both `file()` and `download()` treat the filename as untrusted input — it usually comes from
+an upload:
+
+- Control characters are dropped (a raw `\r\n` would make PSR-7 reject the header and kill
+  the response), as are bidi overrides — `U+202E` turns `Rechnung‮fdp.exe` into a disguised
+  `.exe` in the download dialog.
+- `/` and `\` are replaced with `_`; surrounding whitespace is trimmed; `.` and `..` become
+  `download`.
+- Values longer than 200 bytes are truncated, keeping the file extension.
+- The `filename="…"` form carries **ASCII only** — every other character becomes `_`. The
+  original name is sent in the RFC 5987 `filename*=UTF-8''…` form, which clients prefer.
+  Anything that is not valid UTF-8 gets no extended form at all: declaring `UTF-8''` and
+  then sending other octets would be a lie.
+
+So a plain ASCII name without separators stays exactly as it was; anything else is normalized.
+
+It does **not** send `ETag`/`Last-Modified` and ignores `If-Range` — if files can be replaced
+under the same path, a resumed download may mix two versions.
+
+**Uploads are not affected by this** — they never pass through `Response`. Incoming request
+size stays a matter of `upload_max_filesize` / `post_max_size` (PHP) and
+`client_max_body_size` (nginx).
 
 ### JSON Structure
 
@@ -439,7 +495,9 @@ $r->get('/{any:any}', [PageController::class, 'index']);
 ```php
 class PageController
 {
-    public function index($request): ResponseInterface
+    // `$any` mirrors the {any:any} placeholder — every placeholder of the route must be
+    // declared, even when the handler ignores it.
+    public function index(ServerRequestInterface $request, string $any): ResponseInterface
     {
         return Response::html(file_get_contents('public/index.html'));
     }
@@ -587,6 +645,8 @@ $router = Router::create()
 - Route cache uses OPcache (no memory parsing)
 - ~1KB per route in memory
 - 100 routes ≈ 100KB memory footprint
+- Response bodies are emitted in 8 KB chunks — a `Response::file()` download of any size
+  keeps peak memory flat (a 32 MB file cost ~96 MB before that change)
 
 ## Security Best Practices
 

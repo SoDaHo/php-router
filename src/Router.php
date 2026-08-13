@@ -26,6 +26,11 @@ use Sodaho\Router\Traits\HasHooks;
 class Router implements RequestHandlerInterface
 {
     use HasHooks;
+    /** Bytes pulled from the response body per emit() iteration (see emit()). */
+    private const EMIT_CHUNK_SIZE = 8192;
+
+    /** Consecutive empty reads tolerated before emit() gives up on a stalled body. */
+    private const EMIT_EMPTY_READ_LIMIT = 3;
 
     /** @var array{debug: bool, basePath: string, baseUrl: ?string, trailingSlash: string, cacheFile: ?string, cacheSignature: ?string, routesFile: ?string, urlEncoding: bool} */
     private array $config;
@@ -380,6 +385,13 @@ class Router implements RequestHandlerInterface
         }
         // @codeCoverageIgnoreEnd
 
+        // Readability BEFORE the status line: a detached/closed body used to blow up loudly
+        // inside __toString(). Throwing after the headers went out would leave a half-sent
+        // response; throwing here lets the error handler still produce a proper 500.
+        if (!$response->getBody()->isReadable()) {
+            throw new RouterException('Response body is not readable (closed or detached before emit)');
+        }
+
         // Status line
         header(sprintf(
             'HTTP/%s %d %s',
@@ -395,7 +407,33 @@ class Router implements RequestHandlerInterface
             }
         }
 
-        // Body
-        echo $response->getBody();
+        // Body — pulled in chunks so large payloads (file downloads via Response::file())
+        // never sit in memory as a whole. For string bodies the emitted bytes are identical
+        // to the previous `echo $response->getBody()`: Nyholm's __toString() rewound the
+        // stream and returned everything, which is exactly what this loop does piecewise.
+        $body = $response->getBody();
+
+        if ($body->isSeekable()) {
+            $body->rewind();
+        }
+
+        // An empty read does not mean "done" — pump/append streams return '' transiently
+        // while eof() is still false, and breaking on the first one would truncate the body
+        // (the old getContents() looped until eof). Bail out only after several in a row,
+        // which still guards against a stream that never reports eof at all.
+        $emptyReads = 0;
+        while (!$body->eof()) {
+            $chunk = $body->read(self::EMIT_CHUNK_SIZE);
+            if ($chunk === '') {
+                if (++$emptyReads >= self::EMIT_EMPTY_READ_LIMIT) {
+                    break;
+                }
+
+                continue;
+            }
+
+            $emptyReads = 0;
+            echo $chunk;
+        }
     }
 }

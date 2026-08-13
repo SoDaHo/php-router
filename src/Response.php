@@ -7,7 +7,9 @@ namespace Sodaho\Router;
 use Nyholm\Psr7\Response as Psr7Response;
 use Psr\Http\Message\ResponseInterface;
 use Sodaho\Router\Contract\ResponderInterface;
+use Sodaho\Router\Exception\RouterException;
 use Sodaho\Router\Service\JsonResponder;
+use Sodaho\Router\Stream\FileStream;
 
 /**
  * Facade for standardized API responses.
@@ -21,6 +23,12 @@ use Sodaho\Router\Service\JsonResponder;
  */
 final class Response
 {
+    /** Upper bound for the filename inside Content-Disposition (see contentDisposition()). */
+    private const FILENAME_MAX_BYTES = 200;
+
+    /** Longest suffix still treated as a file extension when truncating (last dot wins, so ".gz" — not ".tar.gz"). */
+    private const FILENAME_MAX_EXT_BYTES = 16;
+
     private static ?ResponderInterface $responder = null;
 
     /**
@@ -317,17 +325,106 @@ final class Response
         string $filename,
         string $contentType = 'application/octet-stream',
     ): ResponseInterface {
-        // Escape quotes and backslashes in filename for Content-Disposition header
-        $escapedFilename = str_replace(['\\', '"'], ['\\\\', '\\"'], $filename);
-
         return new Psr7Response(
             200,
             [
                 'Content-Type' => $contentType,
-                'Content-Disposition' => sprintf('attachment; filename="%s"', $escapedFilename),
+                'Content-Disposition' => self::contentDisposition($filename, false),
                 'Content-Length' => (string) strlen($content),
             ],
             $content,
+        );
+    }
+
+    /**
+     * Streamed file response — the file is never held in memory as a whole.
+     *
+     * Use this instead of download() for anything that can grow: the body is a FileStream
+     * and Router::emit() pulls it in chunks, so peak memory is independent of file size.
+     * Optionally serves a single HTTP Range (206) — enough for <audio>/<video> seeking;
+     * multipart ranges are not supported and fall back to the full response.
+     *
+     * The filename is sanitized (control, bidi-override and path characters removed) and,
+     * when it is not pure ASCII, additionally sent as RFC 5987 `filename*=UTF-8''…`.
+     *
+     * @param string $path Readable file path
+     * @param string|null $filename Name shown to the client (default: basename of $path)
+     * @param string $contentType MIME type (default: 'application/octet-stream')
+     * @param bool $inline Content-Disposition: inline instead of attachment
+     * @param string|null $range Raw Range request header, e.g. 'bytes=0-1023'
+     * @param int|null $maxChunk Cap for a single 206 body, always trimming at the END of the
+     *                           requested range (a suffix range 'bytes=-5' with maxChunk 2
+     *                           therefore yields the first 2 of those last 5 bytes); null = no cap
+     *
+     * @throws RouterException When the file cannot be read or $maxChunk is below 1
+     */
+    public static function file(
+        string $path,
+        ?string $filename = null,
+        string $contentType = 'application/octet-stream',
+        bool $inline = false,
+        ?string $range = null,
+        ?int $maxChunk = null,
+    ): ResponseInterface {
+        // is_file() before filesize(): a directory reports a size, opens on some platforms
+        // and only blows up on the first read — long after the headers went out.
+        if (!is_file($path) || !is_readable($path)) {
+            throw new RouterException(sprintf('Cannot read file: %s', $path));
+        }
+
+        if ($maxChunk !== null && $maxChunk < 1) {
+            throw new RouterException(sprintf('maxChunk must be at least 1, got %d', $maxChunk));
+        }
+
+        $size = filesize($path);
+        if ($size === false) {
+            throw new RouterException(sprintf('Cannot determine size of: %s', $path));
+        }
+
+        $headers = [
+            'Content-Type' => $contentType,
+            'Content-Disposition' => self::contentDisposition($filename ?? basename($path), $inline),
+            'Accept-Ranges' => 'bytes',
+            'X-Content-Type-Options' => 'nosniff',
+        ];
+
+        $parsed = $range === null ? null : self::parseRange($range, $size);
+
+        if ($parsed === null) {
+            return new Psr7Response(
+                200,
+                $headers + ['Content-Length' => (string) $size],
+                new FileStream($path),
+            );
+        }
+
+        // Unsatisfiable range (RFC 9110): answer 416 and name the current length. No
+        // Content-Type/Disposition — they would describe a body that is not there.
+        if ($parsed === false) {
+            return new Psr7Response(
+                416,
+                [
+                    'Content-Range' => 'bytes */' . $size,
+                    'Accept-Ranges' => 'bytes',
+                    'Content-Length' => '0',
+                ],
+                '',
+            );
+        }
+
+        [$start, $end] = $parsed;
+        if ($maxChunk !== null) {
+            $end = min($end, $start + $maxChunk - 1);
+        }
+        $length = $end - $start + 1;
+
+        return new Psr7Response(
+            206,
+            $headers + [
+                'Content-Range' => sprintf('bytes %d-%d/%d', $start, $end, $size),
+                'Content-Length' => (string) $length,
+            ],
+            new FileStream($path, $start, $length),
         );
     }
 
@@ -354,4 +451,123 @@ final class Response
         );
     }
 
+
+    /**
+     * Build a Content-Disposition header value for a client-supplied filename.
+     *
+     * Three problems are handled here, all reachable through uploaded filenames:
+     * control characters (a raw \r\n makes PSR-7 reject the header and the download dies
+     * with a 500), bidi overrides (U+202E turns "Rechnungexe.pdf" into a disguised .exe in
+     * the download dialog) and path separators. Non-ASCII names additionally get the RFC
+     * 5987 form, without which strict clients decode UTF-8 as latin1 ("RÃ¶ntgen.pdf").
+     */
+    private static function contentDisposition(string $filename, bool $inline): string
+    {
+        // ORDER MATTERS. Truncation must happen BEFORE the bidi strip and before the
+        // empty/dot guards: cutting the tail can turn an invalid UTF-8 name into a valid one
+        // (the invalid byte sat beyond the limit), and the /u-based bidi strip only runs on
+        // valid input — so a late truncation would smuggle a right-to-left override back into
+        // filename*. Same for the guards: cutting can produce an empty or dots-only name.
+
+        // 1. Control characters, byte-wise (safe for non-UTF-8 names too).
+        $clean = preg_replace('/[\x00-\x1F\x7F]/', '', $filename) ?? '';
+
+        // 2. Path separators are not part of a filename.
+        $clean = trim(str_replace(['/', '\\'], '_', $clean));
+
+        // 3. Cap the header value, keeping the extension — a client that saves
+        //    "Befund" instead of "Befund.pdf" has a file it cannot open.
+        if (strlen($clean) > self::FILENAME_MAX_BYTES) {
+            $wasValidUtf8 = preg_match('//u', $clean) === 1;
+
+            $extension = '';
+            $dot = strrpos($clean, '.');
+            if ($dot !== false && $dot > 0 && strlen($clean) - $dot <= self::FILENAME_MAX_EXT_BYTES) {
+                $extension = substr($clean, $dot);
+            }
+
+            $stem = substr($clean, 0, max(1, self::FILENAME_MAX_BYTES - strlen($extension)));
+
+            // Repair a multi-byte sequence cut in half — but only when the input was valid to
+            // begin with. Peeling back on an already invalid name would strip it to nothing.
+            if ($wasValidUtf8) {
+                for ($i = 0; $i < 3 && preg_match('//u', $stem) !== 1; $i++) {
+                    $stem = substr($stem, 0, -1);
+                }
+            }
+
+            $clean = $stem . $extension;
+        }
+
+        // 4. Bidi/format overrides — needs /u, so on invalid UTF-8 preg_replace returns null
+        //    and the name stays as it is. Those bytes cannot reach the header anyway: the
+        //    ASCII fallback masks them and filename* is skipped for invalid UTF-8.
+        $noBidi = preg_replace('/[\x{202A}-\x{202E}\x{2066}-\x{2069}]/u', '', $clean);
+        if ($noBidi !== null) {
+            $clean = $noBidi;
+        }
+
+        // 5. "." and ".." are path segments, not filenames (RFC 6266 §4.3). Runs last so it
+        //    also catches what the steps above produced.
+        $clean = trim($clean);
+        if ($clean === '' || trim($clean, '.') === '') {
+            $clean = 'download';
+        }
+
+        // 6. ASCII fallback for the quoted-string form: one underscore per CHARACTER, hence /u.
+        $ascii = preg_replace('/[^\x20-\x7E]/u', '_', $clean);
+        if ($ascii === null) {
+            $ascii = preg_replace('/[^\x20-\x7E]/', '_', $clean) ?? 'download';
+        }
+
+        $escaped = str_replace(['\\', '"'], ['\\\\', '\\"'], $ascii);
+        $value = sprintf('%s; filename="%s"', $inline ? 'inline' : 'attachment', $escaped);
+
+        // RFC 8187: the extended form MUST carry the encoding it declares. Emitting
+        // rawurlencode() of non-UTF-8 bytes under UTF-8'' would be a lie.
+        if ($ascii !== $clean && preg_match('//u', $clean) === 1) {
+            $value .= "; filename*=UTF-8''" . rawurlencode($clean);
+        }
+
+        return $value;
+    }
+
+    /**
+     * Parse a single-range Range header.
+     *
+     * @return array{0: int, 1: int}|false|null Range as [start, end], false when
+     *                                          unsatisfiable (416), null when not a
+     *                                          single byte range (serve the full body)
+     */
+    private static function parseRange(string $range, int $size): array|false|null
+    {
+        if (preg_match('/^bytes=(\\d*)-(\\d*)$/', trim($range), $m) !== 1) {
+            return null;
+        }
+
+        [, $from, $to] = $m;
+        if ($from === '' && $to === '') {
+            return null;
+        }
+
+        if ($from === '') {
+            // Suffix form 'bytes=-N' — the last N bytes.
+            $length = (int) $to;
+            if ($length <= 0) {
+                return false;
+            }
+
+            $start = max(0, $size - $length);
+            $end = $size - 1;
+        } else {
+            $start = (int) $from;
+            $end = $to === '' ? $size - 1 : min((int) $to, $size - 1);
+        }
+
+        if ($size === 0 || $start >= $size || $start > $end) {
+            return false;
+        }
+
+        return [$start, $end];
+    }
 }
