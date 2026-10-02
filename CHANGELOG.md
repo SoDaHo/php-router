@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-10-02
+
 ### Security
 - **The cache file is no longer executed.** It is a signed data file now; the HMAC covers
   every byte that is used. Previously, code placed between the signature line and `return`
@@ -144,6 +146,7 @@ themselves (`handle()` plus their own emitter) are not affected.
 - **Configuration** via constructor array, environment variables, or fluent API.
 - **Strict parameter validation**: invalid types return 400 (not 500), controller TypeErrors bubble up as 500.
 
-[Unreleased]: https://github.com/sodaho/php-router/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/sodaho/php-router/compare/v1.1.1...HEAD
+[1.1.1]: https://github.com/sodaho/php-router/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/sodaho/php-router/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/sodaho/php-router/releases/tag/v1.0.0
