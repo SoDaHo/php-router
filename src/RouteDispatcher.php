@@ -225,6 +225,16 @@ class RouteDispatcher implements RequestHandlerInterface
                 }
             }
             if (class_exists($middleware)) {
+                $constructor = (new \ReflectionClass($middleware))->getConstructor();
+                if ($constructor !== null && $constructor->getNumberOfRequiredParameters() > 0) {
+                    throw new RouterException(
+                        sprintf(
+                            'Middleware "%s" requires constructor parameters. Register it in a PSR-11 container or pass an instance.',
+                            $middleware
+                        )
+                    );
+                }
+
                 $instance = new $middleware();
                 if ($instance instanceof MiddlewareInterface) {
                     return $instance;

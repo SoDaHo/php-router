@@ -362,6 +362,31 @@ class RouteDispatcherTest extends TestCase
         $this->assertSame(['POST', 'GET'], $hookData['allowed_methods']);
     }
 
+    public function testMiddlewareWithConstructorParametersGetsAnActionableError(): void
+    {
+        $route = new Route(['GET'], '/test', fn ($req) => Response::success([]));
+        $route->middleware(MiddlewareNeedingAnArgument::class);
+
+        $dispatcher = new RouteDispatcher([['GET' => ['/test' => $route]], []]);
+
+        // Used to surface as a bare ArgumentCountError from inside the dispatcher
+        $this->expectException(RouterException::class);
+        $this->expectExceptionMessage(
+            'Middleware "' . MiddlewareNeedingAnArgument::class . '" requires constructor parameters. '
+            . 'Register it in a PSR-11 container or pass an instance.'
+        );
+        $dispatcher->handle(new ServerRequest('GET', '/test'));
+    }
+
+    public function testMiddlewareWithOptionalConstructorParametersIsInstantiated(): void
+    {
+        $route = new Route(['GET'], '/test', fn ($req) => Response::success([]));
+        $route->middleware(MiddlewareWithOptionalArgument::class);
+
+        $dispatcher = new RouteDispatcher([['GET' => ['/test' => $route]], []]);
+
+        $this->assertSame('default', $dispatcher->handle(new ServerRequest('GET', '/test'))->getHeaderLine('X-Arg'));
+    }
 }
 
 class TestMiddlewareClass implements MiddlewareInterface
@@ -385,5 +410,29 @@ class BuggyController
     private function expectsInt(int $value): void
     {
         // This will never be reached due to TypeError
+    }
+}
+
+final class MiddlewareNeedingAnArgument implements MiddlewareInterface
+{
+    public function __construct(private readonly string $arg)
+    {
+    }
+
+    public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
+    {
+        return $handler->handle($request)->withHeader('X-Arg', $this->arg);
+    }
+}
+
+final class MiddlewareWithOptionalArgument implements MiddlewareInterface
+{
+    public function __construct(private readonly string $arg = 'default')
+    {
+    }
+
+    public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
+    {
+        return $handler->handle($request)->withHeader('X-Arg', $this->arg);
     }
 }
