@@ -238,6 +238,9 @@ class Router implements RequestHandlerInterface
     /**
      * Enable route caching.
      *
+     * @deprecated 1.2 The route cache will be removed in 2.0. Measured, loading it costs more
+     *             than building the table from the routes file.
+     *
      * @param string $file Path to cache file
      * @param string|null $signature HMAC key for integrity verification (required outside debug mode);
      *                               null keeps the key already configured (config or ROUTER_CACHE_KEY)
