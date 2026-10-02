@@ -78,6 +78,13 @@ $r->match(['GET', 'POST'], '/search', $handler);
 $r->any('/webhook', $handler);
 ```
 
+A `HEAD` request to a route registered with `get()` answers 405. With
+`'implicitHead' => true` it runs through the GET route instead — same status, same headers,
+no body — and `Allow` names `HEAD` right behind `GET`. No response to a HEAD request
+carries a body then, whoever wrote it; that includes a request a middleware turned into
+HEAD, or out of it, on its way in. The router itself does not change the method:
+middleware and handler see HEAD unless a middleware of yours rewrites it.
+
 ## Route Parameters
 
 ```php
@@ -146,6 +153,30 @@ $r->group('/api', function (RouteCollector $r) {
 // → /api/v1/users
 ```
 
+## Route Attributes
+
+What your application wants to know about a route before its handler runs — the response
+format, whether browsers may call it — goes on the route. The router does not interpret
+attributes.
+
+```php
+$r->post('/token', [TokenController::class, 'token'])
+    ->attribute('format', 'oauth');
+
+$r->attributeGroup(['format' => 'envelope', 'cors' => true], function (RouteCollector $r) {
+    $r->get('/me', [AccountController::class, 'show']);
+    $r->get('/me/avatar', [AvatarController::class, 'show'])->attribute('format', 'binary');
+});
+
+// Reading them, e.g. in a middleware (Sodaho\Router\Route)
+$route = $request->getAttribute(Route::class);
+$route->getAttribute('format', 'envelope');  // second argument: default when not set
+$route->attributes;                          // all of them
+```
+
+Groups nest: the inner group wins per key, and `attribute()` on the route wins over every
+group. See [Looking a Route Up](#looking-a-route-up) for where the route comes from.
+
 ## Middleware
 
 ```php
@@ -178,6 +209,100 @@ class OwnershipMiddleware implements MiddlewareInterface
     }
 }
 ```
+
+### Middleware for Every Request
+
+Route middleware only runs when a route matched. Middleware added to the router runs for
+every request — also those that end in 404, 405 or 400 — and sees every response, including
+the one made from an exception. That is the place for an access log, security headers or
+CORS.
+
+```php
+$router->middleware(AccessLog::class)       // first added = outermost
+       ->middleware([$securityHeaders, $cors]);
+```
+
+The request it gets already carries the result of the route lookup:
+
+```php
+use Sodaho\Router\RouteMatch;
+
+public function process($request, $handler): ResponseInterface
+{
+    $match = $request->getAttribute(RouteMatch::class);
+
+    if ($match->status === RouteMatch::NOT_FOUND) {
+        return Response::html($this->notFoundPage, 404);   // answer instead of the router
+    }
+
+    if ($request->getMethod() === 'OPTIONS' && $match->route?->getAttribute('cors')) {
+        return $this->preflight($match->allowedMethods());
+    }
+
+    return $handler->handle($request);
+}
+```
+
+A middleware that passes the request on with another method or path — a method override, a
+stripped locale prefix — gets it routed as passed on: the route is looked up again for
+everything further in (the middleware added after it, the error handler, the route). The
+middleware itself and those added before it have seen the `RouteMatch` of the request as
+it came in — add a rewriting middleware first if an access log or a guard is to see the
+route that runs.
+
+### Error Handler
+
+```php
+use Sodaho\Router\RouteMatch;
+
+$router->setErrorHandler(function (Throwable $e, ServerRequestInterface $request): ?ResponseInterface {
+    $format = $request->getAttribute(RouteMatch::class)?->route?->getAttribute('format');
+
+    return $format === 'oauth'
+        ? Response::json(['error' => 'server_error'], 500)
+        : null;                                             // null: the router's own 500
+});
+```
+
+It is called for what route middleware and handlers throw — not for a 500 a handler
+returns. Its response passes through the middleware for every request like any other. The
+`error` hook fires in either case. `handle()` does not throw for any of this: an error
+handler that throws itself counts as `null` (and is reported through the `error` hook,
+unless it only hands the exception back). What a middleware for every request throws goes
+to the same error handler as the last resort — with the request as far as it came; that
+response no longer passes through the middleware. (What still leaves `handle()`, as
+before: a responder set with `Response::setResponder()` that throws while the router's own
+500 is built.)
+
+From the outside in: middleware for every request → error handler → 404/405, or route
+middleware → handler.
+
+## Looking a Route Up
+
+```php
+$match = $router->match($request);     // nothing runs: no middleware, no handler, no routing hook
+
+$match->status;            // RouteMatch::FOUND | NOT_FOUND | METHOD_NOT_ALLOWED
+$match->route;             // the Route; at METHOD_NOT_ALLOWED a route of the path (see below)
+$match->params;            // ['id' => '5'] — as in the path, not cast yet
+$match->allowedMethods();  // every method the path is registered with
+$match->path;              // the path the table was asked with (decoded, without basePath)
+```
+
+`match()` needs no container, so it works before the application is booted;
+`setContainer()`, `middleware()`, `setErrorHandler()` and hooks added afterwards take
+effect as usual. Finish the rest — base path, trailing slash mode, debug, routes — before
+the first use (`match()`, `handle()` or `url()`, whichever comes first): what the routing
+works with is taken at that moment.
+
+Every request that goes through `handle()` carries the result as attribute
+`RouteMatch::class`, and on a hit the route as `Route::class`. Hand the request on with the
+`RouteMatch` you already have and `handle()` does not look it up again — unless method or
+path changed since. Only a `RouteMatch` this router made is taken over.
+
+At `METHOD_NOT_ALLOWED` — which is what a CORS preflight is for a path without an OPTIONS
+route — `route` is a route registered for that path: the GET route if there is one,
+otherwise that of the first allowed method. Tell the cases apart by `status`.
 
 ## Named Routes & URL Generation
 
@@ -242,7 +367,10 @@ Response::redirect('/new-url');                          // 302
 Response::redirect('/new-url', 301);                     // 301
 Response::download($content, 'file.pdf');                // Attachment (in-memory string, filename sanitized)
 Response::download($content, 'file.pdf', 'application/pdf');
+Response::download($png, 'avatar.png', 'image/png', inline: true);  // shown, not saved
 Response::file('/path/to/file.pdf', 'file.pdf');         // Streamed attachment
+Response::json(['access_token' => $token]);              // JSON as given, no envelope
+Response::json(['error' => 'invalid_request'], 400);
 ```
 
 ### Large Files
@@ -341,6 +469,11 @@ $router = Router::create([
 ### Via Environment Variables
 
 ```php
+$router = Router::fromEnv();                       // everything from the environment
+$router = Router::fromEnv(['debug' => false]);     // what you pass wins
+```
+
+```php
 // .env
 APP_DEBUG=true
 APP_ENV=development
@@ -351,13 +484,18 @@ ROUTER_CACHE_FILE=/var/cache/routes.php
 ROUTER_CACHE_KEY=your-secret-key
 ```
 
+**Deprecated:** `Router::create()` and `new Router()` read the same variables for whatever
+the config array leaves out. From 2.0 on only `fromEnv()` looks at the environment, and
+`APP_ENV` no longer switches debug on. `implicitHead` is never read from the environment.
+
 ### Via Fluent API
 
 ```php
 $router = Router::create()
     ->setDebug(true)
-    ->setBasePath('/api')
-    ->enableCache(__DIR__ . '/cache/routes.php', 'your-secret-key');
+    ->setBasePath('/api');
+
+$router->isDebug();   // what the router decided from config and environment
 ```
 
 ### Options
@@ -372,8 +510,12 @@ $router = Router::create()
 | `cacheFile` | `ROUTER_CACHE_FILE` | `null` | Path to cache file |
 | `cacheSignature` | `ROUTER_CACHE_KEY` | `null` | HMAC key for the cache file — without one the cache stays off |
 | `urlEncoding` | `ROUTER_URL_ENCODING` | `true` | `rawurlencode()` parameter values in `url()`/`absoluteUrl()`; `false` inserts them as given |
+| `implicitHead` | - | `false` | Answer `HEAD` through the `GET` route (see [HTTP Methods](#http-methods)) |
 
 ## Caching
+
+**Deprecated — the route cache will be removed in 2.0.** Measured, it makes requests slower
+(see [Performance](#route-caching)).
 
 ```php
 $router = Router::create()
@@ -410,6 +552,8 @@ $router->run();
 // Log successful dispatches
 $router->on('dispatch', function (array $data) {
     // $data: method, path, route, handler, params, duration
+    // (duration: from the start of handle(), so it includes the way in through the
+    // middleware for every request)
     $logger->info("Route matched", $data);
 });
 
@@ -435,7 +579,16 @@ $router->on('error', function (array $data) {
 });
 ```
 
-**Note:** Hook exceptions are caught and logged to stderr. They never affect the response.
+**Note:** Hook exceptions are caught and never affect the response. Register `hookError` to
+get them; without it a line goes to stderr (`error_log()` where there is none). A
+`hookError` callback that fails itself gets that line too.
+
+```php
+$router->on('hookError', function (array $data) {
+    // $data: event (the hook that failed), exception
+    $logger->error("Hook failed", $data);
+});
+```
 
 **Without an `error` hook nothing is logged.** An exception caught by the router becomes a
 500 response and leaves no other trace — logging is the application's job, the hook is how.
@@ -454,11 +607,12 @@ $router->run();
 $request = $serverRequestFactory->fromGlobals();
 $response = $router->handle($request);  // Returns ResponseInterface
 
-// Emit the response with any PSR-7 emitter, e.g. laminas/laminas-httphandlerrunner
-(new \Laminas\HttpHandlerRunner\Emitter\SapiEmitter())->emit($response);
+// Emit it — with the router's emitter or any other PSR-7 emitter
+$router->emit($response);
+$router->emit($response, withBody: $request->getMethod() !== 'HEAD');
 ```
 
-What `run()` does with headers the host application set before it: a field that exists once
+What `run()` and `emit()` do with headers the host application set before them: a field that exists once
 per message (`Content-Type`, `Location`, `Content-Length`, `ETag`, ...) is replaced by the
 response's value; every other field is a list and the response's lines are added — a
 `Vary: Cookie` or the `Cache-Control: no-store` of `session_start()` stays in place; so does
@@ -506,7 +660,8 @@ try {
 Whatever is thrown while a request is handled — by a handler, a middleware or the router
 itself — never leaves `handle()`: it becomes a 500 response and is passed to the `error`
 hook. That includes `NotFoundException` and `MethodNotAllowedException` thrown by your own
-code; return `Response::notFound()` instead. `run()` adds one case of its own: a response
+code; return `Response::notFound()` instead. The one thing that does leave `handle()`: what
+a responder set with `Response::setResponder()` throws while that 500 is built. `run()` adds one case of its own: a response
 whose body was closed before it could be sent raises `RouterException`.
 
 | Exception | When |
