@@ -949,7 +949,7 @@ vendor/bin/phpunit
 
 ## Requirements
 
-- PHP ^8.2
+- PHP ^8.5
 - PSR-7 HTTP Message (nyholm/psr7)
 - PSR-15 HTTP Handler/Middleware
 

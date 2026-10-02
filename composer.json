@@ -5,7 +5,7 @@
     "license": "MIT",
     "keywords": ["router", "psr-7", "psr-11", "psr-15", "api", "rest", "middleware", "json", "php"],
     "require": {
-        "php": "^8.2",
+        "php": "^8.5",
         "psr/http-message": "^2.0",
         "psr/http-server-handler": "^1.0",
         "psr/http-server-middleware": "^1.0",

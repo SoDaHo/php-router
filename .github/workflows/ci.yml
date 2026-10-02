@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main, master]
+    branches: [main, master, 2.x]
   pull_request:
-    branches: [main, master]
+    branches: [main, master, 2.x]
   workflow_dispatch:
 
 permissions:
@@ -19,7 +19,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        php: ['8.2', '8.3', '8.4', '8.5']
+        php: ['8.5']
 
     steps:
       - uses: actions/checkout@v6
@@ -59,7 +59,7 @@ jobs:
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.2'
+          php-version: '8.5'
           coverage: none
 
       - name: Get Composer Cache Directory
@@ -90,7 +90,7 @@ jobs:
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.2'
+          php-version: '8.5'
           coverage: none
 
       - name: Get Composer Cache Directory
