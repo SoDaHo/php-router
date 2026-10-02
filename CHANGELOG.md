@@ -18,18 +18,8 @@
   `getenv('APP_DEBUG')` returns for an unset variable.
 
 ### Fixed
-- **Status line is sent after the headers.** PHP rewrites the status when certain headers
-  are set: a 403 with `WWW-Authenticate` left as 401, and any response with `Location`
-  other than 201/3xx (a 202, a 409) left as a 302/303 redirect. Unchanged in 1.x: a 200
-  with a `Location` still goes out as a redirect — use `Response::redirect()`, 2.0 will
-  send what the response says.
-- **Fields that exist once per message replace what the host already set** — `Content-Type`,
-  `Location`, `Content-Length`, `ETag`, the `Cross-Origin-*` policies and the like were sent
-  twice when the application had set one before `run()`. Everything else (`Vary`,
-  `Cache-Control`, `Set-Cookie`, `X-Frame-Options`, unknown fields, ...) is added as before.
 - A response that cannot be sent because output had already started is reported through the
   `error` hook (`type: 'emit'`). It used to vanish without a trace.
-- `Router::run()` no longer reads the body for a HEAD request.
 - 405: the list of allowed methods (hook `allowed_methods`, `error.details.allowed` in the
   body) is always a list. When a static and a dynamic route matched the same path it had
   gaps in its keys and was encoded as a JSON object. Content and order are unchanged.
@@ -56,6 +46,23 @@
   request is served from the routes file.
 
 ### Changed
+Three corrections to what `Router::run()` sends. Applications that emit the response
+themselves (`handle()` plus their own emitter) are not affected.
+- **Status line is sent after the headers.** PHP rewrites the status when certain headers
+  are set: a 403 with `WWW-Authenticate` left as 401, and any response with `Location`
+  other than 201/3xx (a 202, a 409) left as a 302/303 redirect. *Who notices:* clients of
+  such responses — they now get the status the handler returned. Unchanged in 1.x: a 200
+  with a `Location` still goes out as a redirect; use `Response::redirect()`, 2.0 will
+  send what the response says.
+- **Fields that exist once per message replace what the host already set** — `Content-Type`,
+  `Location`, `Content-Length`, `ETag`, the `Cross-Origin-*` policies and the like were sent
+  twice. Everything else (`Vary`, `Cache-Control`, `Set-Cookie`, `X-Frame-Options`, unknown
+  fields, ...) is added as before. *Who notices:* applications that call `header()` for
+  one of these fields before `run()` and also set it on the response — one line goes out
+  now, the response's.
+- **`run()` does not read the body for a HEAD request.** *Who notices:* nobody on the wire,
+  PHP never sent that output; a body stream whose reading has side effects is no longer
+  touched for HEAD.
 - Cache file format: `serialize()` instead of `var_export()`. An old file is ignored and
   replaced on the first request — which therefore needs the routes file: a deployment that
   ships only a pre-built cache has to rebuild it with this version, and nodes running an
