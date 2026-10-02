@@ -153,6 +153,23 @@ class Router implements RequestHandlerInterface
     }
 
     /**
+     * Register a hook callback for an event.
+     *
+     * @param string $event Event name (e.g., 'dispatch', 'notFound', 'error')
+     * @param callable $callback Callback receiving event data array
+     */
+    public function on(string $event, callable $callback): static
+    {
+        $this->hooks[$event][] = $callback;
+
+        // The dispatcher got a copy of the hooks when it was built; a hook registered after
+        // the first request would otherwise never fire for dispatch/notFound/methodNotAllowed.
+        $this->dispatcher?->on($event, $callback);
+
+        return $this;
+    }
+
+    /**
      * Load routes from a file.
      *
      * File must return a callable: function(RouteCollector $r) { ... }

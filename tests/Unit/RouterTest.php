@@ -533,4 +533,46 @@ class RouterTest extends TestCase
         // Cache file should NOT exist (save failed gracefully)
         $this->assertFileDoesNotExist($cacheFile);
     }
+
+    public function testHooksRegisteredAfterTheFirstRequestStillFire(): void
+    {
+        $this->createRoutesFile(
+            <<<'ROUTES'
+                <?php
+                use Sodaho\Router\RouteCollector;
+                use Sodaho\Router\Response;
+
+                return function (RouteCollector $r) {
+                    $r->get('/users/{id:int}', fn($req, $id) => Response::success(['id' => $id]));
+                };
+                ROUTES
+        );
+
+        $router = Router::create(['debug' => false])->loadRoutes($this->routesFile);
+
+        $early = [];
+        $router->on('dispatch', function (array $data) use (&$early): void {
+            $early[] = 'dispatch';
+        });
+
+        // The first request builds the dispatcher, which copies the hooks registered so far.
+        // A long-running worker registering a metrics hook later used to be ignored silently.
+        $router->handle(new ServerRequest('GET', '/users/1'));
+
+        $late = [];
+        foreach (['dispatch', 'notFound', 'methodNotAllowed', 'error'] as $event) {
+            $returned = $router->on($event, function (array $data) use (&$late, $event): void {
+                $late[] = $event;
+            });
+            $this->assertSame($router, $returned);
+        }
+
+        $router->handle(new ServerRequest('GET', '/users/2'));
+        $router->handle(new ServerRequest('GET', '/nowhere'));
+        $router->handle(new ServerRequest('POST', '/users/2'));
+        $router->handle(new ServerRequest('GET', '/users/' . str_repeat('9', 30)));
+
+        $this->assertSame(['dispatch', 'notFound', 'methodNotAllowed', 'error'], $late);
+        $this->assertSame(['dispatch', 'dispatch'], $early, 'each hook fires once per event, not once per copy');
+    }
 }
