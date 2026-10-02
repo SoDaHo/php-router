@@ -71,7 +71,7 @@ final class Response
         ?string $message = null,
         ?array $meta = null,
     ): ResponseInterface {
-        return self::json(200, self::getResponder()->formatSuccess($data, $message, $meta));
+        return self::envelope(200, self::getResponder()->formatSuccess($data, $message, $meta));
     }
 
     /**
@@ -86,7 +86,7 @@ final class Response
         ?string $message = null,
         ?string $location = null,
     ): ResponseInterface {
-        $response = self::json(201, self::getResponder()->formatSuccess($data, $message));
+        $response = self::envelope(201, self::getResponder()->formatSuccess($data, $message));
 
         if ($location !== null) {
             $response = $response->withHeader('Location', $location);
@@ -103,7 +103,7 @@ final class Response
      */
     public static function accepted(mixed $data, ?string $message = null): ResponseInterface
     {
-        return self::json(202, self::getResponder()->formatSuccess($data, $message));
+        return self::envelope(202, self::getResponder()->formatSuccess($data, $message));
     }
 
     /**
@@ -134,7 +134,7 @@ final class Response
 
         $lastPage = (int) ceil($total / $perPage);
 
-        return self::json(200, self::getResponder()->formatSuccess($items, null, [
+        return self::envelope(200, self::getResponder()->formatSuccess($items, null, [
             'pagination' => [
                 'total' => $total,
                 'per_page' => $perPage,
@@ -162,7 +162,7 @@ final class Response
         ?string $code = null,
         ?array $details = null,
     ): ResponseInterface {
-        return self::json($status, self::getResponder()->formatError($message, $code, $details));
+        return self::envelope($status, self::getResponder()->formatError($message, $code, $details));
     }
 
     /**
@@ -183,7 +183,7 @@ final class Response
             $message = 'Resource not found';
         }
 
-        return self::json(404, self::getResponder()->formatError($message, 'NOT_FOUND'));
+        return self::envelope(404, self::getResponder()->formatError($message, 'NOT_FOUND'));
     }
 
     /**
@@ -194,7 +194,7 @@ final class Response
     public static function unauthorized(?string $message = null): ResponseInterface
     {
         $message ??= 'Unauthorized';
-        return self::json(401, self::getResponder()->formatError($message, 'UNAUTHORIZED'));
+        return self::envelope(401, self::getResponder()->formatError($message, 'UNAUTHORIZED'));
     }
 
     /**
@@ -205,7 +205,7 @@ final class Response
     public static function forbidden(?string $message = null): ResponseInterface
     {
         $message ??= 'Forbidden';
-        return self::json(403, self::getResponder()->formatError($message, 'FORBIDDEN'));
+        return self::envelope(403, self::getResponder()->formatError($message, 'FORBIDDEN'));
     }
 
     /**
@@ -215,7 +215,7 @@ final class Response
      */
     public static function validationError(array $errors): ResponseInterface
     {
-        return self::json(422, self::getResponder()->formatError(
+        return self::envelope(422, self::getResponder()->formatError(
             'Validation failed',
             'VALIDATION_ERROR',
             ['fields' => $errors],
@@ -229,7 +229,7 @@ final class Response
      */
     public static function methodNotAllowed(array $allowedMethods): ResponseInterface
     {
-        $response = self::json(405, self::getResponder()->formatError(
+        $response = self::envelope(405, self::getResponder()->formatError(
             'Method not allowed',
             'METHOD_NOT_ALLOWED',
             ['allowed' => $allowedMethods],
@@ -245,7 +245,7 @@ final class Response
      */
     public static function tooManyRequests(int $retryAfter): ResponseInterface
     {
-        $response = self::json(429, self::getResponder()->formatError(
+        $response = self::envelope(429, self::getResponder()->formatError(
             'Too many requests',
             'TOO_MANY_REQUESTS',
             ['retry_after' => $retryAfter],
@@ -267,7 +267,7 @@ final class Response
         $userMessage = $message ?? 'Internal server error';
         $details = $debug !== null ? ['debug' => $debug] : null;
 
-        return self::json(500, self::getResponder()->formatError($userMessage, 'SERVER_ERROR', $details));
+        return self::envelope(500, self::getResponder()->formatError($userMessage, 'SERVER_ERROR', $details));
     }
 
     // ==================== Other Responses ====================
@@ -299,6 +299,25 @@ final class Response
             $status,
             ['Content-Type' => 'text/plain; charset=utf-8'],
             $content,
+        );
+    }
+
+    /**
+     * JSON response without the {success, data, error} envelope: the body is $data, encoded.
+     *
+     * For payloads whose shape is not yours to decide (OAuth/OIDC responses, an OpenAPI
+     * document). The responder set with setResponder() has no say here.
+     *
+     * @param mixed $data Anything json_encode() accepts
+     * @param int $status HTTP status code (default: 200)
+     * @param string $contentType Content-Type (default: 'application/json')
+     */
+    public static function json(mixed $data, int $status = 200, string $contentType = 'application/json'): ResponseInterface
+    {
+        return new Psr7Response(
+            $status,
+            ['Content-Type' => $contentType],
+            json_encode($data, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE),
         );
     }
 
@@ -435,12 +454,12 @@ final class Response
     // ==================== Internal Helpers ====================
 
     /**
-     * Create a JSON response.
+     * Create a JSON response in the responder's envelope.
      *
      * @param int $status HTTP status code
      * @param array<string, mixed> $data Response data
      */
-    private static function json(int $status, array $data): ResponseInterface
+    private static function envelope(int $status, array $data): ResponseInterface
     {
         // RFC 7807: application/problem+json is only for error responses (4xx/5xx).
         // Success responses (2xx/3xx) use getSuccessContentType() (allows custom formats like JSON:API).

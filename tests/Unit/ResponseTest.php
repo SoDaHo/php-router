@@ -413,4 +413,54 @@ class ResponseTest extends TestCase
         $this->assertTrue($body['custom']);
         $this->assertSame(['test' => 1], $body['payload']);
     }
+
+    public function testJsonWithoutEnvelope(): void
+    {
+        $response = Response::json(['access_token' => 'abc', 'expires_in' => 3600]);
+
+        $this->assertSame(200, $response->getStatusCode());
+        $this->assertSame('application/json', $response->getHeaderLine('Content-Type'));
+        $this->assertSame('{"access_token":"abc","expires_in":3600}', (string) $response->getBody());
+    }
+
+    public function testJsonTakesAnythingJsonEncodeTakes(): void
+    {
+        $this->assertSame('[1,2,3]', (string) Response::json([1, 2, 3])->getBody());
+        $this->assertSame('"text"', (string) Response::json('text')->getBody());
+        $this->assertSame('null', (string) Response::json(null)->getBody());
+        $this->assertSame('{}', (string) Response::json(new \stdClass())->getBody());
+
+        // Same encoding rules as the envelope helpers: Unicode as it is, broken UTF-8 replaced
+        $this->assertSame('{"name":"Röntgen"}', (string) Response::json(['name' => 'Röntgen'])->getBody());
+        $this->assertSame("\"a\u{FFFD}b\"", (string) Response::json("a\xC3b")->getBody());
+    }
+
+    public function testJsonStatusAndContentType(): void
+    {
+        $response = Response::json(['error' => 'invalid_request'], 400, 'application/problem+json');
+
+        $this->assertSame(400, $response->getStatusCode());
+        $this->assertSame('application/problem+json', $response->getHeaderLine('Content-Type'));
+    }
+
+    public function testJsonIgnoresTheResponder(): void
+    {
+        Response::setResponder(new \Sodaho\Router\Service\RfcResponder());
+
+        try {
+            $response = Response::json(['error' => 'invalid_request'], 400);
+        } finally {
+            Response::reset();
+        }
+
+        $this->assertSame('application/json', $response->getHeaderLine('Content-Type'));
+        $this->assertSame('{"error":"invalid_request"}', (string) $response->getBody());
+    }
+
+    public function testJsonThatCannotBeEncodedThrows(): void
+    {
+        $this->expectException(\JsonException::class);
+
+        Response::json(['value' => INF]);
+    }
 }
