@@ -1,13 +1,12 @@
 # php-router
 
-Lightweight PHP Router for REST APIs and SPAs. Standardized JSON responses, middleware, caching.
+Lightweight PHP Router for REST APIs and SPAs. Standardized JSON responses, middleware.
 
 ## Why This Library?
 
 **What it does:**
 - PSR-7/PSR-15 compliant routing with typed route parameters and auto-casting
 - Standardized JSON response format (pluggable via `ResponderInterface`)
-- Route caching with HMAC integrity verification
 - Middleware, route groups, named routes, URL generation
 
 **What it deliberately does not:**
@@ -78,12 +77,18 @@ $r->match(['GET', 'POST'], '/search', $handler);
 $r->any('/webhook', $handler);
 ```
 
-A `HEAD` request to a route registered with `get()` answers 405. With
-`'implicitHead' => true` it runs through the GET route instead — same status, same headers,
-no body — and `Allow` names `HEAD` right behind `GET`. No response to a HEAD request
-carries a body then, whoever wrote it; that includes a request a middleware turned into
-HEAD, or out of it, on its way in. The router itself does not change the method:
-middleware and handler see HEAD unless a middleware of yours rewrites it.
+A `HEAD` request to a route registered with `get()` is answered by that route: its
+middleware and handler run, and the response goes out with its status and headers but
+without its body. `Allow` names `HEAD` right behind `GET`. The router does not change the
+method — middleware and handler see `HEAD` (unless a middleware of yours rewrites it) and
+are free to answer differently than for GET. Keep GET handlers free of side effects, or
+give them a `head()` route of their own: link scanners and mail clients ask with HEAD. No
+response to a HEAD request leaves `handle()` with a body, whoever wrote it; that includes
+a request a middleware turned into HEAD, or out of it, on its way in.
+
+With `'implicitHead' => false` HEAD needs a route of its own (`$r->head()`), a GET route
+answers 405 as it did in 1.x, and `handle()` leaves bodies alone (`run()` never sends one
+for a HEAD request, either way).
 
 ## Route Parameters
 
@@ -314,7 +319,7 @@ $r->get('/users/{id}', [UserController::class, 'show'])
 $url = $router->url('user.show', ['id' => 5]);
 // → /users/5
 
-// Absolute URL (requires APP_URL env variable)
+// Absolute URL (needs 'baseUrl' in the config, or APP_URL with Router::fromEnv())
 $url = $router->absoluteUrl('user.show', ['id' => 5]);
 // → https://example.com/users/5
 ```
@@ -466,27 +471,33 @@ $router = Router::create([
 ]);
 ```
 
+Only what you pass counts: `Router::create()` and `new Router()` do not look at the
+environment.
+
 ### Via Environment Variables
 
 ```php
 $router = Router::fromEnv();                       // everything from the environment
-$router = Router::fromEnv(['debug' => false]);     // what you pass wins
+$router = Router::fromEnv(['debug' => false]);     // a key you pass wins over its variable
 ```
+
+`fromEnv()` is the one place where the router reads the environment (`$_ENV`, then
+`getenv()`), and these are all the variables it reads:
 
 ```php
 // .env
 APP_DEBUG=true
-APP_ENV=development
 APP_URL=https://api.example.com
 ROUTER_BASE_PATH=/api
 ROUTER_TRAILING_SLASH=ignore
-ROUTER_CACHE_FILE=/var/cache/routes.php
-ROUTER_CACHE_KEY=your-secret-key
+ROUTER_URL_ENCODING=true
 ```
 
-**Deprecated:** `Router::create()` and `new Router()` read the same variables for whatever
-the config array leaves out. From 2.0 on only `fromEnv()` looks at the environment, and
-`APP_ENV` no longer switches debug on. `implicitHead` is never read from the environment.
+A key in the array you pass wins whatever its value — `null`, `false` and `''` included
+(`null` then means the default) — and its variable is not looked at. `APP_DEBUG` and
+`ROUTER_URL_ENCODING` have to be boolean-like (`true`/`false`, `1`/`0`, `on`/`off`,
+`yes`/`no`) or empty; anything else makes `fromEnv()` throw a `RouterException` that names
+the variable. `APP_ENV` means nothing to the router.
 
 ### Via Fluent API
 
@@ -495,56 +506,20 @@ $router = Router::create()
     ->setDebug(true)
     ->setBasePath('/api');
 
-$router->isDebug();   // what the router decided from config and environment
+$router->isDebug();   // what the router decided
 ```
 
 ### Options
 
-| Config Key | ENV Variable | Default | Description |
+| Config Key | Variable read by `fromEnv()` | Default | Description |
 |------------|--------------|---------|-------------|
-| `debug` | `APP_DEBUG` | `false` | Enable debug mode (detailed errors). A value passed in the config array wins, `false` included (`null` counts as not passed) |
-| - | `APP_ENV` | `production` | Only without a `debug` config value: `dev`/`local`/`development` → debug=true, whatever `APP_DEBUG` says |
+| `debug` | `APP_DEBUG` | `false` | Enable debug mode (detailed errors). Boolean or boolean-like (`'true'`, `'0'`, ...). `null` means the default; `''` and `0` count as off; anything else is refused |
 | `basePath` | `ROUTER_BASE_PATH` | `''` | URL prefix for all routes (`/api`, `/api/` and `api` mean the same) |
 | `baseUrl` | `APP_URL` | `null` | Base URL for `absoluteUrl()` |
 | `trailingSlash` | `ROUTER_TRAILING_SLASH` | `'strict'` | `'strict'` or `'ignore'` |
-| `cacheFile` | `ROUTER_CACHE_FILE` | `null` | Path to cache file |
-| `cacheSignature` | `ROUTER_CACHE_KEY` | `null` | HMAC key for the cache file — without one the cache stays off |
-| `urlEncoding` | `ROUTER_URL_ENCODING` | `true` | `rawurlencode()` parameter values in `url()`/`absoluteUrl()`; `false` inserts them as given |
-| `implicitHead` | - | `false` | Answer `HEAD` through the `GET` route (see [HTTP Methods](#http-methods)) |
-
-## Caching
-
-**Deprecated — the route cache will be removed in 2.0.** Measured, it makes requests slower
-(see [Performance](#route-caching)).
-
-```php
-$router = Router::create()
-    ->enableCache(__DIR__ . '/cache/routes.php', 'your-secret-key')
-    ->loadRoutes(__DIR__ . '/routes.php');
-
-$router->run();
-```
-
-- **The key is required.** Without one (or with an empty one) the cache stays off and the
-  `error` hook receives the `CacheException` that says why — on every request. In debug mode
-  the cache is not used.
-- **One key per cache file.** The signature proves that a holder of the key wrote the file,
-  not that it belongs to this router: a cache signed with the same key for another router,
-  or an older one of this router, passes the check.
-- **The cache file is signed data, not code.** It is never executed: an HMAC-SHA256 over its
-  content is checked first, and only then is it unserialized. A file that fails the check,
-  or whose content no longer fits the application's classes, is reported through the
-  `error` hook and rebuilt from the routes file.
-- **Closures cannot be cached**, and neither can anonymous classes or objects whose
-  serialized state contains a resource (an open file). The `error` hook reports it and the routes are served uncached.
-  Use `[Controller::class, 'method']` syntax; objects in routes (middleware instances) must
-  survive `serialize()` and their classes must be autoloadable — a class declared inside the
-  routes file is unknown to the next request, which reports the cache as outdated and
-  rebuilds it every time. The same happens when a string in a route looks exactly like a
-  serialized object of an unknown class.
-- **A cache file that cannot be written** is reported through the `error` hook as well; the
-  request is served from the routes file.
-- **The cache does not notice a changed routes file.** Delete the cache file on deploy.
+| `urlEncoding` | `ROUTER_URL_ENCODING` | `true` | `rawurlencode()` parameter values in `url()`/`absoluteUrl()`; `false` inserts them as given. Boolean or boolean-like, as `debug` |
+| `routesFile` | - | `null` | Routes file, as `loadRoutes()` sets it |
+| `implicitHead` | - | `true` | Answer `HEAD` through the `GET` route (see [HTTP Methods](#http-methods)) |
 
 ## Hooks (Logging)
 
@@ -574,7 +549,7 @@ $router->on('methodNotAllowed', function (array $data) {
 
 // Log exceptions
 $router->on('error', function (array $data) {
-    // $data: method, path, exception — or type ('cache', 'emit'), message, exception
+    // $data: method, path, exception — or type ('emit'), message, exception
     $logger->error("Error", $data);
 });
 ```
@@ -646,7 +621,6 @@ use Sodaho\Router\Exception\NotFoundException;
 use Sodaho\Router\Exception\MethodNotAllowedException;
 use Sodaho\Router\Exception\RouteNotFoundException;
 use Sodaho\Router\Exception\DuplicateRouteException;
-use Sodaho\Router\Exception\CacheException;
 
 try {
     $url = $router->url('users.show', ['id' => 5]);
@@ -670,7 +644,6 @@ whose body was closed before it could be sent raises `RouterException`.
 | `MethodNotAllowedException` | Never thrown by the router (it answers 405 itself); for your own code |
 | `RouteNotFoundException` | Named route doesn't exist (URL generation) |
 | `DuplicateRouteException` | Same method+pattern registered twice |
-| `CacheException` | Cache read/write/signature failure |
 
 ## Trailing Slash Handling
 
@@ -712,6 +685,9 @@ class PageController
 ```php
 // One-liner for simple apps
 Router::boot(['debug' => true], __DIR__ . '/routes.php');
+
+// The same with the configuration from the environment
+Router::fromEnv()->loadRoutes(__DIR__ . '/routes.php')->run();
 ```
 
 ## Webserver Configuration
@@ -815,21 +791,20 @@ $r->get('/events/{date:date}', $handler);
 
 ## Performance
 
-### Route Caching
+### Building the Route Table
 
-**Measure before you enable it.** With OPcache on, building the table from the routes file
-is cheaper than loading the cache: every request has to verify the signature over the whole
-cache file before it may use it.
+The table is built from the routes file once per router — under PHP-FPM that is once per
+request; with OPcache on that is cheap:
 
-| Routes | No cache | With cache |
-|--------|----------|------------|
-| 114 | 0.11 ms | 0.43 ms |
-| 500 | 0.47 ms | 1.89 ms |
-| 1000 | 0.92 ms | 3.69 ms |
+| Routes | Time |
+|--------|------|
+| 114 | 0.11 ms |
+| 500 | 0.47 ms |
+| 1000 | 0.92 ms |
 
 One request with a fresh router and a hit on a dynamic route; PHP 8.5, Linux arm64, OPcache
-on. Without OPcache the routes file has to be compiled on every request and the picture
-depends on the platform.
+on. (1.x had a route cache; measured, loading it took about four times as long as this, so
+2.0 has none.)
 
 ### Route Matching Complexity
 
@@ -846,7 +821,6 @@ depends on the platform.
 
 ### Memory
 
-- Route cache is one signed data file, verified and unserialized once per request
 - ~1KB per route in memory
 - 100 routes ≈ 100KB memory footprint
 - Response bodies are emitted in 8 KB chunks — a `Response::file()` download of any size
@@ -934,11 +908,11 @@ public function show(ServerRequestInterface $request, int $id): ResponseInterfac
 
 // .env.production
 APP_DEBUG=false
-APP_ENV=production
 ```
 
-`APP_ENV=local|dev|development` switches debug on even next to `APP_DEBUG=false`. To keep it
-off regardless of the environment, pass `'debug' => false` — a config value always wins.
+Debug is off unless you switch it on: with `'debug' => true`, or with `APP_DEBUG` through
+`Router::fromEnv()`. To keep it off regardless of the environment, pass `'debug' => false`
+— a key you pass always wins.
 
 ## Testing
 
