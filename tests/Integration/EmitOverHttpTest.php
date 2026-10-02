@@ -88,7 +88,7 @@ class EmitOverHttpTest extends TestCase
                     flush();
                 }
 
-                Sodaho\Router\Router::create(['debug' => false, 'basePath' => '', 'cacheFile' => ''])
+                Sodaho\Router\Router::create(['debug' => false, 'basePath' => ''])
                     ->loadRoutes(__DIR__ . '/routes.php')
                     ->on('error', function (array \$data): void {
                         file_put_contents(__DIR__ . '/error.log', (\$data['type'] ?? '-') . '|' . \$data['message'] . "\n", FILE_APPEND);

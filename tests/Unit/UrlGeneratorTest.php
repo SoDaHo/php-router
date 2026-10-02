@@ -199,7 +199,7 @@ class UrlGeneratorTest extends TestCase
 
     public function testConstructorWithPatternMapping(): void
     {
-        // This is the format used when loading from cache (name => pattern)
+        // A plain map: name => pattern
         $patternMapping = [
             'users.index' => '/users',
             'users.show' => '/users/{id}',

@@ -75,7 +75,7 @@ class PipelineTest extends TestCase
     private function router(array $config = []): Router
     {
         /** @phpstan-ignore argument.type */
-        return Router::create($config + ['debug' => false, 'cacheFile' => ''])->loadRoutes($this->routesFile);
+        return Router::create($config + ['debug' => false])->loadRoutes($this->routesFile);
     }
 
     // ==================== middleware for every request ====================
@@ -405,7 +405,7 @@ class PipelineTest extends TestCase
     public function testWithoutRoutesTheErrorHandlerGetsTheBareRequest(): void
     {
         $seen = 'not called';
-        $router = Router::create(['debug' => false, 'cacheFile' => ''])
+        $router = Router::create(['debug' => false])
             ->setErrorHandler(function (\Throwable $e, ServerRequestInterface $request) use (&$seen): ResponseInterface {
                 $seen = $request->getAttribute(RouteMatch::class);
 
@@ -421,7 +421,7 @@ class PipelineTest extends TestCase
 
     public function testFailingErrorHandlerInTheLastResortStillGivesAResponse(): void
     {
-        $router = Router::create(['debug' => false, 'cacheFile' => ''])
+        $router = Router::create(['debug' => false])
             ->setErrorHandler(fn () => throw new \LogicException('error handler failed'));
 
         $response = $router->handle(new ServerRequest('GET', '/ok'));
@@ -665,7 +665,7 @@ class PipelineTest extends TestCase
 
                 return null;
             }),
-            'last resort' => Router::create(['debug' => false, 'cacheFile' => '']),
+            'last resort' => Router::create(['debug' => false]),
         ];
 
         foreach ($routers as $label => $router) {
@@ -858,7 +858,7 @@ class PipelineTest extends TestCase
 
         try {
             $hook = [];
-            $router = Router::create(['debug' => false, 'cacheFile' => ''])->loadRoutes($routes);
+            $router = Router::create(['debug' => false])->loadRoutes($routes);
             $router->on('error', function (array $data) use (&$hook): void {
                 $hook[] = $data['exception']->getMessage();
             });

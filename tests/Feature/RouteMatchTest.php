@@ -65,7 +65,7 @@ class RouteMatchTest extends TestCase
     private function router(array $config = []): Router
     {
         /** @phpstan-ignore argument.type */
-        return Router::create($config + ['debug' => false, 'cacheFile' => ''])->loadRoutes($this->routesFile);
+        return Router::create($config + ['debug' => false])->loadRoutes($this->routesFile);
     }
 
     public function testHit(): void
@@ -187,7 +187,7 @@ class RouteMatchTest extends TestCase
         $this->expectException(RouterException::class);
         $this->expectExceptionMessage('No routes loaded');
 
-        Router::create(['debug' => false, 'cacheFile' => ''])->match(new ServerRequest('GET', '/'));
+        Router::create(['debug' => false])->match(new ServerRequest('GET', '/'));
     }
 
     /**

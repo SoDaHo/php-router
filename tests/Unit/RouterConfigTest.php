@@ -7,7 +7,6 @@ namespace Sodaho\Router\Tests\Unit;
 use Nyholm\Psr7\ServerRequest;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
-use Sodaho\Router\Exception\CacheException;
 use Sodaho\Router\Exception\RouterException;
 use Sodaho\Router\Router;
 
@@ -19,12 +18,11 @@ class RouterConfigTest extends TestCase
 {
     private const ENV_KEYS = [
         'APP_DEBUG', 'APP_ENV', 'APP_URL',
-        'ROUTER_BASE_PATH', 'ROUTER_TRAILING_SLASH', 'ROUTER_CACHE_FILE', 'ROUTER_CACHE_KEY', 'ROUTER_URL_ENCODING',
+        'ROUTER_BASE_PATH', 'ROUTER_TRAILING_SLASH', 'ROUTER_URL_ENCODING',
         'ROUTER_IMPLICIT_HEAD',
     ];
 
     private string $routesFile;
-    private string $cacheFile;
 
     /** @var array<string, array{env: mixed, getenv: string|false}> What the process had before the test */
     private array $originalEnvironment = [];
@@ -37,7 +35,6 @@ class RouterConfigTest extends TestCase
         $this->clearEnvironment();
 
         $this->routesFile = sys_get_temp_dir() . '/router_config_routes_' . uniqid() . '.php';
-        $this->cacheFile = sys_get_temp_dir() . '/router_config_cache_' . uniqid() . '.php';
 
         file_put_contents(
             $this->routesFile,
@@ -67,7 +64,7 @@ class RouterConfigTest extends TestCase
             }
         }
 
-        foreach ([$this->routesFile, $this->cacheFile] as $file) {
+        foreach ([$this->routesFile] as $file) {
             if (file_exists($file)) {
                 unlink($file);
             }
@@ -346,112 +343,6 @@ class RouterConfigTest extends TestCase
         $_ENV['ROUTER_URL_ENCODING'] = 'false';
         $this->assertSame('/users/a b', $this->router()->url('users.show', ['id' => 'a b']));
         $this->assertSame('/users/a%20b', $this->router(['urlEncoding' => true])->url('users.show', ['id' => 'a b']));
-    }
-
-    // ==================== cache ====================
-
-    public function testCacheFileAndKeyFromEnvironment(): void
-    {
-        $_ENV['ROUTER_CACHE_FILE'] = $this->cacheFile;
-        $_ENV['ROUTER_CACHE_KEY'] = 'key-from-env';
-
-        $this->assertSame(200, $this->router(['debug' => false])->handle(new ServerRequest('GET', '/users'))->getStatusCode());
-        $this->assertFileExists($this->cacheFile);
-    }
-
-    public function testEnableCacheWithoutKeyKeepsTheConfiguredKey(): void
-    {
-        // Up to 1.1.0 the setter overwrote the configured key with null: every request a 500
-        $_ENV['ROUTER_CACHE_KEY'] = 'key-from-env';
-
-        foreach ([['debug' => false], ['debug' => false, 'cacheSignature' => 'key-from-config']] as $config) {
-            $errors = [];
-            $router = $this->router($config)
-                ->enableCache($this->cacheFile)
-                ->on('error', function (array $data) use (&$errors): void {
-                    $errors[] = $data;
-                });
-
-            $this->assertSame(200, $router->handle(new ServerRequest('GET', '/users'))->getStatusCode());
-            $this->assertSame([], $errors);
-            $this->assertFileExists($this->cacheFile);
-            unlink($this->cacheFile);
-        }
-    }
-
-    public function testEnableCacheWithKeyReplacesTheConfiguredKey(): void
-    {
-        $this->router(['debug' => false, 'cacheSignature' => 'first-key'])
-            ->enableCache($this->cacheFile, 'second-key')
-            ->handle(new ServerRequest('GET', '/users'));
-
-        $errors = [];
-        $this->router(['debug' => false])
-            ->enableCache($this->cacheFile, 'first-key')
-            ->on('error', function (array $data) use (&$errors): void {
-                $errors[] = $data['exception'];
-            })
-            ->handle(new ServerRequest('GET', '/users'));
-
-        $this->assertCount(1, $errors, 'the file was signed with the second key, not the first');
-        $this->assertInstanceOf(CacheException::class, $errors[0]);
-    }
-
-    /**
-     * @return array<string, array{0: array<string, mixed>, 1: array<string, string>}>
-     */
-    public static function cacheConfigurationsWithoutAUsableKey(): array
-    {
-        return [
-            'no key at all' => [[], []],
-            'empty key in the config array' => [['cacheSignature' => ''], []],
-            // What an .env template with "ROUTER_CACHE_KEY=" leaves behind. With 1.1.0 that
-            // signed with an empty key — anyone could have produced the same signature.
-            'empty key in the environment' => [[], ['ROUTER_CACHE_KEY' => '']],
-        ];
-    }
-
-    /**
-     * The cache is an optimisation. Without a usable key it stays off and says so through
-     * the error hook; it must not take the application down (which is what happened in
-     * production only — in debug mode the cache is off anyway).
-     *
-     * @param array<string, mixed> $config
-     * @param array<string, string> $env
-     */
-    #[DataProvider('cacheConfigurationsWithoutAUsableKey')]
-    public function testCacheWithoutAUsableKeyStaysOffAndIsReported(array $config, array $env): void
-    {
-        foreach ($env as $key => $value) {
-            $_ENV[$key] = $value;
-        }
-
-        $errors = [];
-        $router = $this->router($config + ['debug' => false, 'cacheFile' => $this->cacheFile])
-            ->on('error', function (array $data) use (&$errors): void {
-                $errors[] = $data;
-            });
-
-        $this->assertSame(200, $router->handle(new ServerRequest('GET', '/users'))->getStatusCode());
-        $this->assertSame('/users/5', $router->url('users.show', ['id' => 5]));
-
-        $this->assertCount(1, $errors);
-        $this->assertSame('cache', $errors[0]['type']);
-        $this->assertInstanceOf(CacheException::class, $errors[0]['exception']);
-        $this->assertStringContainsString('signature key is required', $errors[0]['message']);
-        $this->assertFileDoesNotExist($this->cacheFile);
-    }
-
-    public function testEmptyCacheFileSwitchesTheCacheOffDespiteTheEnvironment(): void
-    {
-        $_ENV['ROUTER_CACHE_FILE'] = $this->cacheFile;
-        $_ENV['ROUTER_CACHE_KEY'] = 'key-from-env';
-
-        $this->assertSame(
-            200,
-            $this->router(['debug' => false, 'cacheFile' => '', 'cacheSignature' => ''])->handle(new ServerRequest('GET', '/users'))->getStatusCode()
-        );
-        $this->assertFileDoesNotExist($this->cacheFile);
     }
 
     // ==================== 1.2 ====================

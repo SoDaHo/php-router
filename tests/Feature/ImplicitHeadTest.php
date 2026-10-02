@@ -61,13 +61,13 @@ class ImplicitHeadTest extends TestCase
 
     private function router(bool $implicitHead): Router
     {
-        return Router::create(['debug' => false, 'cacheFile' => '', 'implicitHead' => $implicitHead])
+        return Router::create(['debug' => false, 'implicitHead' => $implicitHead])
             ->loadRoutes($this->routesFile);
     }
 
     public function testOffByDefault(): void
     {
-        foreach ([$this->router(false), Router::create(['debug' => false, 'cacheFile' => ''])->loadRoutes($this->routesFile)] as $router) {
+        foreach ([$this->router(false), Router::create(['debug' => false])->loadRoutes($this->routesFile)] as $router) {
             $response = $router->handle(new ServerRequest('HEAD', '/page'));
 
             $this->assertSame(405, $response->getStatusCode());
@@ -223,7 +223,7 @@ class ImplicitHeadTest extends TestCase
 
     public function testLastResortWithoutRoutesHasNoBodyEither(): void
     {
-        $router = Router::create(['debug' => false, 'cacheFile' => '', 'implicitHead' => true]);
+        $router = Router::create(['debug' => false, 'implicitHead' => true]);
 
         $head = $router->handle(new ServerRequest('HEAD', '/page'));
         $get = $router->handle(new ServerRequest('GET', '/page'));
@@ -233,7 +233,7 @@ class ImplicitHeadTest extends TestCase
         $this->assertStringContainsString('SERVER_ERROR', (string) $get->getBody());
 
         // ... and with the switch off the body stays, as it always has
-        $off = Router::create(['debug' => false, 'cacheFile' => ''])->handle(new ServerRequest('HEAD', '/page'));
+        $off = Router::create(['debug' => false])->handle(new ServerRequest('HEAD', '/page'));
         $this->assertStringContainsString('SERVER_ERROR', (string) $off->getBody());
     }
 

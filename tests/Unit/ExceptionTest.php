@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Sodaho\Router\Tests\Unit;
 
 use PHPUnit\Framework\TestCase;
-use Sodaho\Router\Exception\CacheException;
 use Sodaho\Router\Exception\DuplicateRouteException;
 use Sodaho\Router\Exception\MethodNotAllowedException;
 use Sodaho\Router\Exception\NotFoundException;
@@ -43,7 +42,6 @@ class ExceptionTest extends TestCase
         $this->assertInstanceOf(RouterException::class, new MethodNotAllowedException());
         $this->assertInstanceOf(RouterException::class, new RouteNotFoundException());
         $this->assertInstanceOf(RouterException::class, new DuplicateRouteException());
-        $this->assertInstanceOf(RouterException::class, new CacheException());
     }
 
     // ==================== MethodNotAllowedException ====================
@@ -69,32 +67,6 @@ class ExceptionTest extends TestCase
         $this->assertSame([], $e->getAllowedMethods());
     }
 
-    // ==================== CacheException Factory Methods ====================
-
-    public function testCacheExceptionDirectoryNotWritable(): void
-    {
-        $e = CacheException::directoryNotWritable('/path/to/dir');
-
-        $this->assertStringContainsString('/path/to/dir', $e->getMessage());
-        $this->assertStringContainsString('write permissions', $e->getDebugMessage());
-    }
-
-    public function testCacheExceptionWriteFailed(): void
-    {
-        $e = CacheException::writeFailed('/path/to/file.php');
-
-        $this->assertStringContainsString('/path/to/file.php', $e->getMessage());
-        $this->assertStringContainsString('permissions', $e->getDebugMessage());
-    }
-
-    public function testCacheExceptionInvalidSignature(): void
-    {
-        $e = CacheException::invalidSignature();
-
-        $this->assertStringContainsString('signature', strtolower($e->getMessage()));
-        $this->assertStringContainsString('tampered', strtolower($e->getDebugMessage()));
-    }
-
     // ==================== Exception Inheritance ====================
 
     public function testCanCatchAllRouterExceptions(): void
@@ -104,7 +76,6 @@ class ExceptionTest extends TestCase
             new MethodNotAllowedException('Method not allowed'),
             new RouteNotFoundException('Route not found'),
             new DuplicateRouteException('Duplicate route'),
-            new CacheException('Cache error'),
         ];
 
         foreach ($exceptions as $e) {
@@ -124,7 +95,6 @@ class ExceptionTest extends TestCase
             new MethodNotAllowedException(),
             new RouteNotFoundException(),
             new DuplicateRouteException(),
-            new CacheException(),
         ];
 
         foreach ($exceptions as $e) {

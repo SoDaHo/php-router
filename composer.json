@@ -1,6 +1,6 @@
 {
     "name": "sodaho/php-router",
-    "description": "Lightweight PHP Router for REST APIs and SPAs. Standardized JSON responses, middleware, caching.",
+    "description": "Lightweight PHP Router for REST APIs and SPAs. Standardized JSON responses, middleware.",
     "type": "library",
     "license": "MIT",
     "keywords": ["router", "psr-7", "psr-11", "psr-15", "api", "rest", "middleware", "json", "php"],
@@ -16,7 +16,6 @@
     },
     "require-dev": {
         "friendsofphp/php-cs-fixer": "^3.94",
-        "mikey179/vfsstream": "^1.6",
         "phpstan/phpstan": "^2.1",
         "phpunit/phpunit": "^11.0"
     },

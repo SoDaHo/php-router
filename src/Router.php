@@ -10,8 +10,6 @@ use Psr\Container\ContainerInterface;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Server\RequestHandlerInterface;
-use Sodaho\Router\Cache\RouteCache;
-use Sodaho\Router\Exception\CacheException;
 use Sodaho\Router\Exception\RouterException;
 use Sodaho\Router\Traits\HasHooks;
 
@@ -65,7 +63,7 @@ class Router implements RequestHandlerInterface
         'origin-agent-cluster' => true,
     ];
 
-    /** @var array{debug: bool, basePath: string, baseUrl: ?string, trailingSlash: string, cacheFile: ?string, cacheSignature: ?string, routesFile: ?string, urlEncoding: bool, implicitHead: bool} */
+    /** @var array{debug: bool, basePath: string, baseUrl: ?string, trailingSlash: string, routesFile: ?string, urlEncoding: bool, implicitHead: bool} */
     private array $config;
 
     /** @var array<int, string|object> Middleware for every request, outermost first */
@@ -79,13 +77,11 @@ class Router implements RequestHandlerInterface
     private ?RouteCollector $collector = null;
     private ?UrlGenerator $urlGenerator = null;
 
-    /** @var array<string, string> Cached named routes (name => pattern) */
-    private array $cachedNamedRoutes = [];
 
     /**
      * Create a new Router instance.
      *
-     * @param array{debug?: bool|int|string|null, basePath?: string, baseUrl?: string, trailingSlash?: string, cacheFile?: string, cacheSignature?: string, routesFile?: string, urlEncoding?: bool, implicitHead?: bool|int|string|null} $config
+     * @param array{debug?: bool|int|string|null, basePath?: string, baseUrl?: string, trailingSlash?: string, routesFile?: string, urlEncoding?: bool, implicitHead?: bool|int|string|null} $config
      *
      * @throws RouterException If 'debug' or 'implicitHead' is neither a boolean nor a boolean-like value
      */
@@ -97,8 +93,6 @@ class Router implements RequestHandlerInterface
             'basePath' => self::normalizeBasePath((string) ($config['basePath'] ?? self::env('ROUTER_BASE_PATH') ?? '')),
             'baseUrl' => $config['baseUrl'] ?? self::env('APP_URL'),
             'trailingSlash' => (string) ($config['trailingSlash'] ?? self::env('ROUTER_TRAILING_SLASH') ?? 'strict'),
-            'cacheFile' => $config['cacheFile'] ?? self::env('ROUTER_CACHE_FILE'),
-            'cacheSignature' => $config['cacheSignature'] ?? self::env('ROUTER_CACHE_KEY'),
             'routesFile' => $config['routesFile'] ?? null,
             'urlEncoding' => $config['urlEncoding']
                 ?? filter_var(self::env('ROUTER_URL_ENCODING') ?? true, FILTER_VALIDATE_BOOL),
@@ -173,7 +167,7 @@ class Router implements RequestHandlerInterface
     /**
      * Factory method for fluent creation.
      *
-     * @param array{debug?: bool|int|string|null, basePath?: string, baseUrl?: string, trailingSlash?: string, cacheFile?: string, cacheSignature?: string, routesFile?: string, urlEncoding?: bool, implicitHead?: bool|int|string|null} $config
+     * @param array{debug?: bool|int|string|null, basePath?: string, baseUrl?: string, trailingSlash?: string, routesFile?: string, urlEncoding?: bool, implicitHead?: bool|int|string|null} $config
      */
     public static function create(array $config = []): self
     {
@@ -187,7 +181,7 @@ class Router implements RequestHandlerInterface
      * Today create() and the constructor do the same. That silent fallback is deprecated
      * and ends with 2.0 — from then on only fromEnv() reads the environment.
      *
-     * @param array{debug?: bool|int|string|null, basePath?: string, baseUrl?: string, trailingSlash?: string, cacheFile?: string, cacheSignature?: string, routesFile?: string, urlEncoding?: bool, implicitHead?: bool|int|string|null} $config Values that take precedence
+     * @param array{debug?: bool|int|string|null, basePath?: string, baseUrl?: string, trailingSlash?: string, routesFile?: string, urlEncoding?: bool, implicitHead?: bool|int|string|null} $config Values that take precedence
      *
      * @throws RouterException If 'debug' or 'implicitHead' is neither a boolean nor a boolean-like value
      */
@@ -199,7 +193,7 @@ class Router implements RequestHandlerInterface
     /**
      * Quick boot: create, load routes, and run.
      *
-     * @param array{debug?: bool|int|string|null, basePath?: string, baseUrl?: string, trailingSlash?: string, cacheFile?: string, cacheSignature?: string, routesFile?: string, urlEncoding?: bool, implicitHead?: bool|int|string|null} $config
+     * @param array{debug?: bool|int|string|null, basePath?: string, baseUrl?: string, trailingSlash?: string, routesFile?: string, urlEncoding?: bool, implicitHead?: bool|int|string|null} $config
      * @param string $routesFile Path to routes file
      */
     public static function boot(array $config, string $routesFile): void
@@ -287,23 +281,6 @@ class Router implements RequestHandlerInterface
     public function setBasePath(string $basePath): self
     {
         $this->config['basePath'] = self::normalizeBasePath($basePath);
-        return $this;
-    }
-
-    /**
-     * Enable route caching.
-     *
-     * @deprecated 1.2 The route cache will be removed in 2.0. Measured, loading it costs more
-     *             than building the table from the routes file.
-     *
-     * @param string $file Path to cache file
-     * @param string|null $signature HMAC key for integrity verification (required outside debug mode);
-     *                               null keeps the key already configured (config or ROUTER_CACHE_KEY)
-     */
-    public function enableCache(string $file, ?string $signature = null): self
-    {
-        $this->config['cacheFile'] = $file;
-        $this->config['cacheSignature'] = $signature ?? $this->config['cacheSignature'];
         return $this;
     }
 
@@ -427,9 +404,8 @@ class Router implements RequestHandlerInterface
      * Pass the request on with the result as attribute RouteMatch::class and handle() does
      * not look it up a second time.
      *
-     * The first call loads the routes, as the first handle() or url() does — with all that
-     * belongs to it: trouble with the route cache is reported through the error hook, and
-     * base path and trailing slash mode are taken as they are at that moment.
+     * The first call loads the routes, as the first handle() or url() does: base path and
+     * trailing slash mode are taken as they are at that moment.
      *
      * @throws RouterException If no routes are loaded or routes file is invalid
      */
@@ -495,99 +471,29 @@ class Router implements RequestHandlerInterface
             return $this->dispatcher;
         }
 
-        $data = null;
-        $cache = null;
-
-        // Try loading from cache (only in non-debug mode). The cache is an optimisation: a
-        // missing key, a file that fails verification or no longer fits the application and
-        // a failed write are reported through the error hook, and the request is served from
-        // the routes file.
-        if ($this->config['cacheFile']) {
-            try {
-                $cache = new RouteCache(
-                    $this->config['cacheFile'],
-                    $this->config['cacheSignature'],
-                    !$this->config['debug'] // Disabled in debug mode
-                );
-            } catch (CacheException $e) {
-                $this->trigger('error', [
-                    'type' => 'cache',
-                    'message' => $e->getMessage(),
-                    'exception' => $e,
-                ]);
-            }
-
-            if ($cache !== null && !$this->config['debug']) {
-                try {
-                    $data = $cache->load();
-                } catch (\Throwable $e) {
-                    // Not a cache file this key signed, outdated, or something in between threw
-                    // (an autoloader, a stream wrapper) - trigger error hook and rebuild
-                    $this->trigger('error', [
-                        'type' => 'cache',
-                        'message' => $e->getMessage(),
-                        'exception' => $e,
-                    ]);
-                    $data = null;
-                }
-            }
+        if (!$this->config['routesFile'] || !file_exists($this->config['routesFile'])) {
+            throw new RouterException('No routes loaded. Use loadRoutes() first.');
         }
 
-        // Load routes if no cache hit
-        if ($data === null) {
-            if (!$this->config['routesFile'] || !file_exists($this->config['routesFile'])) {
-                throw new RouterException('No routes loaded. Use loadRoutes() first.');
-            }
+        $this->collector = new RouteCollector();
 
-            $this->collector = new RouteCollector();
-
-            // Configure trailing slash handling based on mode
-            if ($this->config['trailingSlash'] === 'strict') {
-                $this->collector->setPreserveTrailingSlash(true);
-            }
-
-            $callback = require $this->config['routesFile'];
-
-            if (!is_callable($callback)) {
-                throw new RouterException(
-                    'Route file must return callable: return function(RouteCollector $r) { ... };'
-                );
-            }
-
-            $callback($this->collector);
-            $dispatchData = $this->collector->getData();
-            $namedRoutes = $this->collector->getNamedRoutesData();
-
-            // Save to cache. Routes that cannot be cached (Closures) and a cache file that
-            // cannot be written are both reported and neither stops the request: the table
-            // just built is complete.
-            try {
-                $cache?->save([
-                    'dispatchData' => $dispatchData,
-                    'namedRoutes' => $namedRoutes,
-                ]);
-            } catch (\Throwable $e) {
-                // trigger error hook and continue without cache
-                $this->trigger('error', [
-                    'type' => 'cache',
-                    'message' => $e->getMessage(),
-                    'exception' => $e,
-                ]);
-            }
-
-            $data = $dispatchData;
-        } else {
-            // Extract from cached structure
-            /** @var array<string, string> $namedRoutes */
-            $namedRoutes = $data['namedRoutes'] ?? [];
-            $this->cachedNamedRoutes = $namedRoutes;
-            $data = $data['dispatchData'] ?? $data;
+        // Configure trailing slash handling based on mode
+        if ($this->config['trailingSlash'] === 'strict') {
+            $this->collector->setPreserveTrailingSlash(true);
         }
 
-        assert(is_array($data));
-        /** @var array{0: array<string, array<string, Route>>, 1: array<string, array<int, array{regex: string, route: Route, casts: array<string, string>}>>} $data */
+        $callback = require $this->config['routesFile'];
+
+        if (!is_callable($callback)) {
+            throw new RouterException(
+                'Route file must return callable: return function(RouteCollector $r) { ... };'
+            );
+        }
+
+        $callback($this->collector);
+
         $this->dispatcher = new RouteDispatcher(
-            $data,
+            $this->collector->getData(),
             $this->container,
             $this->config['basePath'],
             $this->config['trailingSlash'],
@@ -611,16 +517,11 @@ class Router implements RequestHandlerInterface
     private function getUrlGenerator(): UrlGenerator
     {
         if ($this->urlGenerator === null) {
-            // Ensure routes are loaded (initializes collector or loads cache)
+            // Ensure routes are loaded (initializes the collector)
             $this->getDispatcher();
+            assert($this->collector !== null);
 
-            // Use collector if available, otherwise use cached named routes
-            if ($this->collector !== null) {
-                $routes = $this->collector->getRoutes();
-                $this->urlGenerator = new UrlGenerator($routes);
-            } else {
-                $this->urlGenerator = new UrlGenerator($this->cachedNamedRoutes);
-            }
+            $this->urlGenerator = new UrlGenerator($this->collector->getRoutes());
 
             $this->urlGenerator->setBasePath($this->config['basePath']);
             $this->urlGenerator->setEncodeParams($this->config['urlEncoding']);
