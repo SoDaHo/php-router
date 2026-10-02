@@ -55,7 +55,8 @@ class Route
     /**
      * Restore object from var_export() output.
      *
-     * Required for OPcache-friendly route caching.
+     * The route cache serializes and no longer needs this; kept for applications that
+     * var_export() routes themselves.
      *
      * @param array{methods: string[], pattern: string, handler: mixed, middleware?: array<int, string|object>, name?: string|null} $data Exported data
      */

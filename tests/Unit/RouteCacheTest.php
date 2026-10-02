@@ -102,12 +102,23 @@ class RouteCacheTest extends TestCase
     {
         $cache = new RouteCache($this->cacheFile, 'secret-key');
 
-        // Create file with HMAC signature but no "return " statement
+        // Head and signature line are in place, but the signature belongs to nothing
         $fakeSignature = str_repeat('a', 64);
-        file_put_contents($this->cacheFile, "<?php\n// HMAC-SHA256: {$fakeSignature}\n\$data = ['test'];");
+        file_put_contents($this->cacheFile, "<?php __halt_compiler(); ?>\nHMAC-SHA256: {$fakeSignature}\n" . serialize(['test']));
 
         $this->expectException(CacheException::class);
         $cache->load();
+    }
+
+    public function testLoadIgnoresFilesInTheFormatOfEarlierVersions(): void
+    {
+        $cache = new RouteCache($this->cacheFile, 'secret-key');
+
+        // 1.0/1.1 wrote executable PHP. Whatever it contains: a miss, never an include.
+        $fakeSignature = str_repeat('a', 64);
+        file_put_contents($this->cacheFile, "<?php\n// HMAC-SHA256: {$fakeSignature}\nreturn invalid syntax;");
+
+        $this->assertNull($cache->load());
     }
 
     public function testLoadRejectsWrongSignatureKey(): void
@@ -132,9 +143,14 @@ class RouteCacheTest extends TestCase
             },
         ];
 
-        $this->expectException(\LogicException::class);
-        $this->expectExceptionMessage('Closures');
-        $cache->save($data);
+        // The message as it is, not wrapped into a second "Cannot cache routes: ..."
+        try {
+            $cache->save($data);
+            $this->fail('A Closure was cached');
+        } catch (\LogicException $e) {
+            $this->assertSame('Cannot cache routes with Closures. Use [Controller::class, "method"] syntax.', $e->getMessage());
+            $this->assertNull($e->getPrevious());
+        }
     }
 
     public function testSaveCreatesDirectory(): void
@@ -221,27 +237,6 @@ class RouteCacheTest extends TestCase
         $this->assertNull($cache->getModificationTime());
     }
 
-    // public function testIsEnabled(): void
-    // {
-    //     $enabledCache = new RouteCache($this->cacheFile, self::TEST_KEY, true);
-    //     $disabledCache = new RouteCache($this->cacheFile, null, false);
-
-    //     $this->assertTrue($enabledCache->isEnabled());
-    //     $this->assertFalse($disabledCache->isEnabled());
-    // }
-
-    // public function testSetEnabled(): void
-    // {
-    //     $cache = new RouteCache($this->cacheFile, null, false);
-    //     $this->assertFalse($cache->isEnabled());
-
-    //     // Note: setEnabled(true) without key would be invalid in production,
-    //     // but the check is only in constructor. This tests the setter works.
-    //     $result = $cache->setEnabled(true);
-    //     $this->assertTrue($cache->isEnabled());
-    //     $this->assertSame($cache, $result); // Fluent API
-    // }
-
     public function testGetCacheFile(): void
     {
         $cache = new RouteCache($this->cacheFile, self::TEST_KEY);
@@ -273,18 +268,6 @@ class RouteCacheTest extends TestCase
         $this->assertNull($loaded);
     }
 
-    public function testLoadReturnsNullOnCorruptedFile(): void
-    {
-        $cache = new RouteCache($this->cacheFile, self::TEST_KEY);
-
-        // Create corrupted PHP file (with valid signature format to pass check)
-        $fakeSignature = str_repeat('a', 64);
-        file_put_contents($this->cacheFile, "<?php\n// HMAC-SHA256: {$fakeSignature}\nreturn invalid syntax;");
-
-        // Will fail signature check first, then return null on parse error
-        $this->expectException(CacheException::class);
-        $cache->load();
-    }
 
     public function testLoadReturnsNullOnNonArrayReturn(): void
     {
@@ -364,11 +347,46 @@ class RouteCacheTest extends TestCase
         $data = ['circular' => $obj1];
 
         // The closure check should complete without infinite recursion
-        // var_export triggers a warning for circular refs (expected)
-        @$cache->save($data);
+        $cache->save($data);
 
-        // If we got here, the circular reference protection worked
-        $this->assertFileExists($this->cacheFile);
+        $loaded = $cache->load();
+        $this->assertIsArray($loaded);
+        $this->assertSame($loaded['circular'], $loaded['circular']->ref->ref);
+    }
+
+    public function testObjectsSurviveTheRoundTripWithoutSetState(): void
+    {
+        $cache = new RouteCache($this->cacheFile, self::TEST_KEY);
+
+        // stdClass has no __set_state(): the old var_export() format wrote a file for it that
+        // could never be loaded again, and the cache was silently rebuilt on every request.
+        $marker = new \stdClass();
+        $marker->format = 'oauth';
+        $route = new \Sodaho\Router\Route(['GET'], '/test', ['SomeClass', 'method'], [$marker], 'test.route');
+
+        $cache->save(['static' => ['GET' => ['/test' => $route]]]);
+        $loaded = $cache->load();
+
+        $this->assertIsArray($loaded);
+        $this->assertEquals($route, $loaded['static']['GET']['/test']);
+    }
+
+    public function testSaveRejectsValuesThatCannotBeSerialized(): void
+    {
+        $cache = new RouteCache($this->cacheFile, self::TEST_KEY);
+
+        // An anonymous class is as uncacheable as a Closure — and must be just as loud.
+        $route = new \Sodaho\Router\Route(['GET'], '/test', new class () {});
+
+        try {
+            $cache->save(['static' => ['GET' => ['/test' => $route]]]);
+            $this->fail('An unserializable handler was cached');
+        } catch (\LogicException $e) {
+            $this->assertStringContainsString('Cannot cache routes', $e->getMessage());
+            $this->assertInstanceOf(\Throwable::class, $e->getPrevious());
+        }
+
+        $this->assertFileDoesNotExist($this->cacheFile);
     }
 
     public function testConstructorThrowsWhenEnabledWithoutKey(): void
@@ -379,10 +397,328 @@ class RouteCacheTest extends TestCase
         new RouteCache($this->cacheFile, null, true);
     }
 
-    // public function testConstructorAllowsDisabledWithoutKey(): void
-    // {
-    //     // Should not throw - disabled cache doesn't need key
-    //     $cache = new RouteCache($this->cacheFile, null, false);
-    //     $this->assertFalse($cache->isEnabled());
-    // }
+    public function testSaveRejectsResources(): void
+    {
+        $cache = new RouteCache($this->cacheFile, self::TEST_KEY);
+
+        // serialize() does not refuse a resource: it writes int(0), and the next request
+        // would get a middleware whose stream has turned into a number.
+        $open = fopen('php://memory', 'r');
+        $closed = fopen('php://memory', 'r');
+        fclose($closed);
+
+        foreach (['open' => $open, 'closed' => $closed] as $label => $resource) {
+            $holder = new \stdClass();
+            $holder->stream = $resource;
+            $route = new \Sodaho\Router\Route(['GET'], '/test', ['SomeClass', 'method'], [$holder]);
+
+            try {
+                $cache->save(['static' => ['GET' => ['/test' => $route]]]);
+                $this->fail("A route holding a resource ({$label}) was cached");
+            } catch (\LogicException $e) {
+                $this->assertStringContainsString('Cannot cache routes with resources', $e->getMessage());
+            }
+        }
+
+        fclose($open);
+        $this->assertFileDoesNotExist($this->cacheFile);
+    }
+
+    public function testFailingRenameStaysACacheExceptionUnderAThrowingErrorHandler(): void
+    {
+        // A directory sits where the cache file should go: the temp file can be written, the
+        // rename onto it cannot — and warns. Applications whose error handler throws on
+        // warnings must still get the CacheException the router knows how to report.
+        mkdir($this->cacheFile);
+        $cache = new RouteCache($this->cacheFile, self::TEST_KEY);
+
+        // What frameworks install: throw on everything that is not silenced with @.
+        // (PHPUnit lowers error_reporting() while a test runs; raise it so the handler
+        // sees what it would see in an application.)
+        $reporting = error_reporting(E_ALL);
+        set_error_handler(static function (int $severity, string $message): bool {
+            if ((error_reporting() & $severity) === 0) {
+                return false;
+            }
+
+            throw new \ErrorException($message, 0, $severity);
+        });
+
+        try {
+            $cache->save(['test' => true]);
+            $this->fail('Renaming onto a directory succeeded');
+        } catch (CacheException $e) {
+            $this->assertStringContainsString('Failed to write cache file', $e->getMessage());
+        } finally {
+            restore_error_handler();
+            error_reporting($reporting);
+            rmdir($this->cacheFile);
+        }
+
+        $this->assertSame([], glob($this->cacheDir . '/*.tmp.*'), 'the temp file is removed');
+    }
+
+    public function testObjectsThatLeaveTheirResourceOutOfSerializationAreCached(): void
+    {
+        $cache = new RouteCache($this->cacheFile, self::TEST_KEY);
+
+        // What log handlers do: the open file is not part of the serialized state and is
+        // reopened on demand. Such an object serializes cleanly and must not be refused.
+        foreach ([new ReopensViaSerialize('php://memory'), new ReopensViaSleep('php://memory')] as $logger) {
+            $route = new \Sodaho\Router\Route(['GET'], '/test', ['SomeClass', 'method'], [$logger]);
+
+            $cache->save(['static' => ['GET' => ['/test' => $route]]]);
+            $loaded = $cache->load();
+
+            $this->assertIsArray($loaded);
+            $restored = $loaded['static']['GET']['/test']->middleware[0];
+            $this->assertSame($logger::class, $restored::class);
+            $this->assertSame('php://memory', $restored->path);
+            $this->assertNull($restored->handle);
+        }
+    }
+
+    public function testOnlyWhatIsSerializedIsChecked(): void
+    {
+        $cache = new RouteCache($this->cacheFile, self::TEST_KEY);
+
+        // A Closure in a property __sleep() leaves out never reaches the cache file ...
+        $logger = new ReopensViaSleep('php://memory');
+        $logger->handle = fn () => 'left out';
+        $cache->save(['x' => $logger]);
+        $this->assertIsArray($cache->load());
+
+        // ... in a property that is written, it is refused as everywhere else
+        $logger = new ReopensViaSleep('php://memory');
+        $logger->path = fn () => 'not a path';
+
+        $this->expectException(\LogicException::class);
+        $this->expectExceptionMessage('Closures');
+        $cache->save(['x' => $logger]);
+    }
+
+    /**
+     * @return array<string, array{0: object}>
+     */
+    public static function objectsThatRefuseSerialization(): array
+    {
+        return [
+            '__sleep() throws' => [new RefusesViaSleep()],
+            '__serialize() throws' => [new RefusesViaSerialize()],
+            '__sleep() returns no array' => [new SleepReturnsNoArray()],
+        ];
+    }
+
+    /**
+     * The check before serializing asks objects what they will write — it runs their code.
+     * Whatever that throws has to arrive as the LogicException the router knows how to
+     * report, not as an exception of the application in the middle of a request.
+     */
+    #[\PHPUnit\Framework\Attributes\DataProvider('objectsThatRefuseSerialization')]
+    public function testObjectThatRefusesSerializationIsNotCachedAndNotFatal(object $object): void
+    {
+        $cache = new RouteCache($this->cacheFile, self::TEST_KEY);
+
+        try {
+            $cache->save(['x' => $object]);
+            $this->fail('An object that refuses serialization was cached');
+        } catch (\LogicException $e) {
+            $this->assertStringStartsWith('Cannot cache routes: ', $e->getMessage());
+            $this->assertNotNull($e->getPrevious());
+        }
+
+        $this->assertFileDoesNotExist($this->cacheFile);
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('objectsThatRefuseSerialization')]
+    public function testDisabledCacheNeverRunsSerializationCodeOfTheApplication(object $object): void
+    {
+        // Debug mode: nothing is written, so nothing may be asked either. Up to 1.1.0 no
+        // application code ran here, and an object like this did not disturb a request.
+        $cache = new RouteCache($this->cacheFile, null, false);
+
+        $cache->save(['x' => $object]);
+
+        $this->assertFileDoesNotExist($this->cacheFile);
+    }
+
+    public function testDisabledCacheCopesWithCircularReferences(): void
+    {
+        $cache = new RouteCache($this->cacheFile, null, false);
+
+        $a = new \stdClass();
+        $b = new \stdClass();
+        $a->other = $b;
+        $b->other = $a;
+
+        $cache->save(['x' => $a]);
+
+        $this->assertFileDoesNotExist($this->cacheFile);
+    }
+
+    public function testDisabledCacheStillReportsClosures(): void
+    {
+        $cache = new RouteCache($this->cacheFile, null, false);
+
+        $this->expectException(\LogicException::class);
+        $this->expectExceptionMessage('Closures');
+        $cache->save(['x' => new \Sodaho\Router\Route(['GET'], '/x', fn () => 'closure')]);
+    }
+
+    public function testSleepNamingAPrivatePropertyOfTheParentIsFollowed(): void
+    {
+        $cache = new RouteCache($this->cacheFile, self::TEST_KEY);
+
+        // For a private property of a parent class __sleep() has to return the name in the
+        // "\0Class\0name" form; serialize() then writes it — as int(0) if it is a resource.
+        $resource = fopen('php://memory', 'r');
+
+        try {
+            $cache->save(['x' => new SleepsOnParentProperty($resource)]);
+            $this->fail('A resource in a parent property named by __sleep() was cached');
+        } catch (\LogicException $e) {
+            $this->assertStringContainsString('Cannot cache routes with resources', $e->getMessage());
+        } finally {
+            fclose($resource);
+        }
+    }
+
+    public function testResourceHiddenInACollectionIsFound(): void
+    {
+        $cache = new RouteCache($this->cacheFile, self::TEST_KEY);
+
+        // (array) on an SplObjectStorage shows nothing of its content, serialize() writes all
+        // of it — the resource as int(0). Only __serialize() tells what will be written.
+        $resource = fopen('php://memory', 'r');
+        $storage = new \SplObjectStorage();
+        $storage[new \stdClass()] = $resource;
+
+        try {
+            $cache->save(['x' => $storage]);
+            $this->fail('A resource inside an SplObjectStorage was cached');
+        } catch (\LogicException $e) {
+            $this->assertStringContainsString('Cannot cache routes with resources', $e->getMessage());
+        } finally {
+            fclose($resource);
+        }
+
+        $this->assertFileDoesNotExist($this->cacheFile);
+    }
+
+    public function testPrivateAndProtectedPropertiesNamedBySleepAreChecked(): void
+    {
+        $cache = new RouteCache($this->cacheFile, self::TEST_KEY);
+
+        $this->expectException(\LogicException::class);
+        $this->expectExceptionMessage('Closures');
+        $cache->save(['x' => new SleepsOnHiddenProperties(fn () => 'kept by __sleep')]);
+    }
+
+    public function testHiddenPropertiesLeftOutBySleepAreNotChecked(): void
+    {
+        $cache = new RouteCache($this->cacheFile, self::TEST_KEY);
+
+        $cache->save(['x' => new SleepsOnHiddenProperties('plain', fn () => 'left out')]);
+
+        $this->assertIsArray($cache->load());
+    }
+}
+
+final class ReopensViaSerialize
+{
+    /** @var resource|null */
+    public $handle;
+
+    public function __construct(public mixed $path)
+    {
+        $this->handle = fopen($path, 'r');
+    }
+
+    /** @return array<string, mixed> */
+    public function __serialize(): array
+    {
+        return ['path' => $this->path];
+    }
+
+    /** @param array<string, mixed> $data */
+    public function __unserialize(array $data): void
+    {
+        $this->path = $data['path'];
+        $this->handle = null;
+    }
+}
+
+final class ReopensViaSleep
+{
+    /** @var resource|null */
+    public $handle;
+
+    public function __construct(public mixed $path)
+    {
+        $this->handle = fopen($path, 'r');
+    }
+
+    /** @return list<string> */
+    public function __sleep(): array
+    {
+        return ['path'];
+    }
+}
+
+final class SleepsOnHiddenProperties
+{
+    public function __construct(private mixed $kept, protected mixed $dropped = null)
+    {
+    }
+
+    /** @return list<string> */
+    public function __sleep(): array
+    {
+        return ['kept'];
+    }
+}
+
+final class RefusesViaSleep
+{
+    /** @return list<string> */
+    public function __sleep(): array
+    {
+        throw new \RuntimeException('This object must not be serialized');
+    }
+}
+
+final class RefusesViaSerialize
+{
+    /** @return array<string, mixed> */
+    public function __serialize(): array
+    {
+        throw new \RuntimeException('This object must not be serialized');
+    }
+}
+
+final class SleepReturnsNoArray
+{
+    public string $value = 'x';
+
+    public function __sleep()
+    {
+        return 'value';
+    }
+}
+
+class HoldsAHandle
+{
+    /** @param resource $handle */
+    public function __construct(private mixed $handle)
+    {
+    }
+}
+
+final class SleepsOnParentProperty extends HoldsAHandle
+{
+    /** @return list<string> */
+    public function __sleep(): array
+    {
+        return ["\0" . HoldsAHandle::class . "\0handle"];
+    }
 }

@@ -53,6 +53,21 @@ class CacheException extends RouterException
     }
 
     /**
+     * Create exception for a correctly signed cache whose content cannot be restored.
+     *
+     * @param string $reason What does not fit (unknown class, failed wake-up)
+     */
+    public static function outdated(string $reason, ?\Throwable $previous = null): self
+    {
+        return new self(
+            'Cache file is outdated',
+            0,
+            $previous,
+            sprintf('%s. The cache does not fit the classes of this process; it is rebuilt from the routes file.', ucfirst($reason))
+        );
+    }
+
+    /**
      * Create exception for missing signature key.
      */
     public static function signatureKeyRequired(): self

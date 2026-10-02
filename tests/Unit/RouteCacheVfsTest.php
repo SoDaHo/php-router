@@ -156,4 +156,76 @@ class RouteCacheVfsTest extends TestCase
 
         $this->assertTrue($this->root->hasChild('existing/routes.php'));
     }
+
+    /**
+     * Applications commonly turn warnings into exceptions. A cache that cannot be written
+     * has to stay a CacheException then — the router reports those and carries on — and
+     * must not surface as an ErrorException from file_put_contents().
+     */
+    public function testWriteFailureStaysACacheExceptionUnderAThrowingErrorHandler(): void
+    {
+        $dir = vfsStream::newDirectory('locked', 0o755)->at($this->root);
+        $cache = new RouteCache(vfsStream::url('cache/locked/routes.php'), self::TEST_KEY);
+        $cache->save(['initial' => true]);
+        $dir->chmod(0o000);
+
+        // The blunt kind of handler: throws on every warning, silenced with @ or not
+        $reporting = error_reporting(E_ALL);
+        set_error_handler(static function (int $severity, string $message): bool {
+            throw new \ErrorException($message, 0, $severity);
+        });
+
+        try {
+            $cache->save(['updated' => true]);
+            $this->fail('Writing into a locked directory succeeded');
+        } catch (CacheException $e) {
+            $this->assertStringContainsString('Failed to write cache file', $e->getMessage());
+        } finally {
+            restore_error_handler();
+            error_reporting($reporting);
+        }
+    }
+
+    public function testShortWriteIsAFailureAndLeavesTheOldCacheInPlace(): void
+    {
+        $cache = new RouteCache(vfsStream::url('cache/routes.php'), self::TEST_KEY);
+        $cache->save(['version' => 1]);
+        $old = file_get_contents(vfsStream::url('cache/routes.php'));
+
+        // Disk full while the new file is written. Half a cache must never be renamed into
+        // place — PHP reports the short write as a failure, and save() has to act on it.
+        vfsStream::setQuota(strlen((string) $old) + 20);
+
+        try {
+            @$cache->save(['version' => 2, 'padding' => str_repeat('x', 500)]);
+            $this->fail('A short write was taken for a complete one');
+        } catch (CacheException $e) {
+            $this->assertStringContainsString('Failed to write cache file', $e->getMessage());
+        } finally {
+            vfsStream::setQuota(-1);
+        }
+
+        $this->assertSame($old, file_get_contents(vfsStream::url('cache/routes.php')));
+        $this->assertSame(['routes.php'], array_map(fn ($child) => $child->getName(), $this->root->getChildren()));
+    }
+
+    public function testUnreadableContentIsAMissUnderAThrowingErrorHandler(): void
+    {
+        // Passes is_readable() and then cannot be read: a directory at the cache path
+        vfsStream::newDirectory('routes.php', 0o755)->at($this->root);
+        $cache = new RouteCache(vfsStream::url('cache/routes.php'), self::TEST_KEY);
+
+        // The blunt kind of handler: throws on every warning, silenced with @ or not
+        $reporting = error_reporting(E_ALL);
+        set_error_handler(static function (int $severity, string $message): bool {
+            throw new \ErrorException($message, 0, $severity);
+        });
+
+        try {
+            $this->assertNull($cache->load());
+        } finally {
+            restore_error_handler();
+            error_reporting($reporting);
+        }
+    }
 }

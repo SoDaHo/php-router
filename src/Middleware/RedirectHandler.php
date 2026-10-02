@@ -69,7 +69,8 @@ class RedirectHandler implements RequestHandlerInterface
     /**
      * Restore object from var_export() output.
      *
-     * Required for OPcache-friendly route caching.
+     * The route cache serializes and no longer needs this; kept for applications that
+     * var_export() routes themselves.
      *
      * @param array{target: string, status: int} $data Exported data
      */

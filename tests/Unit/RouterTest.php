@@ -361,7 +361,7 @@ class RouterTest extends TestCase
         $this->assertFileExists($cacheFile);
 
         // Verify cache contains namedRoutes
-        $cachedData = require $cacheFile;
+        $cachedData = (new \Sodaho\Router\Cache\RouteCache($cacheFile, $signatureKey))->load();
         $this->assertArrayHasKey('namedRoutes', $cachedData);
         $this->assertArrayHasKey('items.show', $cachedData['namedRoutes']);
         $this->assertSame('/api/items/{id}', $cachedData['namedRoutes']['items.show']);
@@ -456,7 +456,8 @@ class RouterTest extends TestCase
         );
 
         // Create a cache file with invalid HMAC signature
-        $corruptCache = "<?php\n// HMAC-SHA256: 0000000000000000000000000000000000000000000000000000000000000000\nreturn ['dispatchData' => [[], []], 'namedRoutes' => []];";
+        $corruptCache = "<?php __halt_compiler(); ?>\nHMAC-SHA256: 0000000000000000000000000000000000000000000000000000000000000000\n"
+            . serialize(['dispatchData' => [[], []], 'namedRoutes' => []]);
         file_put_contents($cacheFile, $corruptCache);
 
         $cacheErrorTriggered = false;
