@@ -343,6 +343,65 @@ class RouteCollectorTest extends TestCase
         $this->assertSame(0, preg_match($regex, '/t/php/v8.4'));
     }
 
+    public function testAttributeGroup(): void
+    {
+        $this->collector->get('/before', 'h');
+
+        $this->collector->attributeGroup(['format' => 'envelope', 'cors' => false], function (RouteCollector $r): void {
+            $r->get('/plain', 'h');
+            $r->get('/own', 'h')->attribute('cors', true)->attribute('tag', 'me');
+
+            $r->attributeGroup(['format' => 'oauth', 'scope' => 'admin'], function (RouteCollector $r): void {
+                $r->post('/nested', 'h');
+            });
+
+            $r->get('/after-nested', 'h');
+        });
+
+        $this->collector->get('/after', 'h');
+
+        $attributes = [];
+        foreach ($this->collector->getRoutes() as $route) {
+            $attributes[$route->pattern] = $route->attributes;
+        }
+
+        // On the Route object right at registration — whoever reads getRoutes() sees them
+        $this->assertSame(
+            [
+                '/before' => [],
+                '/plain' => ['format' => 'envelope', 'cors' => false],
+                // the route itself wins over the group
+                '/own' => ['format' => 'envelope', 'cors' => true, 'tag' => 'me'],
+                // the inner group wins per key and adds its own
+                '/nested' => ['format' => 'oauth', 'cors' => false, 'scope' => 'admin'],
+                // ... and is over when it ends
+                '/after-nested' => ['format' => 'envelope', 'cors' => false],
+                '/after' => [],
+            ],
+            $attributes
+        );
+    }
+
+    public function testAttributeGroupCombinesWithTheOtherGroups(): void
+    {
+        $this->collector->group('/api', function (RouteCollector $r): void {
+            $r->middlewareGroup('Auth', function (RouteCollector $r): void {
+                $r->attributeGroup(['format' => 'oauth'], function (RouteCollector $r): void {
+                    $r->get('/token', 'h');
+                });
+            });
+        });
+
+        $route = $this->collector->getRoutes()[0];
+
+        $this->assertSame('/api/token', $route->pattern);
+        $this->assertSame(['Auth'], $route->middleware);
+        $this->assertSame(['format' => 'oauth'], $route->attributes);
+
+        // The compiled table holds the same object
+        $this->assertSame($route, $this->collector->getData()[0]['GET']['/api/token']);
+    }
+
     /**
      * A routes file that catches what a group's callback throws and carries on must not
      * register the routes after it inside that group.
@@ -356,6 +415,7 @@ class RouteCollectorTest extends TestCase
         foreach ([
             fn () => $this->collector->group('/admin', $giveUp),
             fn () => $this->collector->middlewareGroup('Auth', $giveUp),
+            fn () => $this->collector->attributeGroup(['cors' => true], $giveUp),
         ] as $group) {
             try {
                 $group();
@@ -369,5 +429,6 @@ class RouteCollectorTest extends TestCase
 
         $this->assertSame('/public', $route->pattern);
         $this->assertSame([], $route->middleware);
+        $this->assertSame([], $route->attributes);
     }
 }

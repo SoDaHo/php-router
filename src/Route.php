@@ -7,10 +7,21 @@ namespace Sodaho\Router;
 /**
  * Value object representing a single route.
  *
- * Partially mutable: middleware and name can be set via fluent setters.
+ * Partially mutable: middleware, name and attributes can be set via fluent setters.
  */
 class Route
 {
+    /**
+     * What the application wants to know about this route before its handler runs
+     * (response format, a CORS flag, ...). The router does not interpret it.
+     *
+     * Declared with a default instead of in the constructor's signature: a route that is
+     * restored from a cache written before 1.2 has no such property and wakes up with [].
+     *
+     * @var array<string, mixed>
+     */
+    public array $attributes = [];
+
     /**
      * Create a new Route instance.
      *
@@ -19,14 +30,17 @@ class Route
      * @param mixed $handler Controller class, callable, or RequestHandler
      * @param array<int, string|object> $middleware List of middleware class names/instances
      * @param string|null $name Optional route name for URL generation
+     * @param array<string, mixed> $attributes Application-defined attributes
      */
     public function __construct(
         public readonly array $methods,
         public readonly string $pattern,
         public readonly mixed $handler,
         public array $middleware = [],
-        public ?string $name = null
+        public ?string $name = null,
+        array $attributes = [],
     ) {
+        $this->attributes = $attributes;
     }
 
     /**
@@ -53,12 +67,36 @@ class Route
     }
 
     /**
+     * Fluent setter for one attribute. Overrides what a surrounding attributeGroup() set.
+     *
+     * For the routes file: the route object is shared by every request it serves.
+     *
+     * @param string $key Attribute name (e.g., 'format')
+     * @param mixed $value Any value; keep it serializable if the route cache is used
+     */
+    public function attribute(string $key, mixed $value): self
+    {
+        $this->attributes[$key] = $value;
+        return $this;
+    }
+
+    /**
+     * Read an attribute.
+     *
+     * @param mixed $default Returned when the attribute is not set
+     */
+    public function getAttribute(string $key, mixed $default = null): mixed
+    {
+        return array_key_exists($key, $this->attributes) ? $this->attributes[$key] : $default;
+    }
+
+    /**
      * Restore object from var_export() output.
      *
      * The route cache serializes and no longer needs this; kept for applications that
      * var_export() routes themselves.
      *
-     * @param array{methods: string[], pattern: string, handler: mixed, middleware?: array<int, string|object>, name?: string|null} $data Exported data
+     * @param array{methods: string[], pattern: string, handler: mixed, middleware?: array<int, string|object>, name?: string|null, attributes?: array<string, mixed>} $data Exported data
      */
     public static function __set_state(array $data): self
     {
@@ -67,7 +105,8 @@ class Route
             $data['pattern'],
             $data['handler'],
             $data['middleware'] ?? [],
-            $data['name'] ?? null
+            $data['name'] ?? null,
+            $data['attributes'] ?? [],
         );
     }
 }

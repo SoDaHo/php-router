@@ -137,4 +137,48 @@ class RouteTest extends TestCase
         $this->assertSame([], $restored->middleware);
         $this->assertNull($restored->name);
     }
+
+    public function testAttributes(): void
+    {
+        $route = new Route(['GET'], '/token', 'handler');
+        $this->assertSame([], $route->attributes);
+        $this->assertNull($route->getAttribute('format'));
+        $this->assertSame('envelope', $route->getAttribute('format', 'envelope'));
+
+        $this->assertSame($route, $route->attribute('format', 'oauth')->attribute('cors', false));
+        $this->assertSame(['format' => 'oauth', 'cors' => false], $route->attributes);
+        $this->assertSame('oauth', $route->getAttribute('format', 'envelope'));
+
+        // An attribute that is set to null or false is set — the default is for missing ones
+        $this->assertFalse($route->getAttribute('cors', true));
+        $route->attribute('tag', null);
+        $this->assertNull($route->getAttribute('tag', 'default'));
+
+        $route->attribute('format', 'metadata');
+        $this->assertSame('metadata', $route->getAttribute('format'));
+    }
+
+    public function testAttributesThroughConstructorAndSetState(): void
+    {
+        $route = new Route(['GET'], '/x', 'h', [], null, ['format' => 'oauth']);
+        $this->assertSame(['format' => 'oauth'], $route->attributes);
+
+        $restored = eval('return ' . var_export($route, true) . ';');
+        $this->assertEquals($route, $restored);
+        $this->assertSame(['format' => 'oauth'], $restored->attributes);
+    }
+
+    public function testRouteSerializedBeforeAttributesExistedWakesUpWithNone(): void
+    {
+        // What a route cache written by 1.1.1 contains: a Route with five properties
+        $before = 'O:19:"Sodaho\Router\Route":5:{s:7:"methods";a:1:{i:0;s:3:"GET";}s:7:"pattern";s:2:"/x";'
+            . 's:7:"handler";s:1:"h";s:10:"middleware";a:0:{}s:4:"name";N;}';
+
+        $route = unserialize($before);
+
+        $this->assertInstanceOf(Route::class, $route);
+        $this->assertSame([], $route->attributes);
+        $this->assertSame('fallback', $route->getAttribute('format', 'fallback'));
+        $this->assertSame(['format' => 'oauth'], $route->attribute('format', 'oauth')->attributes);
+    }
 }

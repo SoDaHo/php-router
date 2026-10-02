@@ -20,6 +20,9 @@ class RouteCollector
     /** @var array<int, string|object> Current group middleware stack */
     private array $currentMiddleware = [];
 
+    /** @var array<string, mixed> Attributes of the groups a route is being registered in */
+    private array $currentAttributes = [];
+
     /** @var array<string, true> Registered method+pattern combinations for duplicate detection */
     private array $registeredRoutes = [];
 
@@ -260,6 +263,27 @@ class RouteCollector
         }
     }
 
+    /**
+     * Group routes with common attributes.
+     *
+     * Nested groups add up; for the same key the inner group wins, and Route::attribute()
+     * wins over every group.
+     *
+     * @param array<string, mixed> $attributes Attribute name => value
+     * @param callable $callback Receives RouteCollector instance
+     */
+    public function attributeGroup(array $attributes, callable $callback): void
+    {
+        $previousAttributes = $this->currentAttributes;
+        $this->currentAttributes = array_merge($this->currentAttributes, $attributes);
+
+        try {
+            $callback($this);
+        } finally {
+            $this->currentAttributes = $previousAttributes;
+        }
+    }
+
     // ==================== Redirect Routes ====================
 
     /**
@@ -317,7 +341,7 @@ class RouteCollector
             $this->registeredRoutes[$key] = true;
         }
 
-        $route = new Route($methods, $path, $handler);
+        $route = new Route($methods, $path, $handler, attributes: $this->currentAttributes);
 
         if (!empty($this->currentMiddleware)) {
             $route->middleware($this->currentMiddleware);
