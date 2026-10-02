@@ -383,7 +383,7 @@ Response::json(['error' => 'invalid_request'], 400);
 `download()` takes the whole body as a string — fine for generated content, but a file of
 size N costs roughly N bytes of memory (plus the copy the emitter used to make). Use
 `file()` for anything that can grow: the body is a `FileStream`, the emitter pulls it in
-8 KB chunks, and peak memory stays flat no matter how large the file is.
+8 KB chunks (the default, see `emitChunkSize`), and peak memory stays flat no matter how large the file is.
 
 ```php
 // Full file, forced download
@@ -520,6 +520,7 @@ $router->isDebug();   // what the router decided
 | `urlEncoding` | `ROUTER_URL_ENCODING` | `true` | `rawurlencode()` parameter values in `url()`/`absoluteUrl()`; `false` inserts them as given. Boolean or boolean-like, as `debug` |
 | `routesFile` | - | `null` | Routes file, as `loadRoutes()` sets it |
 | `implicitHead` | - | `true` | Answer `HEAD` through the `GET` route (see [HTTP Methods](#http-methods)) |
+| `emitChunkSize` | - | `8192` | Bytes `run()`/`emit()` read from the response body at a time; an integer, or a string of digits, from 1024 to 16777216 (see [Memory](#memory)) |
 
 ## Hooks (Logging)
 
@@ -655,6 +656,130 @@ $r->get('/users/', $handler);  // Only matches /users/
 // Ignore mode: /users matches both /users and /users/
 $router = Router::create(['trailingSlash' => 'ignore']);
 ```
+
+## Serving a Web App
+
+A built front end — `index.html` plus assets — in one line per app:
+
+```php
+$router->app('/login', __DIR__ . '/../login/dist');
+$router->app('/', __DIR__ . '/../site/dist');        // the root works as well
+```
+
+Routes always come first. Where no route matches a `GET` or `HEAD` request under the
+prefix, the router sends
+
+- the file, if the folder has one for that path (with its `Content-Type`,
+  `X-Content-Type-Options: nosniff`, and `Range` support);
+- otherwise the start page — the app's own router takes over from there —
+- unless the path looks like a file (a dot in its last segment): a missing
+  `/login/assets/app.js` is a 404, not HTML that the browser would try to run.
+
+Two consequences of that rule for the app's own routes:
+
+- A route whose last segment contains a dot is a 404 on a full page load:
+  `/login/user/john.doe`, `/login/invite/a@b.com`. (`/login/v1.2/page` is fine — only the
+  last segment counts.) Keep dots out of the last segment or give such paths a route.
+- Every other unknown `GET` path under the prefix is answered with the start page and
+  status 200 — a mistyped `/login/api/statsu` included. The app shows its own "not
+  found" there; an API client gets HTML.
+
+The prefix is relative to the base path, the most specific prefix decides alone (`/login`
+before `/`), and a path that the route table knows for another method stays a 405. The
+router still needs its routes file (`loadRoutes()`), also when it serves folders only. A
+relative folder means the working directory at the time of the call.
+
+**Never served**, whatever the folder contains: anything outside it (the resolved file has
+to lie under the resolved folder — links are followed and checked), hidden files and
+folders (a leading dot, `.well-known` included — give those a route), files that cannot be
+read, file types that are not on the list (see `AppFolder::TYPES`, extend it with the
+`types` option), and paths with a NUL byte, a backslash, an encoded separator (`%2F`,
+`%5C`), an empty segment (`//`) or a segment that ends in a dot or a space. A requested
+path with a colon below the prefix is never looked up as a file (on Windows it would name
+a stream of one); as a path of the app's own router — `/login/item/urn:isbn:1` — it gets
+the start page. (Most PSR-7 implementations fold slashes at the very start of a path into
+one before the router sees it: `//login/x` is `/login/x` then, for routes and apps alike.)
+
+PHP sources (`php`, `phtml`, `phar`, `inc`, …) cannot be put on the list. Source maps
+(`.map`) are not on it: they publish the sources of the app —
+`'types' => ['map' => 'application/json']` if that is what you want.
+
+The folder you register is trusted as a whole: the rule for hidden names applies below
+it, not to its own path, and a folder that is a link is followed (deployments switch
+releases that way). Whoever can write into the folder, replace it, or rename a directory
+above it decides what is served — keep all of that writable for the deployment only.
+
+**Caching:** the start page goes out with `Cache-Control: no-cache`, and so does every
+other file — until you say which files never change. The router does not guess: a file
+that is wrongly cached for a year cannot be called back.
+
+```php
+use Sodaho\Router\AppFolder;
+
+$router->app('/login', $dir, ['immutable' => AppFolder::HASHED]);
+```
+
+`AppFolder::HASHED` is the rule for what the common bundlers write. A requested path
+counts when
+
+- it lies in `assets/` (Vite, Rollup, esbuild) or `static/` (webpack, Create React App),
+  at any depth, **and**
+- its name ends, before the extension, in a hyphen and exactly eight characters out of
+  `A-Z a-z 0-9 _ -` (`assets/index-B1fQx9cD.css`) or in a dot and 8 to 32 hexadecimal
+  digits in lower case (`assets/app.4f9a2b1c.js`, `static/js/main.a1b2c3d4.chunk.js`).
+
+Such files go out with `public, max-age=31536000, immutable`. The rule goes by form, and
+a form proves nothing: `assets/app-settings.js` and `assets/user-12345678.png` have it
+too. Pass the constant where these two directories hold nothing but the bundler's output.
+Whatever a build copies unchanged does not belong there, with any bundler: nothing in
+Vite's `public/assets/` or Create React App's `public/static/`
+(`static/fonts/Poppins-SemiBold.woff2` has the form as well) — and do not pass it for an
+Angular build, where `assets/` is the directory that is copied as it is.
+`apple-touch-icon-180x180.png` next to `index.html` never counts.
+
+For a build that hashes differently (Angular, a custom output directory) `immutable` takes
+a regular expression of your own; it is matched against the requested path below the
+prefix — what the browser caches by, not the file a link leads to. The start page keeps
+its own rule under every name that leads to it. Conditional requests (`ETag`,
+`If-Modified-Since`) are not answered yet, so `no-cache` means the file is sent again on
+every load.
+
+```php
+$router->app('/login', $dir, [
+    'index' => 'index.html',                  // name of the start page
+    'types' => ['md' => 'text/markdown; charset=utf-8', 'pdf' => null],   // add / take off the list
+    'immutable' => '~^[^/]+[.-][0-9a-f]{16}\.(?:js|css)$~',   // which paths never change; default null: none
+    'cacheIndex' => 'no-cache',
+    'cacheImmutable' => 'public, max-age=31536000, immutable',
+    'cacheOther' => 'max-age=300',            // null: send no Cache-Control
+]);
+```
+
+[Middleware for every request](#middleware-for-every-request) runs before — protect an app
+or add headers there. For the route table an app path is a path without a route, so the
+request carries a `RouteMatch` with status `NOT_FOUND`. **A middleware that answers
+`NOT_FOUND` itself gets there first:** leave the app's paths alone.
+
+```php
+public function process($request, $handler): ResponseInterface
+{
+    $match = $request->getAttribute(RouteMatch::class);
+    $underAnApp = str_starts_with($match->path . '/', '/login/');
+
+    if ($match->status === RouteMatch::NOT_FOUND && !$underAnApp) {
+        return Response::html($this->notFoundPage, 404);
+    }
+
+    return $handler->handle($request);          // route, app folder, or the router's own 404
+}
+```
+
+`$match->path` is the path without the base path — except for a request outside the base
+path, where it is the whole path: with a base path, compare against the request's own
+path instead. And with an app at `/` every `GET` path belongs to an app; there is nothing
+left for such a middleware to answer.
+
+To serve the start page from a route of your own instead, see the next section.
 
 ## SPA Catch-All (Vue/React)
 
@@ -823,7 +948,11 @@ on. (1.x had a route cache; measured, loading it took about four times as long a
 
 - ~1KB per route in memory
 - 100 routes ≈ 100KB memory footprint
-- Response bodies are emitted in 8 KB chunks — a `Response::file()` download of any size
+- `emitChunkSize` rarely needs a change: with the default 8 KB the emit loop moves about
+  2.5 GB per second (1 GiB file, PHP 8.5, output discarded). 64 KB to 1 MB roughly halves
+  the time the loop takes for large files on a fast network; above 1 MB it gets slower
+  again, and every running request holds two to three chunks in memory.
+- Response bodies are emitted in chunks of 8 KB by default — a `Response::file()` download of any size
   keeps peak memory flat (a 32 MB file cost ~96 MB before that change)
 
 ## Security Best Practices
