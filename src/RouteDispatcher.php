@@ -29,6 +29,20 @@ class RouteDispatcher implements RequestHandlerInterface
     private string $trailingSlash;
     private bool $debug;
 
+    /** @var array<int, string|object> Middleware for every request, outermost first */
+    private array $middleware = [];
+
+    /** @var (\Closure(\Throwable, ServerRequestInterface): ResponseInterface)|null */
+    private ?\Closure $errorResponder = null;
+
+    /**
+     * The lookups this dispatcher made, each with the request path it was made for. Only
+     * these are taken over from a request — a RouteMatch built elsewhere never is.
+     *
+     * @var \WeakMap<RouteMatch, string>
+     */
+    private \WeakMap $issued;
+
     /**
      * Create a new RouteDispatcher.
      *
@@ -49,16 +63,42 @@ class RouteDispatcher implements RequestHandlerInterface
         $this->basePath = $basePath;
         $this->trailingSlash = $trailingSlash;
         $this->debug = $debug;
+        $this->issued = new \WeakMap();
     }
+
+    // ==================== Wiring (used by Router) ====================
 
     /**
      * Set the PSR-11 container used to resolve middleware and controllers.
-     *
-     * Router::match() may have built the dispatcher before the application had its container.
      */
     public function setContainer(?ContainerInterface $container): static
     {
         $this->container = $container;
+        return $this;
+    }
+
+    /**
+     * Middleware that runs for every request — also for those that end in 404 or 405.
+     *
+     * @param array<int, string|object> $middleware Class names or instances, outermost first
+     */
+    public function setMiddleware(array $middleware): static
+    {
+        $this->middleware = $middleware;
+        return $this;
+    }
+
+    /**
+     * Turn what route middleware and handlers throw into a response, inside the middleware
+     * set with setMiddleware() — and, as the last resort, what that middleware throws
+     * itself. Without a responder exceptions leave handle() as before. What the responder
+     * throws itself leaves handle() too; it is not asked a second time.
+     *
+     * @param (\Closure(\Throwable, ServerRequestInterface): ResponseInterface)|null $responder
+     */
+    public function setErrorResponder(?\Closure $responder): static
+    {
+        $this->errorResponder = $responder;
         return $this;
     }
 
@@ -74,19 +114,53 @@ class RouteDispatcher implements RequestHandlerInterface
         return $this->lookup($request);
     }
 
+    /**
+     * The request with its lookup result as attribute RouteMatch::class and, on a hit, the
+     * route as Route::class.
+     *
+     * A RouteMatch the request already carries is kept while it still describes the request:
+     * made by this dispatcher, for this method and this path. Otherwise the request is
+     * looked up again.
+     */
+    private function attachMatch(ServerRequestInterface $request): ServerRequestInterface
+    {
+        $match = $request->getAttribute(RouteMatch::class);
+
+        if (!$match instanceof RouteMatch
+            || ($this->issued[$match] ?? null) !== $request->getUri()->getPath()
+            || $match->method !== $request->getMethod()) {
+            $match = $this->lookup($request);
+        }
+
+        $route = $match->isFound() ? $match->route : null;
+
+        if ($request->getAttribute(RouteMatch::class) === $match && $request->getAttribute(Route::class) === $route) {
+            return $request;
+        }
+
+        $request = $request->withAttribute(RouteMatch::class, $match);
+
+        return $route !== null
+            ? $request->withAttribute(Route::class, $route)
+            : $request->withoutAttribute(Route::class);
+    }
+
     private function lookup(ServerRequestInterface $request): RouteMatch
     {
         $method = $request->getMethod();
+        $requestPath = $request->getUri()->getPath();
         $path = $this->normalizePath($request);
 
         if ($path === null) {
             // Outside the base path. The path stays as requested (decoded), as the notFound hook reports it.
-            return new RouteMatch(RouteMatch::NOT_FOUND, $method, rawurldecode($request->getUri()->getPath()));
+            $match = new RouteMatch(RouteMatch::NOT_FOUND, $method, rawurldecode($requestPath));
+
+            return $this->issue($match, $requestPath);
         }
 
         $result = $this->dispatcher->dispatch($method, $path);
 
-        return match ($result[0]) {
+        $match = match ($result[0]) {
             Dispatcher::FOUND => new RouteMatch(
                 RouteMatch::FOUND,
                 $method,
@@ -106,6 +180,15 @@ class RouteDispatcher implements RequestHandlerInterface
             ),
             default => new RouteMatch(RouteMatch::NOT_FOUND, $method, $path),
         };
+
+        return $this->issue($match, $requestPath);
+    }
+
+    private function issue(RouteMatch $match, string $requestPath): RouteMatch
+    {
+        $this->issued[$match] = $requestPath;
+
+        return $match;
     }
 
     /**
@@ -162,6 +245,12 @@ class RouteDispatcher implements RequestHandlerInterface
     /**
      * PSR-15: Handle a request and return a response.
      *
+     * From the outside in: the middleware for every request, the error responder, and
+     * finally the 404/405 answer or the route's own middleware and handler. The route is
+     * looked up before the first of them and travels with the request as attribute
+     * RouteMatch::class (and Route::class on a hit). A middleware that passes the request
+     * on with another method or path has it looked up again for everything further in.
+     *
      * @param ServerRequestInterface $request PSR-7 request
      *
      * @return ResponseInterface PSR-7 response
@@ -170,7 +259,58 @@ class RouteDispatcher implements RequestHandlerInterface
     {
         $startTime = microtime(true);
 
-        return $this->respond($this->lookup($request), $request, $startTime);
+        // The request as it was last passed inwards
+        $current = $request;
+
+        // What the error responder threw itself — nothing answers that a second time
+        /** @var \SplObjectStorage<\Throwable, null> $unanswerable */
+        $unanswerable = new \SplObjectStorage();
+
+        $enter = function (ServerRequestInterface $request) use (&$current): ServerRequestInterface {
+            return $current = $this->attachMatch($request);
+        };
+
+        $handler = new Middleware\CallableHandler(function (ServerRequestInterface $request) use ($enter, $startTime, $unanswerable): ResponseInterface {
+            $request = $enter($request);
+            $match = $request->getAttribute(RouteMatch::class);
+            assert($match instanceof RouteMatch);
+
+            try {
+                return $this->respond($match, $request, $startTime);
+            } catch (\Throwable $e) {
+                if ($this->errorResponder === null) {
+                    throw $e;
+                }
+            }
+
+            try {
+                return ($this->errorResponder)($e, $request);
+            } catch (\Throwable $failure) {
+                $unanswerable->attach($failure);
+
+                throw $failure;
+            }
+        });
+
+        try {
+            foreach (array_reverse($this->middleware) as $middleware) {
+                $next = new MiddlewareHandler($this->resolveMiddleware($middleware), $handler);
+                $handler = new Middleware\CallableHandler(
+                    fn (ServerRequestInterface $request): ResponseInterface => $next->handle($enter($request))
+                );
+            }
+
+            return $handler->handle($request);
+        } catch (\Throwable $e) {
+            if ($this->errorResponder === null || $unanswerable->contains($e)) {
+                throw $e;
+            }
+
+            // Last resort: a middleware for every request threw or could not be built. The
+            // responder gets the request as far as it came, with its RouteMatch; its answer
+            // does not pass through the middleware any more.
+            return ($this->errorResponder)($e, $enter($current));
+        }
     }
 
     /**

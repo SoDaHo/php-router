@@ -68,6 +68,12 @@ class Router implements RequestHandlerInterface
     /** @var array{debug: bool, basePath: string, baseUrl: ?string, trailingSlash: string, cacheFile: ?string, cacheSignature: ?string, routesFile: ?string, urlEncoding: bool} */
     private array $config;
 
+    /** @var array<int, string|object> Middleware for every request, outermost first */
+    private array $middleware = [];
+
+    /** @var (\Closure(\Throwable, ServerRequestInterface): ?ResponseInterface)|null */
+    private ?\Closure $errorHandler = null;
+
     private ?ContainerInterface $container = null;
     private ?RouteDispatcher $dispatcher = null;
     private ?RouteCollector $collector = null;
@@ -229,6 +235,41 @@ class Router implements RequestHandlerInterface
     }
 
     /**
+     * Add middleware that runs for every request, in the order it is added (first = outermost).
+     *
+     * Unlike route middleware it also sees requests that end in 404, 405 or 400 and the
+     * responses made from exceptions. The request it receives already carries the result
+     * of the route lookup as attribute RouteMatch::class.
+     *
+     * @param string|array<string|object>|object $middleware Middleware class name(s) or instance(s)
+     */
+    public function middleware(string|array|object $middleware): self
+    {
+        $this->middleware = array_merge($this->middleware, is_array($middleware) ? $middleware : [$middleware]);
+        $this->dispatcher?->setMiddleware($this->middleware);
+
+        return $this;
+    }
+
+    /**
+     * Let the application build the response for an exception.
+     *
+     * Called for whatever route middleware and handlers throw, inside the middleware added
+     * with middleware() — and, as the last resort, for what that middleware throws itself;
+     * that response is returned as it is. Return null to get the router's own 500; throwing
+     * counts as null. The error hook fires in either case. handle() does not throw for any
+     * of this. (What still leaves it, as before: a responder set with
+     * Response::setResponder() that throws while the 500 is built.)
+     *
+     * @param callable(\Throwable, ServerRequestInterface): ?ResponseInterface $handler
+     */
+    public function setErrorHandler(callable $handler): self
+    {
+        $this->errorHandler = $handler(...);
+        return $this;
+    }
+
+    /**
      * Set base path for all routes.
      *
      * @param string $basePath Base path prefix (e.g., '/api/v1')
@@ -326,7 +367,8 @@ class Router implements RequestHandlerInterface
     /**
      * Convenience method: create request from globals, handle, and emit response.
      *
-     * Whatever goes wrong while the request is handled becomes a 500 response (see handle()).
+     * Whatever goes wrong while the request is handled becomes a 500 response (see handle()) —
+     * unless a responder set with Response::setResponder() throws while that 500 is built.
      *
      * @throws RouterException If the response body cannot be read (closed or detached)
      */
@@ -348,24 +390,17 @@ class Router implements RequestHandlerInterface
     public function handle(ServerRequestInterface $request): ResponseInterface
     {
         try {
-            return $this->getDispatcher()->handle($request);
+            $dispatcher = $this->getDispatcher();
         } catch (\Throwable $e) {
-            $this->trigger('error', [
-                'exception' => $e,
-                'method' => $request->getMethod(),
-                'path' => $request->getUri()->getPath(),
-            ]);
-
-            return Response::serverError(
-                $this->config['debug'] ? $e->getMessage() : 'Internal Server Error',
-                $this->config['debug'] ? [
-                    'exception' => get_class($e),
-                    'file' => $e->getFile(),
-                    'line' => $e->getLine(),
-                    'trace' => explode("\n", $e->getTraceAsString()),
-                ] : null
-            );
+            // The routes could not be loaded
+            return $this->errorResponse($e, $request);
         }
+
+        // Everything a request runs into from here on is answered in the dispatcher, through
+        // errorResponse() (see getDispatcher()). What still comes out is what errorResponse()
+        // could not answer itself: a responder that threw while the 500 was built. That
+        // leaves handle(), as it did before 1.2.
+        return $dispatcher->handle($request);
     }
 
     /**
@@ -384,6 +419,52 @@ class Router implements RequestHandlerInterface
     public function match(ServerRequestInterface $request): RouteMatch
     {
         return $this->getDispatcher()->match($request);
+    }
+
+    /**
+     * The response for an exception: the application's (setErrorHandler()) or a 500.
+     */
+    private function errorResponse(\Throwable $e, ServerRequestInterface $request): ResponseInterface
+    {
+        $this->trigger('error', [
+            'exception' => $e,
+            'method' => $request->getMethod(),
+            'path' => $request->getUri()->getPath(),
+        ]);
+
+        if ($this->errorHandler !== null) {
+            try {
+                $response = ($this->errorHandler)($e, $request);
+                if ($response !== null) {
+                    return $response;
+                }
+            } catch (\Throwable $failure) {
+                // The error handler failed itself: report that too, answer for the original.
+                // One that only hands the exception back has nothing new to report.
+                if ($failure !== $e) {
+                    $this->reportFailure($failure, $request);
+                }
+            }
+        }
+
+        return Response::serverError(
+            $this->config['debug'] ? $e->getMessage() : 'Internal Server Error',
+            $this->config['debug'] ? [
+                'exception' => get_class($e),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+                'trace' => explode("\n", $e->getTraceAsString()),
+            ] : null
+        );
+    }
+
+    private function reportFailure(\Throwable $failure, ServerRequestInterface $request): void
+    {
+        $this->trigger('error', [
+            'exception' => $failure,
+            'method' => $request->getMethod(),
+            'path' => $request->getUri()->getPath(),
+        ]);
     }
 
     // ==================== Internal ====================
@@ -495,6 +576,9 @@ class Router implements RequestHandlerInterface
             $this->config['trailingSlash'],
             $this->config['debug']
         );
+        $this->dispatcher
+            ->setMiddleware($this->middleware)
+            ->setErrorResponder($this->errorResponse(...));
 
         // Forward hooks from Router to Dispatcher
         foreach ($this->hooks as $event => $callbacks) {

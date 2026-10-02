@@ -6,6 +6,7 @@ namespace Sodaho\Router\Tests\Feature;
 
 use Nyholm\Psr7\ServerRequest;
 use PHPUnit\Framework\TestCase;
+use Psr\Container\ContainerInterface;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Server\MiddlewareInterface;
@@ -13,6 +14,8 @@ use Psr\Http\Server\RequestHandlerInterface;
 use Sodaho\Router\Exception\RouterException;
 use Sodaho\Router\Response;
 use Sodaho\Router\Route;
+use Sodaho\Router\RouteCollector;
+use Sodaho\Router\RouteDispatcher;
 use Sodaho\Router\RouteMatch;
 use Sodaho\Router\Router;
 
@@ -154,12 +157,238 @@ class RouteMatchTest extends TestCase
         $this->assertSame([], $outside->allowedMethods());
     }
 
+    public function testLookupRunsNothing(): void
+    {
+        $container = $this->createMock(ContainerInterface::class);
+        $container->expects($this->never())->method('has');
+        $container->expects($this->never())->method('get');
+
+        $hooks = [];
+        $router = $this->router()->setContainer($container);
+        foreach (['dispatch', 'notFound', 'methodNotAllowed', 'error'] as $event) {
+            $router->on($event, function () use (&$hooks, $event): void {
+                $hooks[] = $event;
+            });
+        }
+        $router->middleware(new MatchSpy('global'));
+
+        $router->match(new ServerRequest('GET', '/users/5'));
+        $router->match(new ServerRequest('GET', '/users/not-a-number'));
+        $router->match(new ServerRequest('GET', '/nowhere'));
+        $router->match(new ServerRequest('PUT', '/users/5'));
+
+        $this->assertSame([], $hooks);
+        $this->assertSame([], MatchSpy::$seen);
+        $this->assertSame([], MatchController::$seen);
+    }
+
     public function testMatchWithoutRoutesThrows(): void
     {
         $this->expectException(RouterException::class);
         $this->expectExceptionMessage('No routes loaded');
 
         Router::create(['debug' => false, 'cacheFile' => ''])->match(new ServerRequest('GET', '/'));
+    }
+
+    /**
+     * An application may want to know the route before it has built its container (to pick
+     * the error format, to decide whether configuration is needed at all). What it adds
+     * afterwards — container, middleware, error handler, hooks — must still take effect.
+     * (Base path and trailing slash mode are fixed with the first use, as ever.)
+     */
+    public function testEarlyLookupFreezesNothing(): void
+    {
+        $router = $this->router();
+        $this->assertTrue($router->match(new ServerRequest('GET', '/users/5'))->isFound());
+
+        // Only now: container, middleware for every request, error handler, a hook
+        $controller = new MatchController('from the container');
+        $container = $this->createMock(ContainerInterface::class);
+        $container->method('has')->willReturnCallback(fn (string $id): bool => $id === MatchController::class);
+        $container->method('get')->willReturn($controller);
+
+        $dispatched = 0;
+        $router
+            ->setContainer($container)
+            ->middleware(new MatchSpy('global'))
+            ->setErrorHandler(fn (\Throwable $e): ResponseInterface => Response::text('handled: ' . $e->getMessage(), 503))
+            ->on('dispatch', function () use (&$dispatched): void {
+                $dispatched++;
+            });
+
+        $response = $router->handle((new ServerRequest('GET', '/users/5')));
+        $this->assertSame(200, $response->getStatusCode());
+        $this->assertSame('from the container', json_decode((string) $response->getBody(), true)['data']['origin']);
+        $this->assertSame(['global', 'route'], array_column(MatchSpy::$seen, 'label'));
+        $this->assertSame(1, $dispatched);
+
+        $failing = $router->handle((new ServerRequest('GET', '/users/5'))->withHeader('X-Throw', '1'));
+        $this->assertSame(503, $failing->getStatusCode());
+        $this->assertSame('handled: controller failed', (string) $failing->getBody());
+    }
+
+    public function testMatchTravelsWithTheRequest(): void
+    {
+        $router = $this->router()->middleware(new MatchSpy('global'));
+
+        $router->handle((new ServerRequest('GET', '/users/5')));
+
+        [$global, $route] = MatchSpy::$seen;
+
+        // The middleware for every request knows the route before the handler runs ...
+        $this->assertSame(RouteMatch::FOUND, $global['match']->status);
+        $this->assertSame('users.show', $global['match']->route->name);
+        $this->assertSame('users.show', $global['route']->name);
+
+        // ... route middleware and handler get the same objects
+        $this->assertSame($global['match'], $route['match']);
+        $this->assertSame($global['route'], $route['route']);
+        $this->assertSame($global['match'], MatchController::$seen[0]['match']);
+        $this->assertSame($global['route'], MatchController::$seen[0]['route']);
+        $this->assertSame(['id' => 5], MatchController::$seen[0]['params']);
+    }
+
+    public function testRequestsWithoutAHitCarryTheMatchButNoRoute(): void
+    {
+        $router = $this->router()->middleware(new MatchSpy('global'));
+
+        $this->assertSame(404, $router->handle(new ServerRequest('GET', '/nowhere'))->getStatusCode());
+        $this->assertSame(405, $router->handle(new ServerRequest('OPTIONS', '/users/5'))->getStatusCode());
+
+        [$notFound, $notAllowed] = MatchSpy::$seen;
+
+        $this->assertSame(RouteMatch::NOT_FOUND, $notFound['match']->status);
+        $this->assertNull($notFound['route']);
+
+        // 405: the match names a route of the path, but the request is not "at" that route
+        $this->assertSame(RouteMatch::METHOD_NOT_ALLOWED, $notAllowed['match']->status);
+        $this->assertSame('users.show', $notAllowed['match']->route->name);
+        $this->assertNull($notAllowed['route']);
+    }
+
+    public function testLookupMadeBeforehandIsTakenOver(): void
+    {
+        $router = $this->router()->middleware(new MatchSpy('global'));
+
+        $request = (new ServerRequest('GET', '/users/5'));
+        $match = $router->match($request);
+
+        $router->handle($request->withAttribute(RouteMatch::class, $match));
+
+        $this->assertSame($match, MatchSpy::$seen[0]['match']);
+    }
+
+    /**
+     * The attribute is a hint, not an instruction. It counts only while it still describes
+     * the request — otherwise a request rewritten after the lookup (another method, another
+     * path) would be dispatched to the route of the old one.
+     */
+    public function testLookupThatNoLongerFitsTheRequestIsRedone(): void
+    {
+        $router = $this->router()->middleware(new MatchSpy('global'));
+
+        $request = (new ServerRequest('GET', '/users/5'));
+        $stale = $router->match($request);
+
+        // Method changed after the lookup
+        $response = $router->handle($request->withMethod('PATCH')->withAttribute(RouteMatch::class, $stale));
+        $this->assertSame(200, $response->getStatusCode());
+        $this->assertSame('users.update', json_decode((string) $response->getBody(), true)['data']['route']);
+
+        // Path changed after the lookup
+        $response = $router->handle(
+            $request->withUri($request->getUri()->withPath('/health'))->withAttribute(RouteMatch::class, $stale)
+        );
+        $this->assertSame('health', json_decode((string) $response->getBody(), true)['data']['route']);
+
+        // A match of another router
+        $foreign = $this->router()->match($request);
+        $router->handle($request->withAttribute(RouteMatch::class, $foreign));
+        $this->assertNotSame($foreign, MatchSpy::$seen[2]['match']);
+        $this->assertSame('users.show', MatchSpy::$seen[2]['match']->route->name);
+
+        // Anything else under that name
+        $response = $router->handle($request->withAttribute(RouteMatch::class, 'not a match'));
+        $this->assertSame(200, $response->getStatusCode());
+    }
+
+    /**
+     * With a base path, '/health' outside it and '/api/health' inside it are the same path
+     * for the table. A lookup made for the one must never stand in for the other.
+     */
+    public function testLookupIsBoundToTheRequestPathItWasMadeFor(): void
+    {
+        $router = $this->router(['basePath' => '/api']);
+        $inside = new ServerRequest('GET', '/api/health');
+        $outside = new ServerRequest('GET', '/health');
+
+        $hit = $router->match($inside);
+        $miss = $router->match($outside);
+
+        $this->assertTrue($hit->isFound());
+        $this->assertSame(RouteMatch::NOT_FOUND, $miss->status);
+        $this->assertSame($hit->path, $miss->path);
+
+        // The hit does not open the route for the request outside the base path ...
+        $this->assertSame(404, $router->handle($outside->withAttribute(RouteMatch::class, $hit))->getStatusCode());
+        $this->assertSame([], MatchController::$seen);
+
+        // ... and the miss does not hide it from the request inside
+        $this->assertSame(200, $router->handle($inside->withAttribute(RouteMatch::class, $miss))->getStatusCode());
+    }
+
+    public function testRewriteAcrossTheBasePathIsLookedUpAgain(): void
+    {
+        $rewriteTo = fn (string $path): MiddlewareInterface => new class ($path) implements MiddlewareInterface {
+            public function __construct(private readonly string $path)
+            {
+            }
+
+            public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
+            {
+                return $handler->handle($request->withUri($request->getUri()->withPath($this->path)));
+            }
+        };
+
+        $into = $this->router(['basePath' => '/api'])->middleware($rewriteTo('/api/health'));
+        $this->assertSame(200, $into->handle(new ServerRequest('GET', '/health'))->getStatusCode());
+
+        $outOf = $this->router(['basePath' => '/api'])->middleware($rewriteTo('/health'));
+        $this->assertSame(404, $outOf->handle(new ServerRequest('GET', '/api/health'))->getStatusCode());
+        $this->assertCount(1, MatchController::$seen, 'only the first of the two reached the controller');
+    }
+
+    /**
+     * Only what the router looked up itself is taken over. A RouteMatch somebody built — with
+     * whatever route in it — is looked up again like any other stale attribute.
+     */
+    public function testSelfMadeMatchIsNotTakenOver(): void
+    {
+        $ran = false;
+        $foreign = new Route(['GET'], '/nowhere', function () use (&$ran): ResponseInterface {
+            $ran = true;
+
+            return Response::text('forged');
+        });
+        $forged = new RouteMatch(RouteMatch::FOUND, 'GET', '/nowhere', $foreign);
+        $request = (new ServerRequest('GET', '/nowhere'))
+            ->withAttribute(RouteMatch::class, $forged)
+            ->withAttribute(Route::class, $foreign);
+
+        $this->assertSame(404, $this->router()->handle($request)->getStatusCode());
+
+        // The dispatcher on its own is no more trusting
+        $collector = new RouteCollector();
+        $collector->get('/x', fn () => Response::text('x'));
+        $dispatcher = new RouteDispatcher($collector->getData());
+
+        $this->assertSame(404, $dispatcher->handle($request)->getStatusCode());
+        $this->assertSame('x', (string) $dispatcher->handle($request->withUri($request->getUri()->withPath('/x')))->getBody());
+        $this->assertFalse($ran);
+
+        // What such a match says about itself still works
+        $this->assertSame([], $forged->allowedMethods());
+        $this->assertSame(['GET'], (new RouteMatch(RouteMatch::METHOD_NOT_ALLOWED, 'PUT', '/x', allowedMethods: ['GET']))->allowedMethods());
     }
 }
 
