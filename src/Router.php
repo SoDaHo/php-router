@@ -121,7 +121,13 @@ class Router implements RequestHandlerInterface
     }
 
     /**
-     * Get environment variable value ($_ENV > getenv() fallback).
+     * A variable of the environment: $_ENV, then the environment of the process.
+     *
+     * getenv($key, true), not getenv($key): under PHP-FPM (and mod_php) the plain call
+     * also returns what came with the request — the web server's fastcgi_param/SetEnv,
+     * and every request header as HTTP_*. That is not the environment. ($_ENV carries
+     * the same where variables_order contains E; the names read here are fixed and none
+     * starts with HTTP_, so a client cannot set them either way.)
      */
     private static function env(string $key): ?string
     {
@@ -133,8 +139,8 @@ class Router implements RequestHandlerInterface
             return (string) $value;
         }
 
-        // getenv() for setups that do not fill $_ENV (variables_order without E)
-        $value = getenv($key);
+        // For setups that do not fill $_ENV (variables_order without E)
+        $value = getenv($key, true);
 
         return $value !== false ? $value : null;
     }
@@ -210,7 +216,7 @@ class Router implements RequestHandlerInterface
     /**
      * Create a router from the environment — the only place where the router reads it.
      *
-     * Read are, from $_ENV and then getenv(): APP_DEBUG (debug), APP_URL (baseUrl),
+     * Read are, from $_ENV and then the environment of the process: APP_DEBUG (debug), APP_URL (baseUrl),
      * ROUTER_BASE_PATH (basePath), ROUTER_TRAILING_SLASH (trailingSlash) and
      * ROUTER_URL_ENCODING (urlEncoding). A key that $config contains wins over its variable —
      * also with null, false or an empty value.

@@ -12,8 +12,12 @@ use Sodaho\Router\Router;
 
 /**
  * Configuration: what the config array says counts, and nothing else. The environment
- * is read by Router::fromEnv() only — $_ENV, then getenv() — and a key that is passed
- * settles the matter for its variable.
+ * is read by Router::fromEnv() only — $_ENV, then the environment of the process — and
+ * a key that is passed settles the matter for its variable.
+ *
+ * The environment of the process is getenv($name, true). That it leaves out what PHP-FPM
+ * receives with the request cannot be shown here: on the command line both forms of
+ * getenv() see the same.
  */
 class RouterConfigTest extends TestCase
 {
