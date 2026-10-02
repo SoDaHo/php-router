@@ -2,6 +2,72 @@
 
 ## [Unreleased]
 
+### Security
+- **The cache file is no longer executed.** It is a signed data file now; the HMAC covers
+  every byte that is used. Previously, code placed between the signature line and `return`
+  passed verification and was run — and a foreign route table could be slipped in the same
+  way. Cache files written by earlier versions are ignored and rewritten.
+- The signature is bound to its purpose, so a file signed with the same key for something
+  else (another library's cache under a shared `APP_KEY`) is not accepted as route cache.
+- An empty cache key is refused like a missing one — it signs nothing. With
+  `ROUTER_CACHE_KEY=` left empty the cache is now off (see below) instead of signed with a
+  key everybody knows.
+- `'debug' => false` in the config array is honoured. With `APP_ENV=local|dev|development`
+  it used to be overruled, putting exception message, file and trace into every 500. Any
+  value other than `null` now decides — also `0`, `''` and the `false` that
+  `getenv('APP_DEBUG')` returns for an unset variable.
+
+### Fixed
+- **Status line is sent after the headers.** PHP rewrites the status when certain headers
+  are set: a 403 with `WWW-Authenticate` left as 401, and any response with `Location`
+  other than 201/3xx (a 202, a 409) left as a 302/303 redirect. Unchanged in 1.x: a 200
+  with a `Location` still goes out as a redirect — use `Response::redirect()`, 2.0 will
+  send what the response says.
+- **Fields that exist once per message replace what the host already set** — `Content-Type`,
+  `Location`, `Content-Length`, `ETag`, the `Cross-Origin-*` policies and the like were sent
+  twice when the application had set one before `run()`. Everything else (`Vary`,
+  `Cache-Control`, `Set-Cookie`, `X-Frame-Options`, unknown fields, ...) is added as before.
+- A response that cannot be sent because output had already started is reported through the
+  `error` hook (`type: 'emit'`). It used to vanish without a trace.
+- `Router::run()` no longer reads the body for a HEAD request.
+- 405: the list of allowed methods (hook `allowed_methods`, `error.details.allowed` in the
+  body) is always a list. When a static and a dynamic route matched the same path it had
+  gaps in its keys and was encoded as a JSON object. Content and order are unchanged.
+- Route patterns are anchored with `\z` instead of `$`: `/users/5%0A` no longer matches
+  `/users/{id:int}`.
+- `float` parameters that overflow answer 400 like `int` ones, not 500.
+- `basePath` from the config array and from `ROUTER_BASE_PATH` is normalized like
+  `setBasePath()` does it: `/api/` and `api` used to turn every route into a 404.
+- A non-boolean `debug` config value (`'false'`, `1`) no longer breaks every request with a
+  `TypeError`; boolean-like values are understood, anything else that is not empty throws
+  `RouterException` when the router is created.
+- Hooks registered after the first request fire for `dispatch`, `notFound` and
+  `methodNotAllowed` too.
+- `enableCache($file)` without a key keeps the key from the config array or
+  `ROUTER_CACHE_KEY` instead of discarding it.
+- Filenames: the bidi marks `U+200E`, `U+200F` and `U+061C` are removed like the overrides.
+- A middleware class with required constructor parameters and no container entry raises a
+  `RouterException` that says so, not an `ArgumentCountError`.
+- Routes with objects that have no `__set_state()` (middleware instances) produced a cache
+  file that could not be loaded and was rewritten on every request; they are cached now.
+- Trouble with the cache no longer turns every request into a 500. A cache file that cannot
+  be written, a missing key (`enableCache($file)` in production) and a cache that refers to
+  a class the application no longer has are reported through the `error` hook, and the
+  request is served from the routes file.
+
+### Changed
+- Cache file format: `serialize()` instead of `var_export()`. An old file is ignored and
+  replaced on the first request — which therefore needs the routes file: a deployment that
+  ships only a pre-built cache has to rebuild it with this version, and nodes running an
+  earlier version must not share a cache file with it (each would rewrite the other's on
+  every request). Objects in routes have to survive `serialize()`; `__set_state()` is no longer
+  used and their constructor does not run on a cache hit. Routes with an object whose
+  serialized state contains a `PDO` or an open file are not cached, and the `error` hook
+  says so on every request — before, such a cache was silently rebuilt each time.
+- README no longer recommends the cache for production. Measured with OPcache on, a request
+  is slower with it than without (the signature has to be verified over the whole file each
+  time); the numbers that claimed otherwise are replaced by measured ones.
+
 ## [1.1.0] - 2026-08-13
 
 ### Added

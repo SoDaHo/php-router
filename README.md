@@ -271,7 +271,8 @@ Response::file($path, 'clip.mp4', 'video/mp4', inline: true, range: $range, maxC
 `file()` sets `Content-Length`, `Accept-Ranges: bytes` and `X-Content-Type-Options: nosniff`,
 and throws `RouterException` when the path is not a readable file, or when `maxChunk` is below
 1 — check existence first and answer `Response::notFound()` yourself if you want a 404 instead
-of a 500.
+of a 500. `$path` is opened as given: build it from your own storage layout, never from
+request input.
 
 ### Filenames
 
@@ -279,7 +280,8 @@ Both `file()` and `download()` treat the filename as untrusted input — it usua
 an upload:
 
 - Control characters are dropped (a raw `\r\n` would make PSR-7 reject the header and kill
-  the response), as are bidi overrides — `U+202E` turns `Rechnung‮fdp.exe` into a disguised
+  the response), as are bidi controls (overrides, isolates and the marks `U+200E`, `U+200F`,
+  `U+061C`) — `U+202E` turns `Rechnung‮fdp.exe` into a disguised
   `.exe` in the download dialog.
 - `/` and `\` are replaced with `_`; surrounding whitespace is trimmed; `.` and `..` become
   `download`.
@@ -355,25 +357,25 @@ ROUTER_CACHE_KEY=your-secret-key
 $router = Router::create()
     ->setDebug(true)
     ->setBasePath('/api')
-    ->enableCache(__DIR__ . '/cache/routes.php');
+    ->enableCache(__DIR__ . '/cache/routes.php', 'your-secret-key');
 ```
 
 ### Options
 
 | Config Key | ENV Variable | Default | Description |
 |------------|--------------|---------|-------------|
-| `debug` | `APP_DEBUG` | `false` | Enable debug mode (detailed errors) |
-| - | `APP_ENV` | `production` | If `dev`/`local`/`development` → debug=true |
-| `basePath` | `ROUTER_BASE_PATH` | `''` | URL prefix for all routes |
+| `debug` | `APP_DEBUG` | `false` | Enable debug mode (detailed errors). A value passed in the config array wins, `false` included (`null` counts as not passed) |
+| - | `APP_ENV` | `production` | Only without a `debug` config value: `dev`/`local`/`development` → debug=true, whatever `APP_DEBUG` says |
+| `basePath` | `ROUTER_BASE_PATH` | `''` | URL prefix for all routes (`/api`, `/api/` and `api` mean the same) |
 | `baseUrl` | `APP_URL` | `null` | Base URL for `absoluteUrl()` |
 | `trailingSlash` | `ROUTER_TRAILING_SLASH` | `'strict'` | `'strict'` or `'ignore'` |
 | `cacheFile` | `ROUTER_CACHE_FILE` | `null` | Path to cache file |
-| `cacheSignature` | `ROUTER_CACHE_KEY` | `null` | HMAC key for cache integrity |
+| `cacheSignature` | `ROUTER_CACHE_KEY` | `null` | HMAC key for the cache file — without one the cache stays off |
+| `urlEncoding` | `ROUTER_URL_ENCODING` | `true` | `rawurlencode()` parameter values in `url()`/`absoluteUrl()`; `false` inserts them as given |
 
 ## Caching
 
 ```php
-// Enable cache with optional HMAC signature
 $router = Router::create()
     ->enableCache(__DIR__ . '/cache/routes.php', 'your-secret-key')
     ->loadRoutes(__DIR__ . '/routes.php');
@@ -381,7 +383,25 @@ $router = Router::create()
 $router->run();
 ```
 
-**Note:** Closures cannot be cached. Use `[Controller::class, 'method']` syntax.
+- **The key is required.** Without one (or with an empty one) the cache stays off and the
+  `error` hook receives the `CacheException` that says why — on every request. In debug mode
+  the cache is not used.
+- **One key per cache file.** The signature proves that a holder of the key wrote the file,
+  not that it belongs to this router: a cache signed with the same key for another router,
+  or an older one of this router, passes the check.
+- **The cache file is signed data, not code.** It is never executed: an HMAC-SHA256 over its
+  content is checked first, and only then is it unserialized. A file that fails the check,
+  or whose content no longer fits the application's classes, is reported through the
+  `error` hook and rebuilt from the routes file.
+- **Closures cannot be cached**, and neither can anonymous classes or objects whose
+  serialized state contains a resource (an open file). The `error` hook reports it and the routes are served uncached.
+  Use `[Controller::class, 'method']` syntax; objects in routes (middleware instances) must
+  survive `serialize()` and their classes must be autoloadable — a class declared inside the
+  routes file is unknown to the next request, which reports the cache as outdated and
+  rebuilds it every time.
+- **A cache file that cannot be written** is reported through the `error` hook as well; the
+  request is served from the routes file.
+- **The cache does not notice a changed routes file.** Delete the cache file on deploy.
 
 ## Hooks (Logging)
 
@@ -400,18 +420,28 @@ $router->on('notFound', function (array $data) {
 
 // Log 405 errors
 $router->on('methodNotAllowed', function (array $data) {
-    // $data: method, path, allowed_methods
+    // $data: method, path, allowed_methods — a list of every method registered for the path:
+    // methods of static routes first, then of dynamic ones; within each group in the order in
+    // which a method first occurs among the routes of that group. The 405 response carries the
+    // same list in `Allow` and in `error.details.allowed`.
     $logger->warning("405", $data);
 });
 
 // Log exceptions
 $router->on('error', function (array $data) {
-    // $data: method, path, exception
+    // $data: method, path, exception — or type ('cache', 'emit'), message, exception
     $logger->error("Error", $data);
 });
 ```
 
 **Note:** Hook exceptions are caught and logged to stderr. They never affect the response.
+
+**Without an `error` hook nothing is logged.** An exception caught by the router becomes a
+500 response and leaves no other trace — logging is the application's job, the hook is how.
+
+**`path` and `params` are request data.** In `dispatch`, `notFound` and `methodNotAllowed`
+they are already URL-decoded — `/x%0Ay` arrives with a real line break in it. Encode them
+before they go into a line-based log.
 
 ## PSR-15 Compatibility
 
@@ -423,9 +453,20 @@ $router->run();
 $request = $serverRequestFactory->fromGlobals();
 $response = $router->handle($request);  // Returns ResponseInterface
 
-// Emit response yourself
-(new SapiEmitter())->emit($response);
+// Emit the response with any PSR-7 emitter, e.g. laminas/laminas-httphandlerrunner
+(new \Laminas\HttpHandlerRunner\Emitter\SapiEmitter())->emit($response);
 ```
+
+What `run()` does with headers the host application set before it: a field that exists once
+per message (`Content-Type`, `Location`, `Content-Length`, `ETag`, ...) is replaced by the
+response's value; every other field is a list and the response's lines are added — a
+`Vary: Cookie` or the `Cache-Control: no-store` of `session_start()` stays in place; so does
+every field the router does not know. `X-Frame-Options`, `Strict-Transport-Security` and
+`Access-Control-Allow-Origin` are added as well, not replaced — set them in one place. The
+status is the response's, whatever its headers are (PHP would turn a 403 with
+`WWW-Authenticate` into a 401) — with one exception kept for 1.x: a 200 that carries a
+`Location` goes out as the redirect PHP has always made of it. If output has already
+started, nothing can be sent any more: the `error` hook is called with `type: 'emit'`.
 
 ## Dependency Injection
 
@@ -453,7 +494,7 @@ use Sodaho\Router\Exception\DuplicateRouteException;
 use Sodaho\Router\Exception\CacheException;
 
 try {
-    $router->run();
+    $url = $router->url('users.show', ['id' => 5]);
 } catch (RouterException $e) {
     // Catches all router exceptions
     echo $e->getMessage();
@@ -461,10 +502,16 @@ try {
 }
 ```
 
+Whatever is thrown while a request is handled — by a handler, a middleware or the router
+itself — never leaves `handle()`: it becomes a 500 response and is passed to the `error`
+hook. That includes `NotFoundException` and `MethodNotAllowedException` thrown by your own
+code; return `Response::notFound()` instead. `run()` adds one case of its own: a response
+whose body was closed before it could be sent raises `RouterException`.
+
 | Exception | When |
 |-----------|------|
-| `NotFoundException` | Available for application use (router returns 404 response directly) |
-| `MethodNotAllowedException` | Available for application use (router returns 405 response directly) |
+| `NotFoundException` | Never thrown by the router (it answers 404 itself); for your own code |
+| `MethodNotAllowedException` | Never thrown by the router (it answers 405 itself); for your own code |
 | `RouteNotFoundException` | Named route doesn't exist (URL generation) |
 | `DuplicateRouteException` | Same method+pattern registered twice |
 | `CacheException` | Cache read/write/signature failure |
@@ -614,18 +661,19 @@ $r->get('/events/{date:date}', $handler);
 
 ### Route Caching
 
-**Always enable caching in production:**
+**Measure before you enable it.** With OPcache on, building the table from the routes file
+is cheaper than loading the cache: every request has to verify the signature over the whole
+cache file before it may use it.
 
-```php
-$router = Router::create()
-    ->enableCache(__DIR__ . '/../var/cache/routes.php', $_ENV['APP_KEY'])
-    ->loadRoutes(__DIR__ . '/routes.php');
-```
+| Routes | No cache | With cache |
+|--------|----------|------------|
+| 114 | 0.11 ms | 0.43 ms |
+| 500 | 0.47 ms | 1.89 ms |
+| 1000 | 0.92 ms | 3.69 ms |
 
-| Mode | 50 Routes | 200 Routes |
-|------|-----------|------------|
-| No cache | ~2-5ms | ~5-15ms |
-| With cache | ~0.1ms | ~0.2ms |
+One request with a fresh router and a hit on a dynamic route; PHP 8.5, Linux arm64, OPcache
+on. Without OPcache the routes file has to be compiled on every request and the picture
+depends on the platform.
 
 ### Route Matching Complexity
 
@@ -642,7 +690,7 @@ $router = Router::create()
 
 ### Memory
 
-- Route cache uses OPcache (no memory parsing)
+- Route cache is one signed data file, verified and unserialized once per request
 - ~1KB per route in memory
 - 100 routes ≈ 100KB memory footprint
 - Response bodies are emitted in 8 KB chunks — a `Response::file()` download of any size
@@ -732,6 +780,9 @@ public function show(ServerRequestInterface $request, int $id): ResponseInterfac
 APP_DEBUG=false
 APP_ENV=production
 ```
+
+`APP_ENV=local|dev|development` switches debug on even next to `APP_DEBUG=false`. To keep it
+off regardless of the environment, pass `'debug' => false` — a config value always wins.
 
 ## Testing
 
