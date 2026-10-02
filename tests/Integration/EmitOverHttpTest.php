@@ -242,9 +242,8 @@ class EmitOverHttpTest extends TestCase
         $this->assertSame(['application/json'], self::valuesOf($response['headers'], 'Content-Type'));
         $this->assertSame(['/from-response'], self::valuesOf($response['headers'], 'Location'));
 
-        // A 200 that carries a Location is the one status left to PHP (see Router::emit())
-        // (PHP writes that status line itself, in the protocol version of the request)
-        $this->assertStringEndsWith(' 302 Found', $response['status']);
+        // The status is the response's: a 200 with a Location is no redirect (1.x: 302)
+        $this->assertStringEndsWith(' 200 OK', $response['status']);
     }
 
     public function testListFieldsOfHostAndResponseAddUp(): void

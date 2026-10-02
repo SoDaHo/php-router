@@ -86,9 +86,9 @@ class EmitStatusTest extends TestCase
             '301 redirect' => ['/moved', 301],
             '302 redirect' => ['/found', 302],
             'plain 200' => ['/plain', 200],
-            // Never chose a status, only set a Location: PHP has always sent that as a redirect
-            // and code building redirects by header alone relies on it. Stays so in 1.x.
-            '200 with a Location' => ['/location-only', 302],
+            // 1.x left this one to PHP, which made a 302 of it. A redirect is a 3xx status
+            // (Response::redirect()); a 200 that names a Location is a 200.
+            '200 with a Location' => ['/location-only', 200],
         ];
     }
 
@@ -109,15 +109,15 @@ class EmitStatusTest extends TestCase
     }
 
     #[DataProvider('statusCodesALocationDoesNotRewrite')]
-    public function testRedirectByHeaderDoesNotDependOnWhatTheHostSetBefore(int $hostStatus): void
+    public function testA200WithALocationStaysA200WhateverTheHostSetBefore(int $hostStatus): void
     {
-        // 201 and 3xx are the codes a Location leaves alone. Up to 1.1.0 the router's own
-        // "200" came first and the redirect happened all the same.
+        // 201 and 3xx are the codes a Location leaves alone: sent before the headers, the
+        // host's status would survive. The response's own status goes out, last.
         http_response_code($hostStatus);
 
         $this->serve('GET', '/location-only');
 
-        $this->assertSame(302, http_response_code());
+        $this->assertSame(200, http_response_code());
     }
 
     public function testStatusOfTheHostDoesNotSurviveTheResponse(): void

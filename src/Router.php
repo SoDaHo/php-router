@@ -673,15 +673,6 @@ class Router implements RequestHandlerInterface
             $response->getReasonPhrase()
         );
 
-        // The one case left to PHP: a response that never chose a status (200) but carries a
-        // Location. That has always gone out as a redirect, and code that builds redirects
-        // by header alone relies on it. For exactly that case the status line goes first, as
-        // it did up to 1.1.0, and Location turns it into 302/303. Kept for 1.x; use
-        // Response::redirect().
-        $redirectByHeader = $response->getStatusCode() === 200 && $response->hasHeader('Location');
-        if ($redirectByHeader) {
-            header($statusLine);
-        }
 
         // Headers. A field that exists once per message replaces what the host already set
         // under that name — two Content-Type or Location lines are not a valid response. All
@@ -697,10 +688,9 @@ class Router implements RequestHandlerInterface
 
         // Status line LAST. header() rewrites the status as a side effect: WWW-Authenticate
         // forces 401 and Location forces 302 (unless 201/3xx). Sent first, a 403 with a
-        // challenge would arrive as 401 and a 202 with a Location as 302.
-        if (!$redirectByHeader) {
-            header($statusLine);
-        }
+        // challenge would arrive as 401 and a 202 with a Location as 302 — and a 200 with a
+        // Location, which 1.x still left to PHP, as a redirect nobody asked for.
+        header($statusLine);
 
         // HEAD: PHP discards the output anyway, so do not read the body at all — for a
         // Response::file() that would be the whole file.
