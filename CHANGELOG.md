@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-10-02
+
 ### Added
 - **Middleware for every request:** `Router::middleware()`. Unlike route middleware it also
   runs for requests that end in 404, 405 or 400 and sees the response made from an
@@ -193,7 +195,8 @@ themselves (`handle()` plus their own emitter) are not affected.
 - **Configuration** via constructor array, environment variables, or fluent API.
 - **Strict parameter validation**: invalid types return 400 (not 500), controller TypeErrors bubble up as 500.
 
-[Unreleased]: https://github.com/sodaho/php-router/compare/v1.1.1...HEAD
+[Unreleased]: https://github.com/sodaho/php-router/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/sodaho/php-router/compare/v1.1.1...v1.2.0
 [1.1.1]: https://github.com/sodaho/php-router/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/sodaho/php-router/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/sodaho/php-router/releases/tag/v1.0.0
