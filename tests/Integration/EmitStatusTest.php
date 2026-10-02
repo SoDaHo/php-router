@@ -154,4 +154,48 @@ class EmitStatusTest extends TestCase
         $this->assertSame('', ob_get_clean());
         $this->assertSame(200, http_response_code());
     }
+
+    /**
+     * @return array<string, array{0: array<string, mixed>, 1: int}>
+     */
+    public static function chunkSizes(): array
+    {
+        return [
+            'default' => [[], 8192],
+            'null is the default' => [['emitChunkSize' => null], 8192],
+            'minimum' => [['emitChunkSize' => 1024], 1024],
+            'raised' => [['emitChunkSize' => 1048576], 1048576],
+            'from an env file' => [['emitChunkSize' => '65536'], 65536],
+            'digits with zeros in front' => [['emitChunkSize' => '0065536'], 65536],
+            'maximum' => [['emitChunkSize' => 16 * 1024 * 1024], 16 * 1024 * 1024],
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $config
+     */
+    #[DataProvider('chunkSizes')]
+    public function testBodyIsPulledInChunksOfTheConfiguredSize(array $config, int $expected): void
+    {
+        $asked = [];
+        $body = $this->createMock(\Psr\Http\Message\StreamInterface::class);
+        $body->method('isReadable')->willReturn(true);
+        $body->method('isSeekable')->willReturn(false);
+        $body->method('eof')->willReturnOnConsecutiveCalls(false, false, true);
+        $body->method('read')->willReturnCallback(function (int $length) use (&$asked): string {
+            $asked[] = $length;
+
+            return 'x';
+        });
+
+        /** @phpstan-ignore argument.type */
+        $router = Router::create($config + ['debug' => false]);
+
+        ob_start();
+        $router->emit((new \Nyholm\Psr7\Response(200))->withBody($body));
+        $sent = ob_get_clean();
+
+        $this->assertSame('xx', $sent);
+        $this->assertSame([$expected, $expected], $asked);
+    }
 }

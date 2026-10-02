@@ -25,8 +25,12 @@ class Router implements RequestHandlerInterface
 {
     use HasHooks;
 
-    /** Bytes pulled from the response body per emit() iteration (see emit()). */
+    /** Bytes pulled from the response body per emit() iteration — the default of 'emitChunkSize'. */
     private const EMIT_CHUNK_SIZE = 8192;
+
+    /** Below this a response is mostly loop; above it one request holds too much at once. */
+    private const EMIT_CHUNK_SIZE_MIN = 1024;
+    private const EMIT_CHUNK_SIZE_MAX = 16 * 1024 * 1024;
 
     /** Consecutive empty reads tolerated before emit() gives up on a stalled body. */
     private const EMIT_EMPTY_READ_LIMIT = 3;
@@ -63,7 +67,7 @@ class Router implements RequestHandlerInterface
         'origin-agent-cluster' => true,
     ];
 
-    /** @var array{debug: bool, basePath: string, baseUrl: ?string, trailingSlash: string, routesFile: ?string, urlEncoding: bool, implicitHead: bool} */
+    /** @var array{debug: bool, basePath: string, baseUrl: ?string, trailingSlash: string, routesFile: ?string, urlEncoding: bool, implicitHead: bool, emitChunkSize: int} */
     private array $config;
 
     /** @var array<int, string|object> Middleware for every request, outermost first */
@@ -92,11 +96,12 @@ class Router implements RequestHandlerInterface
      * Only what $config says counts: the constructor does not look at the environment
      * (fromEnv() does). A key that is missing or null takes its default.
      *
-     * @param array{debug?: bool|int|string|null, basePath?: string|null, baseUrl?: string|null, trailingSlash?: string|null, routesFile?: string|null, urlEncoding?: bool|int|string|null, implicitHead?: bool|int|string|null} $config
+     * @param array{debug?: bool|int|string|null, basePath?: string|null, baseUrl?: string|null, trailingSlash?: string|null, routesFile?: string|null, urlEncoding?: bool|int|string|null, implicitHead?: bool|int|string|null, emitChunkSize?: int|string|null} $config
      *
      * @throws RouterException If 'debug', 'urlEncoding' or 'implicitHead' is neither a boolean
      *                         nor boolean-like nor empty ('' and 0 count as off; null is
-     *                         the default)
+     *                         the default), or 'emitChunkSize' is not an integer (or a
+     *                         string of digits) from 1024 to 16777216
      */
     public function __construct(array $config = [])
     {
@@ -108,6 +113,7 @@ class Router implements RequestHandlerInterface
             'routesFile' => $config['routesFile'] ?? null,
             'urlEncoding' => self::flag('urlEncoding', $config['urlEncoding'] ?? true),
             'implicitHead' => self::flag('implicitHead', $config['implicitHead'] ?? true),
+            'emitChunkSize' => self::chunkSize($config['emitChunkSize'] ?? self::EMIT_CHUNK_SIZE),
         ];
     }
 
@@ -155,6 +161,29 @@ class Router implements RequestHandlerInterface
     }
 
     /**
+     * @throws RouterException If the value is not an integer within the allowed range
+     */
+    private static function chunkSize(mixed $value): int
+    {
+        // An integer, or what an env file makes of one ('65536') — digits, nothing around them
+        $size = match (true) {
+            is_int($value) => $value,
+            is_string($value) && preg_match('/^\d+$/D', $value) === 1 => (int) $value,
+            default => false,
+        };
+
+        if ($size === false || $size < self::EMIT_CHUNK_SIZE_MIN || $size > self::EMIT_CHUNK_SIZE_MAX) {
+            throw new RouterException(sprintf(
+                "Config 'emitChunkSize' must be an integer between %d and %d",
+                self::EMIT_CHUNK_SIZE_MIN,
+                self::EMIT_CHUNK_SIZE_MAX
+            ));
+        }
+
+        return $size;
+    }
+
+    /**
      * '/api', '/api/' and 'api' all mean the same prefix; the dispatcher compares against '/api'.
      */
     private static function normalizeBasePath(string $basePath): string
@@ -168,7 +197,7 @@ class Router implements RequestHandlerInterface
      * Factory method for fluent creation. Like the constructor it does not look at the
      * environment.
      *
-     * @param array{debug?: bool|int|string|null, basePath?: string|null, baseUrl?: string|null, trailingSlash?: string|null, routesFile?: string|null, urlEncoding?: bool|int|string|null, implicitHead?: bool|int|string|null} $config
+     * @param array{debug?: bool|int|string|null, basePath?: string|null, baseUrl?: string|null, trailingSlash?: string|null, routesFile?: string|null, urlEncoding?: bool|int|string|null, implicitHead?: bool|int|string|null, emitChunkSize?: int|string|null} $config
      */
     public static function create(array $config = []): self
     {
@@ -183,7 +212,7 @@ class Router implements RequestHandlerInterface
      * ROUTER_URL_ENCODING (urlEncoding). A key that $config contains wins over its variable —
      * also with null, false or an empty value.
      *
-     * @param array{debug?: bool|int|string|null, basePath?: string|null, baseUrl?: string|null, trailingSlash?: string|null, routesFile?: string|null, urlEncoding?: bool|int|string|null, implicitHead?: bool|int|string|null} $config Values that take precedence
+     * @param array{debug?: bool|int|string|null, basePath?: string|null, baseUrl?: string|null, trailingSlash?: string|null, routesFile?: string|null, urlEncoding?: bool|int|string|null, implicitHead?: bool|int|string|null, emitChunkSize?: int|string|null} $config Values that take precedence
      *
      * @throws RouterException As the constructor; and if APP_DEBUG or ROUTER_URL_ENCODING is
      *                         read and its value is not boolean-like (APP_DEBUG=maybe)
@@ -221,7 +250,7 @@ class Router implements RequestHandlerInterface
      * Quick boot: create, load routes, and run. Reads no environment either — for that:
      * Router::fromEnv()->loadRoutes($routesFile)->run().
      *
-     * @param array{debug?: bool|int|string|null, basePath?: string|null, baseUrl?: string|null, trailingSlash?: string|null, routesFile?: string|null, urlEncoding?: bool|int|string|null, implicitHead?: bool|int|string|null} $config
+     * @param array{debug?: bool|int|string|null, basePath?: string|null, baseUrl?: string|null, trailingSlash?: string|null, routesFile?: string|null, urlEncoding?: bool|int|string|null, implicitHead?: bool|int|string|null, emitChunkSize?: int|string|null} $config
      * @param string $routesFile Path to routes file
      */
     public static function boot(array $config, string $routesFile): void
@@ -656,7 +685,7 @@ class Router implements RequestHandlerInterface
         // which still guards against a stream that never reports eof at all.
         $emptyReads = 0;
         while (!$body->eof()) {
-            $chunk = $body->read(self::EMIT_CHUNK_SIZE);
+            $chunk = $body->read($this->config['emitChunkSize']);
             if ($chunk === '') {
                 if (++$emptyReads >= self::EMIT_EMPTY_READ_LIMIT) {
                     break;

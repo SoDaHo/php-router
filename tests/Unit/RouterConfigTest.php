@@ -22,7 +22,7 @@ class RouterConfigTest extends TestCase
         'ROUTER_BASE_PATH', 'ROUTER_TRAILING_SLASH', 'ROUTER_URL_ENCODING',
         // no longer read; still set by a test that proves it
         'ROUTER_CACHE_FILE', 'ROUTER_CACHE_KEY',
-        'ROUTER_IMPLICIT_HEAD',
+        'ROUTER_IMPLICIT_HEAD', 'ROUTER_EMIT_CHUNK_SIZE',
     ];
 
     private string $routesFile;
@@ -648,6 +648,57 @@ class RouterConfigTest extends TestCase
         $this->expectException(RouterException::class);
         $this->expectExceptionMessage("Config 'implicitHead' must be a boolean, got string");
         $status('maybe');
+    }
+
+    // ==================== emitChunkSize ====================
+
+    /**
+     * @return array<string, array{0: mixed}>
+     */
+    public static function chunkSizesThatAreRefused(): array
+    {
+        return [
+            'zero' => [0],
+            'negative' => [-8192],
+            'below the minimum' => [1023],
+            'above the maximum' => [16 * 1024 * 1024 + 1],
+            'a float' => [8192.5],
+            'a float that looks whole' => [8192.0],
+            'a word' => ['big'],
+            'a number with a unit' => ['64K'],
+            'an exponent' => ['1e5'],
+            'true' => [true],
+            'an array' => [[8192]],
+            'an empty string' => [''],
+            // An env file makes '65536' of the number — and nothing else counts as one
+            'a space in front' => [' 65536'],
+            'a sign' => ['+65536'],
+            'a line break behind' => ["65536\n"],
+            'more digits than an integer holds' => ['99999999999999999999999'],
+        ];
+    }
+
+    #[DataProvider('chunkSizesThatAreRefused')]
+    public function testChunkSizeOutsideItsRangeIsRefusedAtConstruction(mixed $value): void
+    {
+        $this->expectException(RouterException::class);
+        $this->expectExceptionMessage("Config 'emitChunkSize' must be an integer between 1024 and 16777216");
+
+        /** @phpstan-ignore argument.type */
+        Router::create(['emitChunkSize' => $value]);
+    }
+
+    public function testChunkSizeIsNotReadFromTheEnvironment(): void
+    {
+        $_ENV['ROUTER_EMIT_CHUNK_SIZE'] = 'big';
+        putenv('ROUTER_EMIT_CHUNK_SIZE=big');
+
+        try {
+            $this->assertInstanceOf(Router::class, Router::fromEnv());
+        } finally {
+            unset($_ENV['ROUTER_EMIT_CHUNK_SIZE']);
+            putenv('ROUTER_EMIT_CHUNK_SIZE');
+        }
     }
 }
 
