@@ -87,6 +87,17 @@ class AppFolderTest extends TestCase
                     $r->get('/login/api/status', fn () => Response::text('from the route'));
                     $r->get('/login/robots.txt', fn () => Response::text('robots from the route'));
                     $r->post('/login/submit', fn () => Response::text('submitted'));
+                    $r->post('/login/form', function () {
+                        $GLOBALS['appFolderTestFormCalls'] = ($GLOBALS['appFolderTestFormCalls'] ?? 0) + 1;
+
+                        return Response::html('<title>invalid</title>', 422);
+                    });
+                    $r->get('/login/page-of-a-route', fn () => Response::html('<title>route</title>'));
+                    $r->get('/login/unchanged-of-a-route', function () {
+                        $GLOBALS['appFolderTestUnchangedCalls'] = ($GLOBALS['appFolderTestUnchangedCalls'] ?? 0) + 1;
+
+                        return Response::html('', 304);
+                    });
                     $r->get('/health', fn () => Response::text('ok'));
                 };
                 PHP
@@ -269,6 +280,13 @@ class AppFolderTest extends TestCase
 
         $this->assertSame(416, $router->handle((new ServerRequest('GET', '/login/big.txt'))->withHeader('Range', 'bytes=5000-'))->getStatusCode());
 
+        // A Range is for GET: HEAD says what the whole file is
+        $headOfPart = $router->handle((new ServerRequest('HEAD', '/login/big.txt'))->withHeader('Range', 'bytes=10-19'));
+        $this->assertSame(200, $headOfPart->getStatusCode());
+        $this->assertSame('1000', $headOfPart->getHeaderLine('Content-Length'));
+        $this->assertFalse($headOfPart->hasHeader('Content-Range'));
+        $this->assertSame(200, $router->handle((new ServerRequest('HEAD', '/login/big.txt'))->withHeader('Range', 'bytes=5000-'))->getStatusCode());
+
         // HEAD with the switch off: a HEAD request is still answered, headers as for GET
         $off = $this->get($this->router(['implicitHead' => false]), '/login/big.txt', 'HEAD');
         $this->assertSame(200, $off->getStatusCode());
@@ -336,6 +354,445 @@ class AppFolderTest extends TestCase
 
         $this->assertSame('caps', (string) $response->getBody());
         $this->assertSame('no-store', $response->getHeaderLine('Cache-Control'));
+    }
+
+    // ==================== conditional requests ====================
+
+    /**
+     * @param array<string, string> $headers
+     */
+    private function ask(Router $router, string $path, array $headers, string $method = 'GET'): ResponseInterface
+    {
+        return $router->handle(new ServerRequest($method, $path, $headers));
+    }
+
+    private static function tagOf(string $content): string
+    {
+        return '"' . hash('xxh128', $content) . '"';
+    }
+
+    public function testFileCarriesAValidatorMadeOfItsContent(): void
+    {
+        $response = $this->get($this->router(), '/login/assets/style.css');
+
+        $this->assertSame(self::tagOf('p{}'), $response->getHeaderLine('ETag'));
+        $this->assertSame('p{}', (string) $response->getBody());
+        // No date: it could not tell two builds apart whose times a pipeline has pinned
+        $this->assertFalse($response->hasHeader('Last-Modified'));
+    }
+
+    /**
+     * @return array<string, array{0: array<string, string>, 1: int}>
+     */
+    public static function conditionsAndTheirAnswer(): array
+    {
+        $etag = self::tagOf('p{}');
+
+        return [
+            'no condition' => [[], 200],
+            'the tag' => [['If-None-Match' => $etag], 304],
+            'the tag, marked weak' => [['If-None-Match' => 'W/' . $etag], 304],
+            'the tag in a list' => [['If-None-Match' => '"other", ' . $etag . ' , "third"'], 304],
+            'any tag' => [['If-None-Match' => '*'], 304],
+            'any tag, blanks around' => [['If-None-Match' => ' * '], 304],
+            // A tag is what stands between two quotes — commas and stars included
+            'a star inside another tag' => [['If-None-Match' => '"foo,*,bar"'], 200],
+            'the tag inside another tag' => [['If-None-Match' => '"x' . trim($etag, '"') . 'y"'], 200],
+            'a star next to another tag' => [['If-None-Match' => '"other", *'], 200],
+            'the tag behind one with a comma' => [['If-None-Match' => '"a,b", ' . $etag], 304],
+            // … so a tag that stands between the quotes of two others is not one
+            'the tag between two others that end and begin there' => [['If-None-Match' => '"a,' . $etag . ',b"'], 200],
+            'the tag, lists without blanks' => [['If-None-Match' => '"a",W/' . $etag . ',"b"'], 304],
+            'another tag' => [['If-None-Match' => self::tagOf('p{} ')], 200],
+            'the tag without its quotes' => [['If-None-Match' => trim($etag, '"')], 200],
+            'an empty header' => [['If-None-Match' => ''], 200],
+            // Dates are not answered: the file comes
+            'a date, whatever it says' => [['If-Modified-Since' => 'Fri, 01 Jan 2100 00:00:00 GMT'], 200],
+            'another tag and a date' => [['If-None-Match' => '"other"', 'If-Modified-Since' => 'Fri, 01 Jan 2100 00:00:00 GMT'], 200],
+            'the tag and a date' => [['If-None-Match' => $etag, 'If-Modified-Since' => 'Mon, 01 Jan 2001 00:00:00 GMT'], 304],
+        ];
+    }
+
+    /**
+     * @param array<string, string> $headers
+     */
+    #[DataProvider('conditionsAndTheirAnswer')]
+    public function testCopyThatStillHoldsIsNotSentAgain(array $headers, int $status): void
+    {
+        $router = $this->router();
+
+        foreach (['GET', 'HEAD'] as $method) {
+            $response = $this->ask($router, '/login/assets/style.css', $headers, $method);
+
+            $this->assertSame($status, $response->getStatusCode(), $method);
+            $this->assertSame(self::tagOf('p{}'), $response->getHeaderLine('ETag'), $method);
+            $this->assertSame('no-cache', $response->getHeaderLine('Cache-Control'), $method);
+            $this->assertSame('text/css; charset=utf-8', $response->getHeaderLine('Content-Type'), $method);
+            $this->assertSame('nosniff', $response->getHeaderLine('X-Content-Type-Options'), $method);
+        }
+
+        $body = (string) $this->ask($router, '/login/assets/style.css', $headers)->getBody();
+        $this->assertSame($status === 304 ? '' : 'p{}', $body);
+
+        if ($status === 304) {
+            $notModified = $this->ask($router, '/login/assets/style.css', $headers);
+            $this->assertFalse($notModified->hasHeader('Content-Length'));
+            $this->assertFalse($notModified->hasHeader('Accept-Ranges'));
+        }
+    }
+
+    public function testEmptyFileHasAValidatorToo(): void
+    {
+        file_put_contents($this->app . '/assets/empty.css', '');
+        $router = $this->router();
+
+        $response = $this->get($router, '/login/assets/empty.css');
+
+        $this->assertSame(200, $response->getStatusCode());
+        $this->assertSame(self::tagOf(''), $response->getHeaderLine('ETag'));
+        $this->assertSame(304, $this->ask($router, '/login/assets/empty.css', ['If-None-Match' => self::tagOf('')])->getStatusCode());
+    }
+
+    public function testNewBuildWithTheSameSizeAndTimeIsSentAgain(): void
+    {
+        // Two releases whose start pages differ in one hash only — the same size — and
+        // whose times a pipeline has pinned; 'current' is switched from one to the other
+        $releases = $this->base . '/releases';
+        foreach (['1' => 'index-B1fQx9cD.js', '2' => 'index-Zk3pQ7aa.js'] as $release => $script) {
+            mkdir($releases . '/' . $release, 0o777, true);
+            file_put_contents($releases . '/' . $release . '/index.html', '<!doctype html><script src="/assets/' . $script . '"></script>');
+            touch($releases . '/' . $release . '/index.html', 1_700_000_000);
+        }
+        $this->assertSame(filesize($releases . '/1/index.html'), filesize($releases . '/2/index.html'));
+        symlink($releases . '/1', $this->base . '/current');
+
+        $router = Router::create(['debug' => false])->loadRoutes($this->routesFile)->app('/app', $this->base . '/current');
+        $first = $this->get($router, '/app/');
+        $etag = $first->getHeaderLine('ETag');
+        $this->assertSame(304, $this->ask($router, '/app/', ['If-None-Match' => $etag])->getStatusCode());
+
+        unlink($this->base . '/current');
+        symlink($releases . '/2', $this->base . '/current');
+
+        // A 304 here would leave the browser with a page that asks for a script that is gone
+        $second = $this->ask($router, '/app/', ['If-None-Match' => $etag]);
+        $this->assertSame(200, $second->getStatusCode());
+        $this->assertStringContainsString('index-Zk3pQ7aa.js', (string) $second->getBody());
+        $this->assertNotSame($etag, $second->getHeaderLine('ETag'));
+    }
+
+    public function testChangedFileIsSentAgain(): void
+    {
+        $file = $this->app . '/assets/style.css';
+        touch($file, 1_700_000_000);
+        $router = $this->router();
+        $etag = $this->get($router, '/login/assets/style.css')->getHeaderLine('ETag');
+
+        // The same router, the file changed in between — same size, same time
+        file_put_contents($file, 'a{}');
+        touch($file, 1_700_000_000);
+
+        $changed = $this->ask($router, '/login/assets/style.css', ['If-None-Match' => $etag]);
+        $this->assertSame(200, $changed->getStatusCode());
+        $this->assertSame(self::tagOf('a{}'), $changed->getHeaderLine('ETag'));
+
+        // A time alone changes nothing about a small file
+        touch($file, 1_700_000_500);
+        $this->assertSame(304, $this->ask($router, '/login/assets/style.css', ['If-None-Match' => self::tagOf('a{}')])->getStatusCode());
+    }
+
+    public function testLargeFileIsToldApartByFileNumberTimeAndSize(): void
+    {
+        // Above 64 KiB the content is not read for the validator
+        $limit = 65536;
+        file_put_contents($this->app . '/at-the-limit.txt', str_repeat('a', $limit));
+        $this->assertSame(self::tagOf(str_repeat('a', $limit)), $this->get($this->router(), '/login/at-the-limit.txt')->getHeaderLine('ETag'));
+
+        $file = $this->app . '/large.txt';
+        file_put_contents($file, str_repeat('a', $limit + 1));
+        touch($file, 1_700_000_000);
+        if (fileinode($file) === 0) {
+            $this->markTestSkipped('this file system reports no file numbers: large files get no validator');
+        }
+        $router = $this->router();
+        $etag = $this->get($router, '/login/large.txt')->getHeaderLine('ETag');
+
+        // Marked weak: time and size do not prove the same bytes
+        $stat = (array) stat($file);
+        $this->assertSame(sprintf('W/"%x-%x-6553f100-10001"', $stat['dev'], $stat['ino']), $etag);
+        $this->assertSame(304, $this->ask($router, '/login/large.txt', ['If-None-Match' => substr($etag, 2)])->getStatusCode(), 'without the W/');
+
+        $this->assertSame(206, $this->ask($router, '/login/large.txt', ['Range' => 'bytes=0-9'])->getStatusCode());
+        $this->assertSame(304, $this->ask($router, '/login/large.txt', ['If-None-Match' => $etag])->getStatusCode());
+
+        // Another time
+        touch($file, 1_700_000_001);
+        $this->assertSame(200, $this->ask($router, '/login/large.txt', ['If-None-Match' => $etag])->getStatusCode());
+
+        // Another size at the first time
+        file_put_contents($file, str_repeat('a', $limit + 2));
+        touch($file, 1_700_000_000);
+        $this->assertSame(200, $this->ask($router, '/login/large.txt', ['If-None-Match' => $etag])->getStatusCode());
+
+        // Another file under the name (a release switched by a link, a file moved into
+        // place): same size, same time, another file number
+        file_put_contents($this->app . '/large.new', str_repeat('b', $limit + 1));
+        touch($this->app . '/large.new', 1_700_000_000);
+        unlink($file);
+        rename($this->app . '/large.new', $file);
+        $replaced = $this->ask($router, '/login/large.txt', ['If-None-Match' => $etag]);
+        $this->assertSame(200, $replaced->getStatusCode());
+        $this->assertNotSame($etag, $replaced->getHeaderLine('ETag'));
+    }
+
+    public function testLargeFileOverwrittenInPlaceWithinTheSameSecondIsNotToldApart(): void
+    {
+        // The known limit, said in the README: the same file number, time and size
+        $file = $this->app . '/large.txt';
+        file_put_contents($file, str_repeat('a', 70000));
+        touch($file, 1_700_000_000);
+        if (fileinode($file) === 0) {
+            $this->markTestSkipped('this file system reports no file numbers: large files get no validator');
+        }
+        $router = $this->router();
+        $etag = $this->get($router, '/login/large.txt')->getHeaderLine('ETag');
+
+        file_put_contents($file, str_repeat('b', 70000));
+        touch($file, 1_700_000_000);
+
+        $this->assertSame(304, $this->ask($router, '/login/large.txt', ['If-None-Match' => $etag])->getStatusCode());
+    }
+
+    public function testStartPageIsNotSentAgainUnderAnyPathOfTheApp(): void
+    {
+        $router = Router::create(['debug' => false])->loadRoutes($this->routesFile)
+            ->app('/login', $this->app, ['cacheIndex' => null]);
+
+        $etag = $this->get($router, '/login/')->getHeaderLine('ETag');
+        $this->assertSame(self::tagOf('<!doctype html><title>login</title>'), $etag);
+
+        foreach (['/login', '/login/', '/login/account/42/edit', '/login/index.html'] as $path) {
+            $response = $this->ask($router, $path, ['If-None-Match' => $etag]);
+
+            $this->assertSame(304, $response->getStatusCode(), $path);
+            $this->assertSame('', (string) $response->getBody(), $path);
+            // No Cache-Control configured: none on the 304 either
+            $this->assertFalse($response->hasHeader('Cache-Control'), $path);
+        }
+
+        // What the folder does not serve stays what it is
+        $this->assertSame(404, $this->ask($router, '/login/missing.js', ['If-None-Match' => '*'])->getStatusCode());
+        $this->assertSame(404, $this->ask($router, '/login/.env', ['If-None-Match' => '*'])->getStatusCode());
+        // And a route is not the folder's business
+        $this->assertSame('from the route', (string) $this->ask($router, '/login/api/status', ['If-None-Match' => '*'])->getBody());
+    }
+
+    /**
+     * @return array<string, array{0: array<string, string>, 1: int, 2: string}>
+     */
+    public static function rangesAndWhatTheyGet(): array
+    {
+        $whole = str_repeat('0123456789', 100);
+        $etag = self::tagOf($whole);
+
+        return [
+            'a Range alone' => [['Range' => 'bytes=0-9'], 206, '0123456789'],
+            // "This piece, if the file is still the one I have": the folder cannot promise
+            // that, so the whole file comes — whatever the If-Range says
+            'If-Range with the tag of the file' => [['Range' => 'bytes=0-9', 'If-Range' => $etag], 200, $whole],
+            'If-Range with another tag' => [['Range' => 'bytes=0-9', 'If-Range' => self::tagOf('other')], 200, $whole],
+            'If-Range with a weak tag' => [['Range' => 'bytes=0-9', 'If-Range' => 'W/' . $etag], 200, $whole],
+            'If-Range with a date' => [['Range' => 'bytes=0-9', 'If-Range' => 'Tue, 14 Nov 2023 22:13:20 GMT'], 200, $whole],
+            'an empty If-Range' => [['Range' => 'bytes=0-9', 'If-Range' => ''], 200, $whole],
+            'If-Range without a Range' => [['If-Range' => $etag], 200, $whole],
+            'a Range that cannot be met, with If-Range' => [['Range' => 'bytes=5000-', 'If-Range' => $etag], 200, $whole],
+        ];
+    }
+
+    /**
+     * @param array<string, string> $headers
+     */
+    #[DataProvider('rangesAndWhatTheyGet')]
+    public function testRangeWithAConditionGetsTheWholeFile(array $headers, int $status, string $body): void
+    {
+        $response = $this->ask($this->router(), '/login/big.txt', $headers);
+
+        $this->assertSame($status, $response->getStatusCode());
+        $this->assertSame($body, (string) $response->getBody());
+        $this->assertSame(self::tagOf(str_repeat('0123456789', 100)), $response->getHeaderLine('ETag'));
+    }
+
+    /**
+     * @return array<string, array{0: int, 1: int, 2: string}>
+     */
+    public static function sizesAndFileNumbers(): array
+    {
+        return [
+            'empty file' => [0, 42, 'content'],
+            'small file' => [1024, 42, 'content'],
+            'at the limit' => [65536, 42, 'content'],
+            'small file where the system has no file numbers' => [65536, 0, 'content'],
+            'one byte above' => [65537, 42, 'metadata'],
+            'large file' => [50_000_000, 42, 'metadata'],
+            // No file number: time and size alone would not tell two releases apart, and
+            // reading 50 MB for every request is no answer either
+            'large file where the system has no file numbers' => [50_000_000, 0, 'none'],
+            'one byte above, no file number' => [65537, 0, 'none'],
+        ];
+    }
+
+    #[DataProvider('sizesAndFileNumbers')]
+    public function testWhatTheValidatorOfAFileIsMadeOf(int $size, int $fileNumber, string $kind): void
+    {
+        $this->assertSame($kind, AppFolder::validatorOf($size, $fileNumber));
+    }
+
+    public function testStarWithBlanksAroundIsAStarForEveryRequestObject(): void
+    {
+        // Nyholm trims header values; a request object of another make may not
+        $request = $this->createMock(ServerRequestInterface::class);
+        $request->method('getMethod')->willReturn('GET');
+        $request->method('getUri')->willReturn(new \Nyholm\Psr7\Uri('/login/assets/style.css'));
+        $request->method('hasHeader')->willReturn(false);
+        $request->method('getHeaderLine')->willReturnCallback(static fn (string $name): string => $name === 'If-None-Match' ? " *\t" : '');
+
+        $response = (new AppFolder('/login', $this->app))->serve($request, '/login/assets/style.css');
+
+        $this->assertNotNull($response);
+        $this->assertSame(304, $response->getStatusCode());
+    }
+
+    public function testMiddlewareThatRewritesAPageWorksOnTheWholePage(): void
+    {
+        // A middleware that puts something new into the page for every request (a CSP nonce)
+        // must not pass a 304 or a piece on: the browser would keep the old body under the
+        // new header. The recipe of the README: where no route matched and a page of the
+        // folder comes back as 304 or 206, it asks once more without the condition.
+        // Registered last, it stands innermost: no other middleware runs twice.
+        $rewriting = new class () implements MiddlewareInterface {
+            public int $pages = 0;
+
+            public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
+            {
+                $match = $request->getAttribute(RouteMatch::class);
+                assert($match instanceof RouteMatch);
+                $folder = in_array($request->getMethod(), ['GET', 'HEAD'], true)
+                    && $match->status === RouteMatch::NOT_FOUND
+                    && str_starts_with($match->path . '/', '/login/');
+                $isPage = static fn (ResponseInterface $r): bool =>
+                    strtolower(trim(explode(';', $r->getHeaderLine('Content-Type'))[0])) === 'text/html';
+
+                $response = $handler->handle($request);
+
+                if ($folder && $isPage($response) && in_array($response->getStatusCode(), [304, 206], true)) {
+                    $response = $handler->handle($request->withoutHeader('If-None-Match')->withoutHeader('Range'));
+                }
+                if (!$folder || !$isPage($response) || $response->getStatusCode() !== 200) {
+                    return $response;
+                }
+
+                $nonce = 'nonce-' . ++$this->pages;
+
+                return $response
+                    ->withBody(\Nyholm\Psr7\Stream::create(str_replace('<title>', '<title nonce="' . $nonce . '">', (string) $response->getBody())))
+                    ->withoutHeader('ETag')
+                    ->withoutHeader('Content-Length')
+                    ->withHeader('Cache-Control', 'no-store')
+                    ->withHeader('Content-Security-Policy', "script-src '" . $nonce . "'");
+            }
+        };
+        // Whatever stands in front of it runs once per request
+        $counting = new class () implements MiddlewareInterface {
+            public int $calls = 0;
+
+            public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
+            {
+                $this->calls++;
+
+                return $handler->handle($request);
+            }
+        };
+
+        // A start page under another name, with a type spelled in capitals, reached by
+        // many paths and spellings
+        file_put_contents($this->app . '/Start.XHT', '<!doctype html><title>login</title>');
+        $router = Router::create(['debug' => false])->loadRoutes($this->routesFile)
+            ->app('/login', $this->app, ['index' => 'Start.XHT', 'types' => ['xht' => 'Text/HTML; charset=utf-8'], 'cacheIndex' => 'public, max-age=600'])
+            ->app('/admin', $this->base . '/site')
+            ->middleware($counting)->middleware($rewriting);
+
+        $etag = self::tagOf('<!doctype html><title>login</title>');
+        $pages = [
+            ['/login/', ['If-None-Match' => $etag]],
+            ['/login', ['If-None-Match' => $etag, 'Accept' => '*/*']],
+            ['/login/account/42/edit', ['If-None-Match' => '*']],
+            ['/login/Start.XHT', ['If-None-Match' => $etag]],
+            ['/login/v1.2/page', ['If-None-Match' => $etag]],
+            ['/login/', ['Range' => 'bytes=0-9']],
+            // Another page of the folder, not the start page
+            ['/login/index.html', ['If-None-Match' => $etag]],
+            ['/login/', []],
+        ];
+
+        foreach ($pages as $i => [$path, $headers]) {
+            $n = $i + 1;
+            $response = $this->ask($router, $path, $headers);
+
+            $this->assertSame(200, $response->getStatusCode(), $path);
+            $this->assertStringContainsString('nonce="nonce-' . $n . '"', (string) $response->getBody(), $path);
+            $this->assertStringContainsString('</title>', (string) $response->getBody(), 'the whole page, not a piece of it');
+            $this->assertSame("script-src 'nonce-" . $n . "'", $response->getHeaderLine('Content-Security-Policy'));
+            // Made for this request alone: no validator, no length of the file, not to be stored
+            $this->assertFalse($response->hasHeader('ETag'));
+            $this->assertFalse($response->hasHeader('Content-Length'));
+            $this->assertSame('no-store', $response->getHeaderLine('Cache-Control'));
+        }
+        $this->assertSame(8, $counting->calls);
+
+        // What is no page is answered as before — whatever the request says it accepts
+        $asset = $this->ask($router, '/login/assets/style.css', ['Accept' => 'text/html', 'If-None-Match' => self::tagOf('p{}')]);
+        $this->assertSame(304, $asset->getStatusCode());
+        $this->assertSame(self::tagOf('p{}'), $asset->getHeaderLine('ETag'));
+        $this->assertFalse($asset->hasHeader('Content-Security-Policy'));
+
+        $piece = $this->ask($router, '/login/big.txt', ['Accept' => 'text/html', 'Range' => 'bytes=0-9']);
+        $this->assertSame(206, $piece->getStatusCode());
+        $this->assertSame('0123456789', (string) $piece->getBody());
+
+        // What the folder does not serve
+        $this->assertSame(404, $this->ask($router, '/login/missing.js', ['If-None-Match' => '*'])->getStatusCode());
+
+        // Routes are not the folder's pages: a handler runs once, whatever it answers —
+        // also HTML that is no 200 — and its answer stays as it is
+        $GLOBALS['appFolderTestFormCalls'] = 0;
+        $invalid = $router->handle(new ServerRequest('POST', '/login/form'));
+        $this->assertSame(422, $invalid->getStatusCode());
+        $this->assertSame('<title>invalid</title>', (string) $invalid->getBody());
+        $this->assertSame(1, $GLOBALS['appFolderTestFormCalls']);
+        unset($GLOBALS['appFolderTestFormCalls']);
+
+        $ofARoute = $this->ask($router, '/login/page-of-a-route', ['If-None-Match' => '*']);
+        $this->assertSame('<title>route</title>', (string) $ofARoute->getBody());
+        $this->assertFalse($ofARoute->hasHeader('Content-Security-Policy'));
+        $this->assertSame('from the route', (string) $this->ask($router, '/login/api/status', ['If-None-Match' => '*'])->getBody());
+
+        // … also a route that answers 304 with the type of a page: asked once, left alone
+        $GLOBALS['appFolderTestUnchangedCalls'] = 0;
+        $unchanged = $this->ask($router, '/login/unchanged-of-a-route', ['If-None-Match' => '"x"']);
+        $this->assertSame(304, $unchanged->getStatusCode());
+        $this->assertSame(1, $GLOBALS['appFolderTestUnchangedCalls']);
+        unset($GLOBALS['appFolderTestUnchangedCalls']);
+
+        // Another app of the same router is not this middleware's business
+        $admin = $this->ask($router, '/admin/', ['Range' => 'bytes=0-9']);
+        $this->assertSame(206, $admin->getStatusCode());
+        $this->assertSame('<!doctype ', (string) $admin->getBody());
+        $this->assertFalse($admin->hasHeader('Content-Security-Policy'));
+        $whole = $this->ask($router, '/admin/', []);
+        $this->assertTrue($whole->hasHeader('ETag'));
+        $this->assertSame(304, $this->ask($router, '/admin/', ['If-None-Match' => $whole->getHeaderLine('ETag')])->getStatusCode());
+
+        $this->assertSame(18, $counting->calls);
     }
 
     // ==================== routes come first ====================

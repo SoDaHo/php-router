@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Sodaho\Router;
 
+use Nyholm\Psr7\Response as Psr7Response;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use Sodaho\Router\Exception\RouterException;
@@ -77,6 +78,9 @@ final class AppFolder
      * nothing but the bundler's output.
      */
     public const HASHED = '~^(?:assets|static)/(?:[^/]+/)*[^/]+(?:-[A-Za-z0-9_-]{8}|\.[0-9a-f]{8,32})(?:\.chunk)?\.[A-Za-z0-9]+$~';
+
+    /** Up to this size (64 KiB) the ETag of a file is a hash of its content */
+    private const ETAG_OF_CONTENT = 65536;
 
     private const OPTIONS = ['index', 'types', 'immutable', 'cacheIndex', 'cacheImmutable', 'cacheOther'];
 
@@ -266,10 +270,6 @@ final class AppFolder
             return null;
         }
 
-        $range = $request->getHeaderLine('Range');
-        $response = Response::file($file, null, $type, true, $range === '' ? null : $range)
-            ->withoutHeader('Content-Disposition');
-
         // The browser caches by address: what was asked for decides, not where a link led
         $cache = match (true) {
             $startPage => $this->cacheIndex,
@@ -277,7 +277,109 @@ final class AppFolder
             default => $this->cacheOther,
         };
 
-        return $cache === null ? $response : $response->withHeader('Cache-Control', $cache);
+        // What the browser sends back to ask whether its copy still holds
+        $etag = self::etag($file);
+        $headers = ($etag === null ? [] : ['ETag' => $etag]) + ($cache === null ? [] : ['Cache-Control' => $cache]);
+
+        if (self::isNotModified($request, $etag)) {
+            // The copy holds: the headers of the file, no body. The Content-Type is named
+            // so that PHP does not put its own default there.
+            return new Psr7Response(304, $headers + ['Content-Type' => $type, 'X-Content-Type-Options' => 'nosniff']);
+        }
+
+        // A Range is for GET only. And one that comes with an If-Range — "this piece, if the
+        // file is still the one I have" — gets the whole file: the tag is taken a moment
+        // before the file is opened, so this class cannot promise that the piece it sends
+        // belongs to the tag it compared.
+        $range = $method === 'GET' && !$request->hasHeader('If-Range') ? $request->getHeaderLine('Range') : '';
+
+        $response = Response::file($file, null, $type, true, $range === '' ? null : $range)
+            ->withoutHeader('Content-Disposition');
+
+        foreach ($headers as $name => $value) {
+            $response = $response->withHeader($name, $value);
+        }
+
+        return $response;
+    }
+
+    /**
+     * The validator of a file — or null where there is nothing to make one of.
+     *
+     * Up to ETAG_OF_CONTENT bytes it is a hash of the content: the start page of two builds
+     * often has the same size (only a hash in it differs) and — where a pipeline pins the
+     * times — the same time, and a 304 for the old one would leave the browser with a page
+     * whose scripts are gone. Above that size reading the file for every request costs too
+     * much: device, file number, time of the last change and size, marked weak (W/) — a
+     * larger file that is overwritten in place by one of the same size and the same
+     * modification time (the same second, or a time that cp -p or the pipeline keeps) is
+     * not told apart. Where the system reports no file number, a large file gets no
+     * validator: time and size alone would not tell two releases apart.
+     *
+     * No Last-Modified goes out: a date cannot tell two such start pages apart either.
+     *
+     * @throws RouterException When the file went away between the check and now
+     */
+    private static function etag(string $file): ?string
+    {
+        // Asked through one open handle: what it says about size and content belongs
+        // together, and a file that went away in this moment is an exception here, not a
+        // warning for the application's error handler.
+        try {
+            $handle = new \SplFileObject($file, 'rb');
+            $stat = $handle->fstat();
+            $kind = self::validatorOf($stat['size'], $stat['ino']);
+            $content = $kind === 'content' && $stat['size'] > 0 ? $handle->fread($stat['size']) : '';
+            // @codeCoverageIgnoreStart
+        } catch (\RuntimeException | \LogicException $e) {
+            // Not reachable in a test: the file was there and readable a moment ago. (A
+            // directory in its place is a LogicException of SplFileObject.)
+            throw new RouterException('Cannot read file', 0, $e, $file);
+        }
+        // A read that fails or comes short is not the end of the file
+        if ($content === false || ($kind === 'content' && strlen($content) !== $stat['size'])) {
+            throw new RouterException('Cannot read file', debugMessage: $file);
+        }
+        // @codeCoverageIgnoreEnd
+
+        return match ($kind) {
+            'content' => '"' . hash('xxh128', $content) . '"',
+            'metadata' => sprintf('W/"%x-%x-%x-%x"', $stat['dev'], $stat['ino'], $stat['mtime'], $stat['size']),
+            default => null,
+        };
+    }
+
+    /**
+     * What the validator of a file is made of: 'content' (a hash; small files), 'metadata'
+     * (device, file number, time, size; large files) or 'none' (large files where the
+     * system reports no file number).
+     *
+     * @internal
+     *
+     * @return 'content'|'metadata'|'none'
+     */
+    public static function validatorOf(int $size, int $fileNumber): string
+    {
+        return match (true) {
+            $size <= self::ETAG_OF_CONTENT => 'content',
+            $fileNumber !== 0 => 'metadata',
+            default => 'none',
+        };
+    }
+
+    /**
+     * Whether the copy the client says it has is the file as it is now: If-None-Match is
+     * '*', or one of its tags is the file's — compared without regard to a W/ in front of
+     * either. A tag is what stands between two quotes, commas included.
+     * If-Modified-Since is not answered — see etag().
+     */
+    private static function isNotModified(ServerRequestInterface $request, ?string $etag): bool
+    {
+        $ifNoneMatch = trim($request->getHeaderLine('If-None-Match'));
+        preg_match_all('~"[^"]*"~', $ifNoneMatch, $tags);
+
+        // '*' asks whether there is a file at all — also where the file has no tag
+        return $ifNoneMatch === '*' || ($etag !== null && in_array(preg_replace('~^W/~', '', $etag), $tags[0], true));
     }
 
     /**
