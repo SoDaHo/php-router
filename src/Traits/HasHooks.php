@@ -9,8 +9,9 @@ namespace Sodaho\Router\Traits;
  *
  * Provides on() for registering and trigger() for firing events.
  * Unlike pdo-wrapper/container (which let exceptions bubble up), this
- * implementation catches hook exceptions and logs them. The router must
- * always return a response to the client (API-first design).
+ * implementation catches hook exceptions and hands them to the 'hookError' hook
+ * (stderr without one). The router must always return a response to the client
+ * (API-first design).
  */
 trait HasHooks
 {
@@ -49,23 +50,61 @@ trait HasHooks
     }
 
     /**
-     * Logs to stderr but never interrupts the request.
+     * A failing hook never interrupts the request.
+     *
+     * With callbacks registered for 'hookError' the application gets event and exception
+     * and decides what to do with them. Without one a line goes to stderr (error_log()
+     * where there is no stderr). A callback that fails itself gets that line too — and so
+     * does the failure it was called for, so that nothing is lost.
      */
     protected function handleHookException(string $event, \Throwable $e): void
     {
-        $message = sprintf(
-            "[Router] Hook error in '%s': %s in %s:%d\n",
-            $event,
-            $e->getMessage(),
-            $e->getFile(),
-            $e->getLine()
-        );
+        // State and helper live in this method: the trait adds no member that a class
+        // using it could already have
+        /** @var \WeakMap<object, true>|null $reporting Objects whose hookError callbacks are running */
+        static $reporting = null;
+        $reporting ??= new \WeakMap();
 
-        if ($this->hasStderr()) {
-            fwrite(STDERR, $message);
-        } else {
-            error_log($message);
+        $write = function (string $event, \Throwable $e): void {
+            $message = sprintf(
+                "[Router] Hook error in '%s': %s in %s:%d\n",
+                $event,
+                $e->getMessage(),
+                $e->getFile(),
+                $e->getLine()
+            );
+
+            if ($this->hasStderr()) {
+                fwrite(STDERR, $message);
+            } else {
+                error_log($message);
+            }
+        };
+
+        // Not while a hookError callback runs: what fails in there must not come back to it
+        if (!isset($reporting[$this]) && $event !== 'hookError' && ($this->hooks['hookError'] ?? []) !== []) {
+            $reporting[$this] = true;
+            $reported = true;
+
+            try {
+                foreach ($this->hooks['hookError'] as $callback) {
+                    try {
+                        $callback(['event' => $event, 'exception' => $e]);
+                    } catch (\Throwable $failure) {
+                        $reported = false;
+                        $write('hookError', $failure);
+                    }
+                }
+            } finally {
+                unset($reporting[$this]);
+            }
+
+            if ($reported) {
+                return;
+            }
         }
+
+        $write($event, $e);
     }
 
     protected function hasStderr(): bool
