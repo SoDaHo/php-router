@@ -9,7 +9,9 @@
          beStrictAboutCoverageMetadata="false"
          beStrictAboutOutputDuringTests="true"
          failOnRisky="true"
-         failOnWarning="true">
+         failOnWarning="true"
+         failOnDeprecation="true"
+         displayDetailsOnTestsThatTriggerDeprecations="true">
     <testsuites>
         <testsuite name="Unit">
             <directory>tests/Unit</directory>
@@ -24,7 +26,7 @@
             <directory>tests/Security</directory>
         </testsuite>
     </testsuites>
-    <source>
+    <source ignoreIndirectDeprecations="true">
         <include>
             <directory>src</directory>
         </include>
