@@ -177,4 +177,26 @@ class DispatcherTest extends TestCase
         $this->assertSame(Dispatcher::FOUND, $result[0]);
         $this->assertSame([], $result[3]);
     }
+
+    public function testAllowedMethodsAreAListEvenWhenStaticAndDynamicRoutesOverlap(): void
+    {
+        $handler = new Route(['POST'], '/users/me', 'handler');
+        $dynamic = fn (string $method) => [[
+            'regex' => '#^/users/(?P<id>[^/]+)\z#',
+            'route' => new Route([$method], '/users/{id}', 'handler'),
+            'casts' => [],
+        ]];
+
+        $dispatcher = new Dispatcher(
+            ['POST' => ['/users/me' => $handler]],
+            ['POST' => $dynamic('POST'), 'GET' => $dynamic('GET')]
+        );
+
+        $result = $dispatcher->dispatch('DELETE', '/users/me');
+
+        // POST is found twice (static and dynamic). array_unique() alone left [0 => 'POST', 2 => 'GET'],
+        // which json_encode() writes as an object into the 405 body.
+        $this->assertSame(Dispatcher::METHOD_NOT_ALLOWED, $result[0]);
+        $this->assertSame(['POST', 'GET'], $result[1]);
+    }
 }

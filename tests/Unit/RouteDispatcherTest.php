@@ -339,6 +339,29 @@ class RouteDispatcherTest extends TestCase
 
         $dispatcher->handle(new ServerRequest('GET', '/test'));
     }
+
+    public function testMethodNotAllowedBodyCarriesAListOfMethods(): void
+    {
+        $collector = new \Sodaho\Router\RouteCollector();
+        $collector->post('/users/me', fn ($req) => Response::success([]));
+        $collector->post('/users/{id}', fn ($req, $id) => Response::success([]));
+        $collector->get('/users/{id}', fn ($req, $id) => Response::success([]));
+
+        $dispatcher = new RouteDispatcher($collector->getData());
+
+        $hookData = null;
+        $dispatcher->on('methodNotAllowed', function (array $data) use (&$hookData): void {
+            $hookData = $data;
+        });
+
+        $response = $dispatcher->handle(new ServerRequest('DELETE', '/users/me'));
+
+        $this->assertSame(405, $response->getStatusCode());
+        $this->assertSame('POST, GET', $response->getHeaderLine('Allow'));
+        $this->assertStringContainsString('"allowed":["POST","GET"]', (string) $response->getBody());
+        $this->assertSame(['POST', 'GET'], $hookData['allowed_methods']);
+    }
+
 }
 
 class TestMiddlewareClass implements MiddlewareInterface

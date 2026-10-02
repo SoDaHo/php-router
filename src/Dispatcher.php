@@ -110,6 +110,7 @@ class Dispatcher
             }
         }
 
-        return array_unique($allowed);
+        // array_values(): array_unique() keeps keys, and a list with gaps is a JSON object in the 405 body.
+        return array_values(array_unique($allowed));
     }
 }
