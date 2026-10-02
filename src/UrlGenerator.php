@@ -105,7 +105,7 @@ final class UrlGenerator
     {
         if ($this->baseUrl === null) {
             throw new RouterException(
-                'Cannot generate absolute URL: baseUrl is not configured. Set APP_URL environment variable or use setBaseUrl().'
+                'Cannot generate absolute URL: baseUrl is not configured. Pass \'baseUrl\' in the config or create the router with Router::fromEnv() and APP_URL.'
             );
         }
 

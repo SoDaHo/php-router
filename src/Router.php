@@ -77,26 +77,36 @@ class Router implements RequestHandlerInterface
     private ?RouteCollector $collector = null;
     private ?UrlGenerator $urlGenerator = null;
 
+    /** Config key => environment variable, for fromEnv() */
+    private const ENV_VARIABLES = [
+        'debug' => 'APP_DEBUG',
+        'baseUrl' => 'APP_URL',
+        'basePath' => 'ROUTER_BASE_PATH',
+        'trailingSlash' => 'ROUTER_TRAILING_SLASH',
+        'urlEncoding' => 'ROUTER_URL_ENCODING',
+    ];
 
     /**
      * Create a new Router instance.
      *
-     * @param array{debug?: bool|int|string|null, basePath?: string, baseUrl?: string, trailingSlash?: string, routesFile?: string, urlEncoding?: bool, implicitHead?: bool|int|string|null} $config
+     * Only what $config says counts: the constructor does not look at the environment
+     * (fromEnv() does). A key that is missing or null takes its default.
      *
-     * @throws RouterException If 'debug' or 'implicitHead' is neither a boolean nor a boolean-like value
+     * @param array{debug?: bool|int|string|null, basePath?: string|null, baseUrl?: string|null, trailingSlash?: string|null, routesFile?: string|null, urlEncoding?: bool|int|string|null, implicitHead?: bool|int|string|null} $config
+     *
+     * @throws RouterException If 'debug', 'urlEncoding' or 'implicitHead' is neither a boolean
+     *                         nor boolean-like nor empty ('' and 0 count as off; null is
+     *                         the default)
      */
     public function __construct(array $config = [])
     {
-        // Config precedence: $config > $_ENV > getenv() > default (consistent with pdo-wrapper)
         $this->config = [
-            'debug' => self::resolveDebug($config['debug'] ?? null),
-            'basePath' => self::normalizeBasePath((string) ($config['basePath'] ?? self::env('ROUTER_BASE_PATH') ?? '')),
-            'baseUrl' => $config['baseUrl'] ?? self::env('APP_URL'),
-            'trailingSlash' => (string) ($config['trailingSlash'] ?? self::env('ROUTER_TRAILING_SLASH') ?? 'strict'),
+            'debug' => self::flag('debug', $config['debug'] ?? false),
+            'basePath' => self::normalizeBasePath((string) ($config['basePath'] ?? '')),
+            'baseUrl' => $config['baseUrl'] ?? null,
+            'trailingSlash' => (string) ($config['trailingSlash'] ?? 'strict'),
             'routesFile' => $config['routesFile'] ?? null,
-            'urlEncoding' => $config['urlEncoding']
-                ?? filter_var(self::env('ROUTER_URL_ENCODING') ?? true, FILTER_VALIDATE_BOOL),
-            // Config only — new options no longer look at the environment
+            'urlEncoding' => self::flag('urlEncoding', $config['urlEncoding'] ?? true),
             'implicitHead' => self::flag('implicitHead', $config['implicitHead'] ?? false),
         ];
     }
@@ -112,30 +122,14 @@ class Router implements RequestHandlerInterface
             return (string) $value;
         }
 
-        // getenv() fallback for legacy compatibility
+        // getenv() for setups that do not fill $_ENV (variables_order without E)
         $value = getenv($key);
 
         return $value !== false ? $value : null;
     }
 
     /**
-     * An explicit config value always wins — an explicit false included. Only without one
-     * do APP_DEBUG and APP_ENV decide.
-     *
-     * @throws RouterException If the config value is not a boolean
-     */
-    private static function resolveDebug(mixed $debug): bool
-    {
-        if ($debug === null) {
-            return filter_var(self::env('APP_DEBUG') ?? false, FILTER_VALIDATE_BOOL)
-                || in_array(self::env('APP_ENV') ?? '', ['local', 'dev', 'development'], true);
-        }
-
-        return self::flag('debug', $debug);
-    }
-
-    /**
-     * @throws RouterException If the value is neither a boolean nor boolean-like
+     * @throws RouterException If the value is neither a boolean nor boolean-like nor empty
      */
     private static function flag(string $name, mixed $value): bool
     {
@@ -165,9 +159,10 @@ class Router implements RequestHandlerInterface
     }
 
     /**
-     * Factory method for fluent creation.
+     * Factory method for fluent creation. Like the constructor it does not look at the
+     * environment.
      *
-     * @param array{debug?: bool|int|string|null, basePath?: string, baseUrl?: string, trailingSlash?: string, routesFile?: string, urlEncoding?: bool, implicitHead?: bool|int|string|null} $config
+     * @param array{debug?: bool|int|string|null, basePath?: string|null, baseUrl?: string|null, trailingSlash?: string|null, routesFile?: string|null, urlEncoding?: bool|int|string|null, implicitHead?: bool|int|string|null} $config
      */
     public static function create(array $config = []): self
     {
@@ -175,25 +170,52 @@ class Router implements RequestHandlerInterface
     }
 
     /**
-     * Create a router that takes what $config does not say from the environment
-     * ($_ENV, then getenv()): APP_DEBUG, APP_ENV, APP_URL and the ROUTER_* variables.
+     * Create a router from the environment — the only place where the router reads it.
      *
-     * Today create() and the constructor do the same. That silent fallback is deprecated
-     * and ends with 2.0 — from then on only fromEnv() reads the environment.
+     * Read are, from $_ENV and then getenv(): APP_DEBUG (debug), APP_URL (baseUrl),
+     * ROUTER_BASE_PATH (basePath), ROUTER_TRAILING_SLASH (trailingSlash) and
+     * ROUTER_URL_ENCODING (urlEncoding). A key that $config contains wins over its variable —
+     * also with null, false or an empty value.
      *
-     * @param array{debug?: bool|int|string|null, basePath?: string, baseUrl?: string, trailingSlash?: string, routesFile?: string, urlEncoding?: bool, implicitHead?: bool|int|string|null} $config Values that take precedence
+     * @param array{debug?: bool|int|string|null, basePath?: string|null, baseUrl?: string|null, trailingSlash?: string|null, routesFile?: string|null, urlEncoding?: bool|int|string|null, implicitHead?: bool|int|string|null} $config Values that take precedence
      *
-     * @throws RouterException If 'debug' or 'implicitHead' is neither a boolean nor a boolean-like value
+     * @throws RouterException As the constructor; and if APP_DEBUG or ROUTER_URL_ENCODING is
+     *                         read and its value is not boolean-like (APP_DEBUG=maybe)
      */
     public static function fromEnv(array $config = []): self
     {
-        return new self($config);
+        $fromEnvironment = [];
+        foreach (self::ENV_VARIABLES as $key => $variable) {
+            // A key that $config has is settled, whatever its value: its variable is not even looked at
+            if (array_key_exists($key, $config)) {
+                continue;
+            }
+
+            $value = self::env($variable);
+            if ($value === null) {
+                continue;
+            }
+
+            if (in_array($key, ['debug', 'urlEncoding'], true)
+                && filter_var($value, FILTER_VALIDATE_BOOL, FILTER_NULL_ON_FAILURE) === null) {
+                // Names the variable — the config key would send the reader to the wrong place
+                throw new RouterException(sprintf(
+                    'Environment variable %s must be boolean-like (true/false, 1/0, on/off, yes/no or empty)',
+                    $variable
+                ));
+            }
+
+            $fromEnvironment[$key] = $value;
+        }
+
+        return new self($config + $fromEnvironment);
     }
 
     /**
-     * Quick boot: create, load routes, and run.
+     * Quick boot: create, load routes, and run. Reads no environment either — for that:
+     * Router::fromEnv()->loadRoutes($routesFile)->run().
      *
-     * @param array{debug?: bool|int|string|null, basePath?: string, baseUrl?: string, trailingSlash?: string, routesFile?: string, urlEncoding?: bool, implicitHead?: bool|int|string|null} $config
+     * @param array{debug?: bool|int|string|null, basePath?: string|null, baseUrl?: string|null, trailingSlash?: string|null, routesFile?: string|null, urlEncoding?: bool|int|string|null, implicitHead?: bool|int|string|null} $config
      * @param string $routesFile Path to routes file
      */
     public static function boot(array $config, string $routesFile): void
@@ -231,7 +253,7 @@ class Router implements RequestHandlerInterface
     }
 
     /**
-     * Whether debug mode is on — as the router decided it from config and environment.
+     * Whether debug mode is on.
      */
     public function isDebug(): bool
     {
@@ -334,7 +356,7 @@ class Router implements RequestHandlerInterface
     /**
      * Generate absolute URL for a named route.
      *
-     * Requires baseUrl to be set via config or APP_URL env variable.
+     * Requires baseUrl: from the config, or APP_URL through fromEnv().
      *
      * @param string $name Route name
      * @param array<string, int|string> $params Route parameters

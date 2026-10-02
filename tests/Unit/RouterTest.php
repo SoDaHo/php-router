@@ -202,7 +202,7 @@ class RouterTest extends TestCase
                 PHP
         );
 
-        $router = Router::create()->loadRoutes($this->routesFile);
+        $router = Router::fromEnv()->loadRoutes($this->routesFile);
         $response = $router->handle(new ServerRequest('GET', '/error'));
 
         // Should show debug info due to APP_DEBUG=true

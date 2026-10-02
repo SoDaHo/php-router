@@ -93,6 +93,36 @@ class RouterOutputTest extends TestCase
     }
 
     #[RunInSeparateProcess]
+    public function testBootDoesNotLookAtTheEnvironment(): void
+    {
+        $this->createRoutesFile(
+            <<<'PHP_ROUTES'
+                <?php
+                use Sodaho\Router\RouteCollector;
+
+                return function (RouteCollector $r) {
+                    $r->get('/boot-test', fn($req) => throw new \RuntimeException('secret detail'));
+                };
+                PHP_ROUTES
+        );
+
+        $_SERVER['REQUEST_METHOD'] = 'GET';
+        $_SERVER['REQUEST_URI'] = '/boot-test';
+        $_SERVER['SERVER_PROTOCOL'] = 'HTTP/1.1';
+        $_ENV['APP_DEBUG'] = 'true';
+        $_ENV['ROUTER_BASE_PATH'] = '/env';
+
+        ob_start();
+        Router::boot([], $this->routesFile);
+        $output = (string) ob_get_clean();
+
+        // Neither the base path nor debug came from the environment: the route is found
+        // under its own path, and its exception stays out of the response
+        $this->assertStringContainsString('"code":"SERVER_ERROR"', $output);
+        $this->assertStringNotContainsString('secret detail', $output);
+    }
+
+    #[RunInSeparateProcess]
     public function testEmitHandles404(): void
     {
         $this->createRoutesFile(
