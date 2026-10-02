@@ -22,7 +22,9 @@ final class RouteMatch
     /**
      * @param int $status One of the constants above
      * @param string $method Request method the lookup was made for
-     * @param string $path Path the table was asked with: decoded, without basePath, trailing slash as configured
+     * @param string $path Path the table was asked with: decoded, without basePath, trailing slash as configured.
+     *                     Where the table was not asked, the path of the request: decoded for one outside the
+     *                     base path, as it came for one with a hidden separator (%2F, %5C, backslash)
      * @param Route|null $route FOUND: the route. METHOD_NOT_ALLOWED: a route registered for the path — the
      *                          GET route if there is one, otherwise that of the first allowed method.
      *                          Tell the two apart by $status, not by this being set

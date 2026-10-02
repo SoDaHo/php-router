@@ -469,6 +469,21 @@ class AppFolderTest extends TestCase
      * A request object whose path carries what a URI class would have encoded. The folder
      * looks at the path the route table was asked with, too.
      */
+    public function testFolderRefusesEncodedSeparatorsWhenAskedDirectly(): void
+    {
+        // The dispatcher turns such paths away before any app is asked. The class keeps
+        // its word for a caller of its own: the raw path counts, not what it decodes to.
+        $folder = new AppFolder('/login', $this->app);
+
+        foreach (['/login/assets%2Fstyle.css', '/login/assets%2fstyle.css', '/login/assets%5Cstyle.css', '/login/assets%5cstyle.css'] as $raw) {
+            $this->assertNull($folder->serve(new ServerRequest('GET', $raw), '/login/assets/style.css'), $raw);
+        }
+
+        $honest = $folder->serve(new ServerRequest('GET', '/login/assets/style.css'), '/login/assets/style.css');
+        $this->assertNotNull($honest);
+        $this->assertSame('p{}', (string) $honest->getBody());
+    }
+
     public function testRawNulAndBackslashInThePathAreRefusedAsWell(): void
     {
         $router = $this->router();

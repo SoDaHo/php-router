@@ -286,10 +286,10 @@ final class AppFolder
      */
     private function relativePath(string $rawPath, string $path): ?string
     {
-        // An encoded slash has no business in the path of a static file: the router decodes
-        // it into a separator, whoever sits in front (proxy, access rules) may not have.
-        // Backslash and NUL — encoded or not — are refused segment by segment below.
-        if (preg_match('/%2f/i', $rawPath) === 1) {
+        // The dispatcher has no route for a path with an encoded separator and asks no app.
+        // This class keeps its own word all the same, for whoever calls it directly.
+        // Backslash and NUL are refused segment by segment below.
+        if (preg_match('/%2f|%5c/i', $rawPath) === 1) {
             return null;
         }
 

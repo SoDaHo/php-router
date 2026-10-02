@@ -178,6 +178,13 @@ class RouteDispatcher implements RequestHandlerInterface
     {
         $method = $request->getMethod();
         $requestPath = $request->getUri()->getPath();
+
+        if (self::hidesSeparator($requestPath)) {
+            // The table is not asked. The path stays as it came — decoded it would read
+            // like the path of a route that exists.
+            return $this->issue(new RouteMatch(RouteMatch::NOT_FOUND, $method, $requestPath), $requestPath);
+        }
+
         $path = $this->normalizePath($request);
 
         if ($path === null) {
@@ -271,6 +278,17 @@ class RouteDispatcher implements RequestHandlerInterface
         $position = (int) array_search('GET', $methods, true) + 1;
 
         return [...array_slice($methods, 0, $position), 'HEAD', ...array_slice($methods, $position)];
+    }
+
+    /**
+     * Whether a request path carries a separator that is none in the address: an encoded
+     * slash (%2F), an encoded backslash (%5C) or a backslash. Decoded, '/files/a%2Fb'
+     * would be two segments here and one for whatever stands in front (proxy, access
+     * rules of the web server) — such a path has no route, as with Apache's default.
+     */
+    private static function hidesSeparator(string $requestPath): bool
+    {
+        return preg_match('/%2f|%5c|\\\\/i', $requestPath) === 1;
     }
 
     /**
@@ -504,7 +522,8 @@ class RouteDispatcher implements RequestHandlerInterface
      */
     private function serveApp(ServerRequestInterface $request): ?ResponseInterface
     {
-        if ($this->apps === []) {
+        // A path with a hidden separator has no route — and no file of an app either
+        if ($this->apps === [] || self::hidesSeparator($request->getUri()->getPath())) {
             return null;
         }
 
