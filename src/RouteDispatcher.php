@@ -28,6 +28,7 @@ class RouteDispatcher implements RequestHandlerInterface
     private string $basePath;
     private string $trailingSlash;
     private bool $debug;
+    private bool $implicitHead = false;
 
     /** @var array<int, string|object> Middleware for every request, outermost first */
     private array $middleware = [];
@@ -85,6 +86,19 @@ class RouteDispatcher implements RequestHandlerInterface
     public function setMiddleware(array $middleware): static
     {
         $this->middleware = $middleware;
+        return $this;
+    }
+
+    /**
+     * Let HEAD requests without a HEAD route of their own run through the GET route.
+     */
+    public function setImplicitHead(bool $implicitHead): static
+    {
+        $this->implicitHead = $implicitHead;
+
+        // What was looked up under the other setting no longer stands in for a fresh lookup
+        $this->issued = new \WeakMap();
+
         return $this;
     }
 
@@ -159,6 +173,16 @@ class RouteDispatcher implements RequestHandlerInterface
         }
 
         $result = $this->dispatcher->dispatch($method, $path);
+        $viaGet = false;
+        $implicitHead = $this->implicitHead;
+
+        if ($result[0] !== Dispatcher::FOUND && $method === 'HEAD' && $this->implicitHead) {
+            $asGet = $this->dispatcher->dispatch('GET', $path);
+            if ($asGet[0] === Dispatcher::FOUND) {
+                $result = $asGet;
+                $viaGet = true;
+            }
+        }
 
         $match = match ($result[0]) {
             Dispatcher::FOUND => new RouteMatch(
@@ -168,15 +192,17 @@ class RouteDispatcher implements RequestHandlerInterface
                 $this->ensureRoute($result[1]),
                 $result[2],
                 $result[3],
-                // For a hit the list costs another pass over the table, so it is built on demand
-                allowedMethods: fn (): array => $this->dispatcher->allowedMethods($path),
+                $viaGet,
+                // For a hit the list costs another pass over the table, so it is built on demand —
+                // with the setting of this moment, like everything else the match says
+                fn (): array => self::withHead($this->dispatcher->allowedMethods($path), $implicitHead),
             ),
             Dispatcher::METHOD_NOT_ALLOWED => new RouteMatch(
                 RouteMatch::METHOD_NOT_ALLOWED,
                 $method,
                 $path,
                 $this->routeOfPath($path, $this->ensureStringArray($result[1])),
-                allowedMethods: $this->ensureStringArray($result[1]),
+                allowedMethods: self::withHead($this->ensureStringArray($result[1]), $implicitHead),
             ),
             default => new RouteMatch(RouteMatch::NOT_FOUND, $method, $path),
         };
@@ -210,6 +236,26 @@ class RouteDispatcher implements RequestHandlerInterface
         $result = $this->dispatcher->dispatch($method, $path);
 
         return $result[0] === Dispatcher::FOUND ? $this->ensureRoute($result[1]) : null;
+    }
+
+    /**
+     * With implicitHead, a path that answers GET answers HEAD: HEAD stands right behind GET,
+     * also when the path has a HEAD route of its own.
+     *
+     * @param list<string> $methods
+     *
+     * @return list<string>
+     */
+    private static function withHead(array $methods, bool $implicitHead): array
+    {
+        if (!$implicitHead || !in_array('GET', $methods, true)) {
+            return $methods;
+        }
+
+        $methods = array_values(array_diff($methods, ['HEAD']));
+        $position = (int) array_search('GET', $methods, true) + 1;
+
+        return [...array_slice($methods, 0, $position), 'HEAD', ...array_slice($methods, $position)];
     }
 
     /**
@@ -259,15 +305,19 @@ class RouteDispatcher implements RequestHandlerInterface
     {
         $startTime = microtime(true);
 
-        // The request as it was last passed inwards
+        // The request as it was last passed inwards, and whether it has been HEAD at any step
         $current = $request;
+        $head = false;
 
         // What the error responder threw itself — nothing answers that a second time
         /** @var \SplObjectStorage<\Throwable, null> $unanswerable */
         $unanswerable = new \SplObjectStorage();
 
-        $enter = function (ServerRequestInterface $request) use (&$current): ServerRequestInterface {
-            return $current = $this->attachMatch($request);
+        $enter = function (ServerRequestInterface $request) use (&$current, &$head): ServerRequestInterface {
+            $current = $this->attachMatch($request);
+            $head = $head || $current->getMethod() === 'HEAD';
+
+            return $current;
         };
 
         $handler = new Middleware\CallableHandler(function (ServerRequestInterface $request) use ($enter, $startTime, $unanswerable): ResponseInterface {
@@ -300,7 +350,7 @@ class RouteDispatcher implements RequestHandlerInterface
                 );
             }
 
-            return $handler->handle($request);
+            $response = $handler->handle($request);
         } catch (\Throwable $e) {
             if ($this->errorResponder === null || $unanswerable->contains($e)) {
                 throw $e;
@@ -309,8 +359,20 @@ class RouteDispatcher implements RequestHandlerInterface
             // Last resort: a middleware for every request threw or could not be built. The
             // responder gets the request as far as it came, with its RouteMatch; its answer
             // does not pass through the middleware any more.
-            return ($this->errorResponder)($e, $enter($current));
+            $response = ($this->errorResponder)($e, $enter($current));
         }
+
+        // With implicitHead on, no answer to a HEAD request carries a body — whoever made it:
+        // a GET route, a middleware for every request (a 404 page), the error responder.
+        // Cut here, at the very end: the middleware has seen the body GET would send (for an
+        // ETag, a Content-Length), and status and headers stay exactly as they are. "HEAD"
+        // is a request that was HEAD at any step on its way in — also in a delegation whose
+        // answer a middleware threw away to delegate again.
+        if ($this->implicitHead && $head) {
+            $response = $response->withBody(\Nyholm\Psr7\Stream::create(''));
+        }
+
+        return $response;
     }
 
     /**

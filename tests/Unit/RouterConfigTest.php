@@ -20,6 +20,7 @@ class RouterConfigTest extends TestCase
     private const ENV_KEYS = [
         'APP_DEBUG', 'APP_ENV', 'APP_URL',
         'ROUTER_BASE_PATH', 'ROUTER_TRAILING_SLASH', 'ROUTER_CACHE_FILE', 'ROUTER_CACHE_KEY', 'ROUTER_URL_ENCODING',
+        'ROUTER_IMPLICIT_HEAD',
     ];
 
     private string $routesFile;
@@ -485,6 +486,38 @@ class RouterConfigTest extends TestCase
         $this->assertFalse($router->isDebug());
         $this->assertSame(200, $router->handle(new ServerRequest('GET', '/config/users'))->getStatusCode());
         $this->assertSame('https://env.example.com/config/users/5', $router->absoluteUrl('users.show', ['id' => 5]));
+    }
+
+    public function testImplicitHeadIsAConfigValueAndNotReadFromTheEnvironment(): void
+    {
+        $_ENV['ROUTER_IMPLICIT_HEAD'] = 'true';
+        putenv('ROUTER_IMPLICIT_HEAD=true');
+
+        $this->assertSame(405, $this->router(['debug' => false])->handle(new ServerRequest('HEAD', '/users'))->getStatusCode());
+        $this->assertSame(
+            200,
+            $this->router(['debug' => false, 'implicitHead' => true])->handle(new ServerRequest('HEAD', '/users'))->getStatusCode()
+        );
+    }
+
+    public function testImplicitHeadTakesBooleanLikeValuesAndRefusesTheRest(): void
+    {
+        $status = fn (mixed $value): int => $this->router(['debug' => false, 'implicitHead' => $value])
+            ->handle(new ServerRequest('HEAD', '/users'))
+            ->getStatusCode();
+
+        foreach ([true, 'true', '1', 1, 'on'] as $on) {
+            $this->assertSame(200, $status($on), var_export($on, true));
+        }
+
+        // 'false' from an env file is not "a non-empty string, so on"
+        foreach ([false, 'false', '0', 0, 'off', '', null, []] as $off) {
+            $this->assertSame(405, $status($off), var_export($off, true));
+        }
+
+        $this->expectException(RouterException::class);
+        $this->expectExceptionMessage("Config 'implicitHead' must be a boolean, got string");
+        $status('maybe');
     }
 }
 

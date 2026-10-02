@@ -65,7 +65,7 @@ class Router implements RequestHandlerInterface
         'origin-agent-cluster' => true,
     ];
 
-    /** @var array{debug: bool, basePath: string, baseUrl: ?string, trailingSlash: string, cacheFile: ?string, cacheSignature: ?string, routesFile: ?string, urlEncoding: bool} */
+    /** @var array{debug: bool, basePath: string, baseUrl: ?string, trailingSlash: string, cacheFile: ?string, cacheSignature: ?string, routesFile: ?string, urlEncoding: bool, implicitHead: bool} */
     private array $config;
 
     /** @var array<int, string|object> Middleware for every request, outermost first */
@@ -85,9 +85,9 @@ class Router implements RequestHandlerInterface
     /**
      * Create a new Router instance.
      *
-     * @param array{debug?: bool|int|string|null, basePath?: string, baseUrl?: string, trailingSlash?: string, cacheFile?: string, cacheSignature?: string, routesFile?: string, urlEncoding?: bool} $config
+     * @param array{debug?: bool|int|string|null, basePath?: string, baseUrl?: string, trailingSlash?: string, cacheFile?: string, cacheSignature?: string, routesFile?: string, urlEncoding?: bool, implicitHead?: bool|int|string|null} $config
      *
-     * @throws RouterException If 'debug' is neither a boolean nor a boolean-like value
+     * @throws RouterException If 'debug' or 'implicitHead' is neither a boolean nor a boolean-like value
      */
     public function __construct(array $config = [])
     {
@@ -102,6 +102,8 @@ class Router implements RequestHandlerInterface
             'routesFile' => $config['routesFile'] ?? null,
             'urlEncoding' => $config['urlEncoding']
                 ?? filter_var(self::env('ROUTER_URL_ENCODING') ?? true, FILTER_VALIDATE_BOOL),
+            // Config only — new options no longer look at the environment
+            'implicitHead' => self::flag('implicitHead', $config['implicitHead'] ?? false),
         ];
     }
 
@@ -135,19 +137,27 @@ class Router implements RequestHandlerInterface
                 || in_array(self::env('APP_ENV') ?? '', ['local', 'dev', 'development'], true);
         }
 
+        return self::flag('debug', $debug);
+    }
+
+    /**
+     * @throws RouterException If the value is neither a boolean nor boolean-like
+     */
+    private static function flag(string $name, mixed $value): bool
+    {
         // Config arrays are often built from env files, so 'true'/'false'/'1'/'0' count too.
-        $flag = filter_var($debug, FILTER_VALIDATE_BOOL, FILTER_NULL_ON_FAILURE);
+        $flag = filter_var($value, FILTER_VALIDATE_BOOL, FILTER_NULL_ON_FAILURE);
         if ($flag !== null) {
             return $flag;
         }
 
         // Neither a boolean nor boolean-like. Something truthy used to end in a TypeError on
         // every request; something empty ([]) simply is not "on".
-        if (!$debug) {
+        if (!$value) {
             return false;
         }
 
-        throw new RouterException(sprintf("Config 'debug' must be a boolean, got %s", get_debug_type($debug)));
+        throw new RouterException(sprintf("Config '%s' must be a boolean, got %s", $name, get_debug_type($value)));
     }
 
     /**
@@ -163,7 +173,7 @@ class Router implements RequestHandlerInterface
     /**
      * Factory method for fluent creation.
      *
-     * @param array{debug?: bool|int|string|null, basePath?: string, baseUrl?: string, trailingSlash?: string, cacheFile?: string, cacheSignature?: string, routesFile?: string, urlEncoding?: bool} $config
+     * @param array{debug?: bool|int|string|null, basePath?: string, baseUrl?: string, trailingSlash?: string, cacheFile?: string, cacheSignature?: string, routesFile?: string, urlEncoding?: bool, implicitHead?: bool|int|string|null} $config
      */
     public static function create(array $config = []): self
     {
@@ -177,9 +187,9 @@ class Router implements RequestHandlerInterface
      * Today create() and the constructor do the same. That silent fallback is deprecated
      * and ends with 2.0 — from then on only fromEnv() reads the environment.
      *
-     * @param array{debug?: bool|int|string|null, basePath?: string, baseUrl?: string, trailingSlash?: string, cacheFile?: string, cacheSignature?: string, routesFile?: string, urlEncoding?: bool} $config Values that take precedence
+     * @param array{debug?: bool|int|string|null, basePath?: string, baseUrl?: string, trailingSlash?: string, cacheFile?: string, cacheSignature?: string, routesFile?: string, urlEncoding?: bool, implicitHead?: bool|int|string|null} $config Values that take precedence
      *
-     * @throws RouterException If 'debug' is neither a boolean nor a boolean-like value
+     * @throws RouterException If 'debug' or 'implicitHead' is neither a boolean nor a boolean-like value
      */
     public static function fromEnv(array $config = []): self
     {
@@ -189,7 +199,7 @@ class Router implements RequestHandlerInterface
     /**
      * Quick boot: create, load routes, and run.
      *
-     * @param array{debug?: bool|int|string|null, basePath?: string, baseUrl?: string, trailingSlash?: string, cacheFile?: string, cacheSignature?: string, routesFile?: string, urlEncoding?: bool} $config
+     * @param array{debug?: bool|int|string|null, basePath?: string, baseUrl?: string, trailingSlash?: string, cacheFile?: string, cacheSignature?: string, routesFile?: string, urlEncoding?: bool, implicitHead?: bool|int|string|null} $config
      * @param string $routesFile Path to routes file
      */
     public static function boot(array $config, string $routesFile): void
@@ -393,7 +403,14 @@ class Router implements RequestHandlerInterface
             $dispatcher = $this->getDispatcher();
         } catch (\Throwable $e) {
             // The routes could not be loaded
-            return $this->errorResponse($e, $request);
+            $response = $this->errorResponse($e, $request);
+
+            // No answer to HEAD carries a body with implicitHead on — this one included
+            if ($this->config['implicitHead'] && $request->getMethod() === 'HEAD') {
+                $response = $response->withBody(\Nyholm\Psr7\Stream::create(''));
+            }
+
+            return $response;
         }
 
         // Everything a request runs into from here on is answered in the dispatcher, through
@@ -577,6 +594,7 @@ class Router implements RequestHandlerInterface
             $this->config['debug']
         );
         $this->dispatcher
+            ->setImplicitHead($this->config['implicitHead'])
             ->setMiddleware($this->middleware)
             ->setErrorResponder($this->errorResponse(...));
 
