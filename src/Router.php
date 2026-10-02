@@ -311,19 +311,31 @@ class Router implements RequestHandlerInterface
         $data = null;
         $cache = null;
 
-        // Try loading from cache (only in non-debug mode)
+        // Try loading from cache (only in non-debug mode). The cache is an optimisation: a
+        // missing key, a file that fails verification or no longer fits the application and
+        // a failed write are reported through the error hook, and the request is served from
+        // the routes file.
         if ($this->config['cacheFile']) {
-            $cache = new RouteCache(
-                $this->config['cacheFile'],
-                $this->config['cacheSignature'],
-                !$this->config['debug'] // Disabled in debug mode
-            );
+            try {
+                $cache = new RouteCache(
+                    $this->config['cacheFile'],
+                    $this->config['cacheSignature'],
+                    !$this->config['debug'] // Disabled in debug mode
+                );
+            } catch (CacheException $e) {
+                $this->trigger('error', [
+                    'type' => 'cache',
+                    'message' => $e->getMessage(),
+                    'exception' => $e,
+                ]);
+            }
 
-            if (!$this->config['debug']) {
+            if ($cache !== null && !$this->config['debug']) {
                 try {
                     $data = $cache->load();
-                } catch (CacheException $e) {
-                    // Cache corrupted (e.g., HMAC mismatch) - trigger error hook and rebuild
+                } catch (\Throwable $e) {
+                    // Not a cache file this key signed, outdated, or something in between threw
+                    // (an autoloader, a stream wrapper) - trigger error hook and rebuild
                     $this->trigger('error', [
                         'type' => 'cache',
                         'message' => $e->getMessage(),
@@ -359,14 +371,16 @@ class Router implements RequestHandlerInterface
             $dispatchData = $this->collector->getData();
             $namedRoutes = $this->collector->getNamedRoutesData();
 
-            // Save to cache (fails gracefully if Closures are used)
+            // Save to cache. Routes that cannot be cached (Closures) and a cache file that
+            // cannot be written are both reported and neither stops the request: the table
+            // just built is complete.
             try {
                 $cache?->save([
                     'dispatchData' => $dispatchData,
                     'namedRoutes' => $namedRoutes,
                 ]);
-            } catch (\LogicException $e) {
-                // Closures cannot be cached - trigger error hook and continue without cache
+            } catch (\Throwable $e) {
+                // trigger error hook and continue without cache
                 $this->trigger('error', [
                     'type' => 'cache',
                     'message' => $e->getMessage(),
