@@ -26,11 +26,44 @@ use Sodaho\Router\Traits\HasHooks;
 class Router implements RequestHandlerInterface
 {
     use HasHooks;
+
     /** Bytes pulled from the response body per emit() iteration (see emit()). */
     private const EMIT_CHUNK_SIZE = 8192;
 
     /** Consecutive empty reads tolerated before emit() gives up on a stalled body. */
     private const EMIT_EMPTY_READ_LIMIT = 3;
+
+    /**
+     * Response fields that exist once per message. Only for these does the response replace
+     * what the host already set; every other field is a list whose lines add up (Vary,
+     * Cache-Control, Link, Content-Security-Policy, Set-Cookie, ...).
+     *
+     * Security fields are sorted by what a browser does with two lines of them. Sent twice,
+     * the Cross-Origin-* policies and Origin-Agent-Cluster are no valid value at all and the
+     * protection is gone — so they are replaced. X-Frame-Options, Strict-Transport-Security
+     * and Access-Control-Allow-Origin fall back to the safe side when two values conflict —
+     * so they stay additive, and a route cannot quietly weaken what the host set.
+     */
+    private const SINGLETON_HEADERS = [
+        'content-type' => true,
+        'content-length' => true,
+        'content-range' => true,
+        'content-location' => true,
+        'content-disposition' => true,
+        'location' => true,
+        'etag' => true,
+        'last-modified' => true,
+        'date' => true,
+        'expires' => true,
+        'age' => true,
+        'retry-after' => true,
+        'cross-origin-embedder-policy' => true,
+        'cross-origin-embedder-policy-report-only' => true,
+        'cross-origin-opener-policy' => true,
+        'cross-origin-opener-policy-report-only' => true,
+        'cross-origin-resource-policy' => true,
+        'origin-agent-cluster' => true,
+    ];
 
     /** @var array{debug: bool, basePath: string, baseUrl: ?string, trailingSlash: string, cacheFile: ?string, cacheSignature: ?string, routesFile: ?string, urlEncoding: bool} */
     private array $config;
@@ -222,14 +255,16 @@ class Router implements RequestHandlerInterface
     /**
      * Convenience method: create request from globals, handle, and emit response.
      *
-     * @throws RouterException If no routes are loaded
+     * Whatever goes wrong while the request is handled becomes a 500 response (see handle()).
+     *
+     * @throws RouterException If the response body cannot be read (closed or detached)
      */
     public function run(): void
     {
         $psr17 = new Psr17Factory();
         $creator = new ServerRequestCreator($psr17, $psr17, $psr17, $psr17);
-        $response = $this->handle($creator->fromGlobals());
-        $this->emit($response);
+        $request = $creator->fromGlobals();
+        $this->emit($this->handle($request), $request->getMethod() !== 'HEAD');
     }
 
     /**
@@ -393,35 +428,73 @@ class Router implements RequestHandlerInterface
         return $this->urlGenerator;
     }
 
-    private function emit(ResponseInterface $response): void
+    private function emit(ResponseInterface $response, bool $withBody = true): void
     {
         // @codeCoverageIgnoreStart
-        // headers_sent() is always false in CLI/PHPUnit
-        if (headers_sent()) {
+        // headers_sent() is always false in CLI/PHPUnit; EmitOverHttpTest covers it over HTTP
+        if (headers_sent($file, $line)) {
+            // Something printed before the router did (a stray echo, a displayed warning).
+            // Status and headers can no longer be sent, so nothing is — but not silently.
+            // PHP only knows the place when the output came from a script line, not after flush()
+            $message = 'Response not sent: output had already started'
+                . ($file !== '' ? sprintf(' at %s:%d', $file, $line) : '');
+            $this->trigger('error', [
+                'type' => 'emit',
+                'message' => $message,
+                'exception' => new RouterException($message),
+            ]);
+
             return;
         }
         // @codeCoverageIgnoreEnd
 
-        // Readability BEFORE the status line: a detached/closed body used to blow up loudly
+        // Readability BEFORE anything is sent: a detached/closed body used to blow up loudly
         // inside __toString(). Throwing after the headers went out would leave a half-sent
         // response; throwing here lets the error handler still produce a proper 500.
         if (!$response->getBody()->isReadable()) {
             throw new RouterException('Response body is not readable (closed or detached before emit)');
         }
 
-        // Status line
-        header(sprintf(
+        $statusLine = sprintf(
             'HTTP/%s %d %s',
             $response->getProtocolVersion(),
             $response->getStatusCode(),
             $response->getReasonPhrase()
-        ));
+        );
 
-        // Headers
+        // The one case left to PHP: a response that never chose a status (200) but carries a
+        // Location. That has always gone out as a redirect, and code that builds redirects
+        // by header alone relies on it. For exactly that case the status line goes first, as
+        // it did up to 1.1.0, and Location turns it into 302/303. Kept for 1.x; use
+        // Response::redirect().
+        $redirectByHeader = $response->getStatusCode() === 200 && $response->hasHeader('Location');
+        if ($redirectByHeader) {
+            header($statusLine);
+        }
+
+        // Headers. A field that exists once per message replaces what the host already set
+        // under that name — two Content-Type or Location lines are not a valid response. All
+        // other fields are lists: the response's lines are added to the host's, so a
+        // "Vary: Cookie" or a session's "Cache-Control: no-store" set before run() stays.
         foreach ($response->getHeaders() as $name => $values) {
+            $replace = isset(self::SINGLETON_HEADERS[strtolower((string) $name)]);
             foreach ($values as $value) {
-                header("$name: $value", false);
+                header("$name: $value", $replace);
+                $replace = false;
             }
+        }
+
+        // Status line LAST. header() rewrites the status as a side effect: WWW-Authenticate
+        // forces 401 and Location forces 302 (unless 201/3xx). Sent first, a 403 with a
+        // challenge would arrive as 401 and a 202 with a Location as 302.
+        if (!$redirectByHeader) {
+            header($statusLine);
+        }
+
+        // HEAD: PHP discards the output anyway, so do not read the body at all — for a
+        // Response::file() that would be the whole file.
+        if (!$withBody) {
+            return;
         }
 
         // Body — pulled in chunks so large payloads (file downloads via Response::file())

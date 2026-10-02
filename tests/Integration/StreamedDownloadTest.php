@@ -299,7 +299,9 @@ class StreamedDownloadTest extends TestCase
     public function testTransientEmptyReadsDoNotTruncateTheBody(): void
     {
         // Pump/append streams return '' while eof() is still false. Breaking on the first
-        // empty read would silently cut the body short.
+        // empty read would silently cut the body short. Two empty reads in a row, twice:
+        // four in total — more than the limit of three, which only counts CONSECUTIVE ones.
+        // A counter that is not reset after a chunk would stop before 'C'.
         $this->createRoutes(
             <<<'PHP'
                 <?php
@@ -311,7 +313,7 @@ class StreamedDownloadTest extends TestCase
                 return function (RouteCollector $r) {
                     $r->get('/pump', function ($req) {
                         $body = new class implements StreamInterface {
-                            private array $parts = ['A', '', 'B', '', 'C'];
+                            private array $parts = ['A', '', '', 'B', '', '', 'C'];
                             private int $i = 0;
                             public function __toString(): string { return 'ABC'; }
                             public function close(): void {}
