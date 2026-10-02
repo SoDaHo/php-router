@@ -401,7 +401,8 @@ class RouteCollector
                 $regex = implode('', $regexParts);
 
                 $dynamicRoutes[$method][] = [
-                    'regex' => '#^' . $regex . '$#',
+                    // \z, not $: $ also matches before a trailing newline, so '/users/5%0A' would hit '/users/{id:int}'
+                    'regex' => '#^' . $regex . '\z#',
                     'route' => $route,
                     'casts' => $casts,
                 ];

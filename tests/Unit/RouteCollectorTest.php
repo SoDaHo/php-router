@@ -311,4 +311,35 @@ class RouteCollectorTest extends TestCase
         $this->assertDoesNotMatchRegularExpression($regex, '/v1X0/users/123');
         $this->assertDoesNotMatchRegularExpression($regex, '/v1-0/users/123');
     }
+
+    public function testCompiledRegexIsAnchoredAtTheVeryEnd(): void
+    {
+        $this->collector->get('/users/{id:int}', 'handler');
+        $this->collector->get('/files/{name}', 'handler');
+
+        [, $dynamic] = $this->collector->getData();
+        $dispatcher = new \Sodaho\Router\Dispatcher([], $dynamic);
+
+        // "$" also matches before a trailing newline: '/users/5%0A' addressed the same route
+        // as '/users/5', while caches, logs and rate limiters in front saw two different paths.
+        $this->assertSame(\Sodaho\Router\Dispatcher::FOUND, $dispatcher->dispatch('GET', '/users/5')[0]);
+        $this->assertSame(\Sodaho\Router\Dispatcher::NOT_FOUND, $dispatcher->dispatch('GET', "/users/5\n")[0]);
+        $this->assertSame(\Sodaho\Router\Dispatcher::NOT_FOUND, $dispatcher->dispatch('GET', "/users/5\r\n")[0]);
+
+        // An untyped parameter takes whatever is not a slash — the newline is part of the value, not dropped
+        $match = $dispatcher->dispatch('GET', "/files/a\n");
+        $this->assertSame(\Sodaho\Router\Dispatcher::FOUND, $match[0]);
+        $this->assertSame("a\n", $match[2]['name']);
+    }
+
+    public function testAddPatternAcceptsAnEscapedDelimiterAndGroups(): void
+    {
+        $this->collector->addPatterns(['tag' => '\#[a-z]+', 'version' => 'v(?:\d+)(?:\.\d+)?']);
+        $this->collector->get('/t/{tag:tag}/{v:version}', 'handler');
+
+        $regex = $this->collector->getData()[1]['GET'][0]['regex'];
+
+        $this->assertSame(1, preg_match($regex, '/t/#php/v8.4'));
+        $this->assertSame(0, preg_match($regex, '/t/php/v8.4'));
+    }
 }
