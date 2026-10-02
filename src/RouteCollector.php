@@ -233,9 +233,11 @@ class RouteCollector
         $previousPrefix = $this->currentPrefix;
         $this->currentPrefix .= '/' . trim($prefix, '/');
 
-        $callback($this);
-
-        $this->currentPrefix = $previousPrefix;
+        try {
+            $callback($this);
+        } finally {
+            $this->currentPrefix = $previousPrefix;
+        }
     }
 
     /**
@@ -251,9 +253,11 @@ class RouteCollector
         $previousMiddleware = $this->currentMiddleware;
         $this->currentMiddleware = array_merge($this->currentMiddleware, $middleware);
 
-        $callback($this);
-
-        $this->currentMiddleware = $previousMiddleware;
+        try {
+            $callback($this);
+        } finally {
+            $this->currentMiddleware = $previousMiddleware;
+        }
     }
 
     // ==================== Redirect Routes ====================

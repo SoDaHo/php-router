@@ -342,4 +342,32 @@ class RouteCollectorTest extends TestCase
         $this->assertSame(1, preg_match($regex, '/t/#php/v8.4'));
         $this->assertSame(0, preg_match($regex, '/t/php/v8.4'));
     }
+
+    /**
+     * A routes file that catches what a group's callback throws and carries on must not
+     * register the routes after it inside that group.
+     */
+    public function testGroupsEndEvenWhenTheirCallbackThrows(): void
+    {
+        $giveUp = function (): void {
+            throw new \RuntimeException('routes of an optional module are missing');
+        };
+
+        foreach ([
+            fn () => $this->collector->group('/admin', $giveUp),
+            fn () => $this->collector->middlewareGroup('Auth', $giveUp),
+        ] as $group) {
+            try {
+                $group();
+                $this->fail('The exception was swallowed');
+            } catch (\RuntimeException $e) {
+                $this->assertSame('routes of an optional module are missing', $e->getMessage());
+            }
+        }
+
+        $route = $this->collector->get('/public', 'h');
+
+        $this->assertSame('/public', $route->pattern);
+        $this->assertSame([], $route->middleware);
+    }
 }
