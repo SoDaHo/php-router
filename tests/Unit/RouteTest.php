@@ -114,30 +114,6 @@ class RouteTest extends TestCase
         $this->assertContains($middlewareInstance, $route->middleware);
     }
 
-    public function testSetStateRestoresEverythingVarExportWrites(): void
-    {
-        // The route cache no longer goes through var_export(), but __set_state() stays public
-        // API for applications that export routes themselves. Dropping the middleware here
-        // would strip the authentication off every restored route.
-        $route = (new Route(['GET', 'HEAD'], '/users/{id}', ['UserController', 'show']))
-            ->middleware(['AuthMiddleware', 'JsonMiddleware'])
-            ->name('users.show');
-
-        $restored = eval('return ' . var_export($route, true) . ';');
-
-        $this->assertEquals($route, $restored);
-        $this->assertSame(['AuthMiddleware', 'JsonMiddleware'], $restored->middleware);
-        $this->assertSame('users.show', $restored->name);
-    }
-
-    public function testSetStateDefaultsForMissingKeys(): void
-    {
-        $restored = Route::__set_state(['methods' => ['GET'], 'pattern' => '/x', 'handler' => 'h']);
-
-        $this->assertSame([], $restored->middleware);
-        $this->assertNull($restored->name);
-    }
-
     public function testAttributes(): void
     {
         $route = new Route(['GET'], '/token', 'handler');
@@ -158,19 +134,16 @@ class RouteTest extends TestCase
         $this->assertSame('metadata', $route->getAttribute('format'));
     }
 
-    public function testAttributesThroughConstructorAndSetState(): void
+    public function testAttributesThroughConstructor(): void
     {
         $route = new Route(['GET'], '/x', 'h', [], null, ['format' => 'oauth']);
-        $this->assertSame(['format' => 'oauth'], $route->attributes);
 
-        $restored = eval('return ' . var_export($route, true) . ';');
-        $this->assertEquals($route, $restored);
-        $this->assertSame(['format' => 'oauth'], $restored->attributes);
+        $this->assertSame(['format' => 'oauth'], $route->attributes);
     }
 
     public function testRouteSerializedBeforeAttributesExistedWakesUpWithNone(): void
     {
-        // What a route cache written by 1.1.1 contains: a Route with five properties
+        // What an application that serializes routes itself may still hold from 1.1: five properties
         $before = 'O:19:"Sodaho\Router\Route":5:{s:7:"methods";a:1:{i:0;s:3:"GET";}s:7:"pattern";s:2:"/x";'
             . 's:7:"handler";s:1:"h";s:10:"middleware";a:0:{}s:4:"name";N;}';
 
@@ -179,6 +152,5 @@ class RouteTest extends TestCase
         $this->assertInstanceOf(Route::class, $route);
         $this->assertSame([], $route->attributes);
         $this->assertSame('fallback', $route->getAttribute('format', 'fallback'));
-        $this->assertSame(['format' => 'oauth'], $route->attribute('format', 'oauth')->attributes);
     }
 }

@@ -289,7 +289,7 @@ class RouteCollector
     /**
      * Register a redirect route.
      *
-     * Uses RedirectHandler instead of Closure (cache-friendly).
+     * Uses RedirectHandler instead of a Closure.
      *
      * @param string $from Source URL pattern
      * @param string $to Target URL
@@ -359,22 +359,6 @@ class RouteCollector
     public function getRoutes(): array
     {
         return $this->routes;
-    }
-
-    /**
-     * Get named routes as cacheable data (name => pattern).
-     *
-     * @return array<string, string>
-     */
-    public function getNamedRoutesData(): array
-    {
-        $namedRoutes = [];
-        foreach ($this->routes as $route) {
-            if ($route->name !== null) {
-                $namedRoutes[$route->name] = $route->pattern;
-            }
-        }
-        return $namedRoutes;
     }
 
     /**

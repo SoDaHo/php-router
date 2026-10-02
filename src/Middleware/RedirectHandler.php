@@ -12,7 +12,7 @@ use Sodaho\Router\Response;
 /**
  * Handler for redirect routes.
  *
- * Cache-friendly alternative to Closures.
+ * A class instead of a Closure, so that a redirect route can be inspected (target, status).
  */
 class RedirectHandler implements RequestHandlerInterface
 {
@@ -51,7 +51,7 @@ class RedirectHandler implements RequestHandlerInterface
     }
 
     /**
-     * Get target URL (for serialization).
+     * Get target URL.
      */
     public function getTarget(): string
     {
@@ -59,23 +59,10 @@ class RedirectHandler implements RequestHandlerInterface
     }
 
     /**
-     * Get status code (for serialization).
+     * Get status code.
      */
     public function getStatus(): int
     {
         return $this->status;
-    }
-
-    /**
-     * Restore object from var_export() output.
-     *
-     * The route cache serializes and no longer needs this; kept for applications that
-     * var_export() routes themselves.
-     *
-     * @param array{target: string, status: int} $data Exported data
-     */
-    public static function __set_state(array $data): self
-    {
-        return new self($data['target'], $data['status']);
     }
 }

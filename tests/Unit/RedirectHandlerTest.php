@@ -99,29 +99,4 @@ class RedirectHandlerTest extends TestCase
         $this->assertSame(302, $handler302->getStatus());
         $this->assertSame(307, $handler307->getStatus());
     }
-
-    public function testIsSerializable(): void
-    {
-        $handler = new RedirectHandler('/new', 301);
-
-        $serialized = serialize($handler);
-        $unserialized = unserialize($serialized);
-
-        $this->assertSame('/new', $unserialized->getTarget());
-        $this->assertSame(301, $unserialized->getStatus());
-    }
-
-    public function testSetState(): void
-    {
-        // Test __set_state for var_export() cache support
-        $original = new RedirectHandler('/cached', 301);
-
-        // Simulate what var_export does
-        $exported = var_export($original, true);
-        $restored = eval('return ' . $exported . ';');
-
-        $this->assertInstanceOf(RedirectHandler::class, $restored);
-        $this->assertSame('/cached', $restored->getTarget());
-        $this->assertSame(301, $restored->getStatus());
-    }
 }

@@ -15,8 +15,9 @@ class Route
      * What the application wants to know about this route before its handler runs
      * (response format, a CORS flag, ...). The router does not interpret it.
      *
-     * Declared with a default instead of in the constructor's signature: a route that is
-     * restored from a cache written before 1.2 has no such property and wakes up with [].
+     * Declared with a default instead of in the constructor's signature: a route that an
+     * application unserializes from data written before 1.2 has no such property and wakes
+     * up with [].
      *
      * @var array<string, mixed>
      */
@@ -72,7 +73,7 @@ class Route
      * For the routes file: the route object is shared by every request it serves.
      *
      * @param string $key Attribute name (e.g., 'format')
-     * @param mixed $value Any value; keep it serializable if the route cache is used
+     * @param mixed $value Any value
      */
     public function attribute(string $key, mixed $value): self
     {
@@ -88,25 +89,5 @@ class Route
     public function getAttribute(string $key, mixed $default = null): mixed
     {
         return array_key_exists($key, $this->attributes) ? $this->attributes[$key] : $default;
-    }
-
-    /**
-     * Restore object from var_export() output.
-     *
-     * The route cache serializes and no longer needs this; kept for applications that
-     * var_export() routes themselves.
-     *
-     * @param array{methods: string[], pattern: string, handler: mixed, middleware?: array<int, string|object>, name?: string|null, attributes?: array<string, mixed>} $data Exported data
-     */
-    public static function __set_state(array $data): self
-    {
-        return new self(
-            $data['methods'],
-            $data['pattern'],
-            $data['handler'],
-            $data['middleware'] ?? [],
-            $data['name'] ?? null,
-            $data['attributes'] ?? [],
-        );
     }
 }

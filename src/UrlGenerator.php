@@ -33,7 +33,7 @@ final class UrlGenerator
                     $this->namedRoutes[$value->name] = $value->pattern;
                 }
             } else {
-                // Pattern mapping from cache: name => pattern
+                // Pattern mapping: name => pattern
                 $this->namedRoutes[$key] = $value;
             }
         }

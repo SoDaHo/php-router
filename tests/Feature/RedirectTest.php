@@ -63,7 +63,7 @@ class RedirectTest extends TestCase
         $this->assertSame('/new', $response->getHeaderLine('Location'));
     }
 
-    public function testRedirectHandlerIsCacheFriendly(): void
+    public function testRedirectRouteHasAnInspectableHandler(): void
     {
         $collector = new RouteCollector();
         $collector->redirect('/old', '/new');
@@ -71,10 +71,8 @@ class RedirectTest extends TestCase
         $routes = $collector->getRoutes();
         $handler = $routes[0]->handler;
 
-        // Should not be a Closure
-        $this->assertNotInstanceOf(\Closure::class, $handler);
-
-        // Should be serializable (no Closures)
-        $this->assertIsString(serialize($handler));
+        $this->assertInstanceOf(\Sodaho\Router\Middleware\RedirectHandler::class, $handler);
+        $this->assertSame('/new', $handler->getTarget());
+        $this->assertSame(302, $handler->getStatus());
     }
 }
