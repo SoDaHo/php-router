@@ -118,7 +118,9 @@ class Router implements RequestHandlerInterface
     {
         // $_ENV is thread-safe, preferred
         $value = $_ENV[$key] ?? null;
-        if (is_scalar($value)) {
+        // Scalars only — and no NAN or INF: they mean nothing here, and PHP 8.5 warns when a
+        // NAN is turned into a string
+        if (is_scalar($value) && !(is_float($value) && !is_finite($value))) {
             return (string) $value;
         }
 
@@ -133,15 +135,19 @@ class Router implements RequestHandlerInterface
      */
     private static function flag(string $name, mixed $value): bool
     {
+        // NAN and INF are no flags. Refused first: PHP 8.5 warns when a NAN is turned into
+        // a string or a boolean, which is what the checks below would do with it.
+        $meaningless = is_float($value) && !is_finite($value);
+
         // Config arrays are often built from env files, so 'true'/'false'/'1'/'0' count too.
-        $flag = filter_var($value, FILTER_VALIDATE_BOOL, FILTER_NULL_ON_FAILURE);
+        $flag = $meaningless ? null : filter_var($value, FILTER_VALIDATE_BOOL, FILTER_NULL_ON_FAILURE);
         if ($flag !== null) {
             return $flag;
         }
 
         // Neither a boolean nor boolean-like. Something truthy used to end in a TypeError on
         // every request; something empty ([]) simply is not "on".
-        if (!$value) {
+        if (!$meaningless && !$value) {
             return false;
         }
 

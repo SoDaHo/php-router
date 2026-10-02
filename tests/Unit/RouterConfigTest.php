@@ -395,6 +395,10 @@ class RouterConfigTest extends TestCase
             'word' => ['maybe', 'string'],
             'number' => [2, 'int'],
             'array' => [['true'], 'array'],
+            // PHP 8.5 warns when these are turned into a string; the router must get there first
+            'NAN' => [NAN, 'float'],
+            'INF' => [INF, 'float'],
+            '-INF' => [-INF, 'float'],
         ];
     }
 
@@ -485,6 +489,22 @@ class RouterConfigTest extends TestCase
         $router = $this->routerFromEnv(['debug' => false]);
         $this->assertSame(200, $router->handle(new ServerRequest('GET', '/from-env/users'))->getStatusCode());
         $this->assertSame(404, $router->handle(new ServerRequest('GET', '/from-getenv/users'))->getStatusCode());
+    }
+
+    public function testNonFiniteFloatInEnvIsNotAValueEither(): void
+    {
+        // PHP 8.5 warns when NAN is turned into a string — the suite fails on warnings
+        foreach ([NAN, INF, -INF] as $float) {
+            $_ENV['APP_DEBUG'] = $float;
+            $_ENV['ROUTER_URL_ENCODING'] = $float;
+            $_ENV['ROUTER_BASE_PATH'] = $float;
+            putenv('ROUTER_BASE_PATH=/from-getenv');
+
+            $router = $this->routerFromEnv();
+
+            $this->assertFalse($router->isDebug());
+            $this->assertSame('/from-getenv/users/a%20b', $router->url('users.show', ['id' => 'a b']));
+        }
     }
 
     public function testNonScalarEnvValueIsNotAValue(): void
