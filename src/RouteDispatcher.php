@@ -310,8 +310,8 @@ class RouteDispatcher implements RequestHandlerInterface
         $head = false;
 
         // What the error responder threw itself — nothing answers that a second time
-        /** @var \SplObjectStorage<\Throwable, null> $unanswerable */
-        $unanswerable = new \SplObjectStorage();
+        /** @var \WeakMap<\Throwable, true> $unanswerable */
+        $unanswerable = new \WeakMap();
 
         $enter = function (ServerRequestInterface $request) use (&$current, &$head): ServerRequestInterface {
             $current = $this->attachMatch($request);
@@ -336,7 +336,7 @@ class RouteDispatcher implements RequestHandlerInterface
             try {
                 return ($this->errorResponder)($e, $request);
             } catch (\Throwable $failure) {
-                $unanswerable->attach($failure);
+                $unanswerable[$failure] = true;
 
                 throw $failure;
             }
@@ -352,7 +352,7 @@ class RouteDispatcher implements RequestHandlerInterface
 
             $response = $handler->handle($request);
         } catch (\Throwable $e) {
-            if ($this->errorResponder === null || $unanswerable->contains($e)) {
+            if ($this->errorResponder === null || isset($unanswerable[$e])) {
                 throw $e;
             }
 
