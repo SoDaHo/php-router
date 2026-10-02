@@ -507,6 +507,26 @@ class RouterConfigTest extends TestCase
         }
     }
 
+    public function testScalarsInEnvCountWhateverTheirType(): void
+    {
+        // $_ENV is a plain array: an application (or a loader that casts) may put more than strings there
+        $_ENV['APP_DEBUG'] = true;
+        $_ENV['ROUTER_URL_ENCODING'] = 0;
+
+        $router = $this->routerFromEnv();
+
+        $this->assertTrue($router->isDebug());
+        $this->assertSame('/users/a b', $router->url('users.show', ['id' => 'a b']));
+
+        $_ENV['APP_DEBUG'] = false;
+        $_ENV['ROUTER_URL_ENCODING'] = 1;
+
+        $router = $this->routerFromEnv();
+
+        $this->assertFalse($router->isDebug());
+        $this->assertSame('/users/a%20b', $router->url('users.show', ['id' => 'a b']));
+    }
+
     public function testNonScalarEnvValueIsNotAValue(): void
     {
         // $_ENV is a plain array; whatever an application parked there must not be cast to "Array"
