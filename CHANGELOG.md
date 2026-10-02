@@ -2,6 +2,40 @@
 
 ## [Unreleased]
 
+2.0.0, in progress on branch `2.x`. Every change that breaks something from 1.x is in the
+table; what is not listed works as in 1.2.
+
+### Upgrading from 1.x
+
+| 1.x | 2.0 |
+|-----|-----|
+| PHP `^8.2` | PHP `^8.5` |
+| `Router::create()` and `new Router()` read `APP_DEBUG`, `APP_ENV`, `APP_URL`, `ROUTER_BASE_PATH`, `ROUTER_TRAILING_SLASH`, `ROUTER_URL_ENCODING`, `ROUTER_CACHE_FILE` and `ROUTER_CACHE_KEY` for what the config array leaves out | They read nothing. `Router::fromEnv()` reads `APP_DEBUG`, `APP_URL`, `ROUTER_BASE_PATH`, `ROUTER_TRAILING_SLASH` and `ROUTER_URL_ENCODING` — or pass the values yourself |
+| `Router::boot($config, $routesFile)` reads the environment as well | It does not: `Router::fromEnv($config)->loadRoutes($routesFile)->run()` |
+| `APP_ENV=local`, `dev` or `development` switches debug on | `APP_ENV` is not read. Debug: `'debug' => true`, or `APP_DEBUG=true` with `fromEnv()` |
+| A config key with the value `null` (`debug`, `basePath`, `baseUrl`, `trailingSlash`, `urlEncoding`) means "ask the environment" | `null` means the default. With `fromEnv()` a key you pass settles it — also with `null`, `false` or `''` — and its variable is not looked at |
+| `APP_DEBUG=maybe`, `ROUTER_URL_ENCODING=sometimes` and other values that are not boolean-like count as "off", silently | `fromEnv()` throws a `RouterException` that names the variable. Empty counts as off |
+| `'urlEncoding'` accepts only `true`/`false`; anything else (`'false'`, `0`) ends in a `TypeError` at the first `url()` | Boolean-like values work (`'false'`, `'0'`, `0`, `'off'` switch it off). `null` means the default (on), an empty string counts as off; anything else is refused when the router is created |
+| `->enableCache($file, $key)`, `'cacheFile'`, `'cacheSignature'`, `ROUTER_CACHE_FILE`, `ROUTER_CACHE_KEY` | Remove them: there is no route cache (measured, it made requests slower). `enableCache()` no longer exists; the config keys — also `'cacheFile' => ''`, the 1.x way to keep the cache off — and the variables have no effect any more (a later beta will refuse config keys the router does not know). Delete old cache files |
+| `error` hook with `type: 'cache'`, `CacheException`, `Cache\RouteCache` | Gone with the cache |
+| `Route::__set_state()`, `RedirectHandler::__set_state()`, `RouteCollector::getNamedRoutesData()` | Removed. Build routes from the routes file instead of `var_export()`ing them; named routes: `getRoutes()` |
+| HEAD on a route registered with `get()`: 405, unless `'implicitHead' => true` | `implicitHead` is on by default — see below. `'implicitHead' => false` (on a `RouteDispatcher` of your own: `setImplicitHead(false)`) brings 1.x back |
+
+What HEAD by default means for an application that changes nothing:
+
+- **Handler and route middleware of a GET route run for HEAD requests** — they see the method
+  `HEAD`. A one-time link behind `GET /confirm/{token}` is used up by a link scanner that
+  asks with HEAD; a check like `$request->getMethod() === 'GET'` does not match. In 1.x such
+  a request ended in 405 before the route's middleware or handler ran.
+- Hooks: `dispatch` (or `error`) fires where `methodNotAllowed` did.
+- Every response to a HEAD request leaves `handle()` without a body: that of a GET route, of
+  a `head()` route, a 404, a 405, an error. Headers stay as they are. (Over `run()` nothing
+  changes on the wire but status and headers — PHP never sent a body for HEAD.)
+- `Allow`, the `allowed` list in the 405 body, the hook's `allowed_methods` and
+  `RouteMatch::allowedMethods()` name HEAD directly behind GET — for every method, not only
+  for HEAD requests: a POST to a GET-only path now says `GET, HEAD`. Where HEAD is registered
+  itself (`any()`), it moves there: `GET, POST, ..., HEAD` becomes `GET, HEAD, POST, ...`.
+
 ## [1.2.0] - 2026-10-02
 
 ### Added
