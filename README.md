@@ -122,12 +122,28 @@ $r->get('/codes/{code:alphanum}', $handler); // Alphanumeric
 | `ulid` | `[0-9A-Za-z]{26}` | `{id:ulid}` → 01ARZ3NDEKTSV4RRFFQ69G5FAV |
 | `any` | `.*` | `{path:any}` → anything/here |
 
+### Slashes in a Parameter
+
+A parameter is one path segment unless its pattern says otherwise (`any`, or a pattern of
+your own that takes a slash). **A separator hidden in the path has no route:** a request
+whose path contains `%2F`, `%5C` or a backslash is answered with 404 — the route table is
+not asked, the `notFound` hook gets the path as it came. Decoded, `/files/a%2Fb` would be
+two segments for the router and one for a proxy or the access rules of the web server in
+front of it; Apache refuses such paths by default for the same reason. A percent sign that
+is meant literally still works: `/tags/a%252Fb` reaches the handler as `a%2Fb`. A
+middleware that decodes the path itself before it passes the request on opens the door
+again — the rule looks at the path of the request it is given.
+
 ### Custom Patterns
 
 ```php
 $r->addPattern('date', '\d{4}-\d{2}-\d{2}');
 $r->get('/events/{date:date}', $handler);  // 2024-12-06
 ```
+
+A pattern is a fragment that stands on its own: no look at the text around it
+(`(?=/tail)`), no reference to another placeholder. `url()` asks it alone whether a value
+with a slash fits.
 
 ### Accessing Parameters
 
@@ -291,7 +307,9 @@ $match->status;            // RouteMatch::FOUND | NOT_FOUND | METHOD_NOT_ALLOWED
 $match->route;             // the Route; at METHOD_NOT_ALLOWED a route of the path (see below)
 $match->params;            // ['id' => '5'] — as in the path, not cast yet
 $match->allowedMethods();  // every method the path is registered with
-$match->path;              // the path the table was asked with (decoded, without basePath)
+$match->path;              // the path the table was asked with (decoded, without basePath);
+                           // as requested where the table was not asked: outside the
+                           // base path (decoded), with a hidden separator (as it came)
 ```
 
 `match()` needs no container, so it works before the application is booted;
@@ -322,6 +340,21 @@ $url = $router->url('user.show', ['id' => 5]);
 // Absolute URL (needs 'baseUrl' in the config, or APP_URL with Router::fromEnv())
 $url = $router->absoluteUrl('user.show', ['id' => 5]);
 // → https://example.com/users/5
+```
+
+Values are encoded (`rawurlencode()`, see `urlEncoding`). With URL encoding on, `url()`
+makes from the values you pass no encoded separator — the router refuses those —, no `.`
+or `..` segment, and no path that begins with `//` below the base path; and the address as
+a whole begins with a single `/` and contains no backslash or control character, whatever
+route pattern and base path are made of:
+
+```php
+$router->url('files', ['path' => 'my dir/a b.txt']);   // /files/{path:any} → /files/my%20dir/a%20b.txt
+$router->url('user.show', ['id' => 'a/b']);            // RouterException: the placeholder is one segment
+$router->url('files', ['path' => '../secret']);        // RouterException: a client would resolve the '..'
+$router->url('export', ['name' => '..']);              // /export/{name}.json → /export/...json: no segment of its own, fine
+$router->url('files', ['path' => 'a\\b']);             // RouterException: no route accepts a backslash
+$router->url('page', ['path' => '/evil.example/x']);   // /{path:any} → RouterException: '//evil.example/x' would name a host
 ```
 
 ## Redirect Routes
@@ -481,8 +514,8 @@ $router = Router::fromEnv();                       // everything from the enviro
 $router = Router::fromEnv(['debug' => false]);     // a key you pass wins over its variable
 ```
 
-`fromEnv()` is the one place where the router reads the environment (`$_ENV`, then
-`getenv()`), and these are all the variables it reads:
+`fromEnv()` is the one place where the router reads the environment (`$_ENV`, then the
+environment of the process), and these are all the variables it reads:
 
 ```php
 // .env
@@ -498,6 +531,14 @@ A key in the array you pass wins whatever its value — `null`, `false` and `''`
 `ROUTER_URL_ENCODING` have to be boolean-like (`true`/`false`, `1`/`0`, `on`/`off`,
 `yes`/`no`) or empty; anything else makes `fromEnv()` throw a `RouterException` that names
 the variable. `APP_ENV` means nothing to the router.
+
+What a web server hands over with each request — nginx's `fastcgi_param`, Apache's
+`SetEnv` — is not the environment of the process: under PHP-FPM it reaches `fromEnv()` only
+where PHP copies request parameters into `$_ENV` (`variables_order` with `E`; not so with
+`php.ini-production`). (Under classic CGI the request's variables *are* the environment of
+the process, so they keep arriving.) Set the pool's `env[NAME]` (with FPM's default `clear_env = yes`
+that is the only environment a worker has), a real environment variable, or pass the
+value in the config array.
 
 ### Via Fluent API
 
@@ -571,7 +612,9 @@ $router->on('hookError', function (array $data) {
 
 **`path` and `params` are request data.** In `dispatch`, `notFound` and `methodNotAllowed`
 they are already URL-decoded — `/x%0Ay` arrives with a real line break in it. Encode them
-before they go into a line-based log.
+before they go into a line-based log. (One exception: a path that was refused for a
+[hidden separator](#slashes-in-a-parameter) arrives in `notFound` as it came, base path
+included — decoded it would read like the path of a route that exists.)
 
 ## PSR-15 Compatibility
 
@@ -594,9 +637,9 @@ response's value; every other field is a list and the response's lines are added
 `Vary: Cookie` or the `Cache-Control: no-store` of `session_start()` stays in place; so does
 every field the router does not know. `X-Frame-Options`, `Strict-Transport-Security` and
 `Access-Control-Allow-Origin` are added as well, not replaced — set them in one place. The
-status is the response's, whatever its headers are (PHP would turn a 403 with
-`WWW-Authenticate` into a 401) — with one exception kept for 1.x: a 200 that carries a
-`Location` goes out as the redirect PHP has always made of it. If output has already
+status is the response's, whatever its headers are — PHP would turn a 403 with
+`WWW-Authenticate` into a 401 and a 200 with a `Location` into a 302; a redirect is a 3xx
+status (`Response::redirect()`). If output has already
 started, nothing can be sent any more: the `error` hook is called with `type: 'emit'`.
 
 ## Dependency Injection
@@ -775,8 +818,8 @@ public function process($request, $handler): ResponseInterface
 ```
 
 `$match->path` is the path without the base path — except for a request outside the base
-path, where it is the whole path: with a base path, compare against the request's own
-path instead. And with an app at `/` every `GET` path belongs to an app; there is nothing
+path (and one with a hidden separator), where it is the whole path: with a base path,
+compare against the request's own path instead. And with an app at `/` every `GET` path belongs to an app; there is nothing
 left for such a middleware to answer.
 
 To serve the start page from a route of your own instead, see the next section.
