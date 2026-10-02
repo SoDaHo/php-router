@@ -88,7 +88,23 @@ class Dispatcher
         return null;
     }
 
-    /** @return string[] */
+    /**
+     * Every method a route is registered with for this URI.
+     *
+     * Methods of static routes first, then those of dynamic routes; within each kind in the
+     * order in which a method was first registered among all routes of that kind (not only
+     * those of this URI).
+     *
+     * @param string $uri Request URI
+     *
+     * @return list<string>
+     */
+    public function allowedMethods(string $uri): array
+    {
+        return $this->getAllowedMethods($uri);
+    }
+
+    /** @return list<string> */
     private function getAllowedMethods(string $uri): array
     {
         $allowed = [];

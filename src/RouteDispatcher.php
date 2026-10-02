@@ -17,7 +17,8 @@ use Sodaho\Router\Traits\HasHooks;
 /**
  * PSR-15 RequestHandler that dispatches requests to routes.
  *
- * Kept slim (~200 LOC) by delegating to specialized classes.
+ * Looks the route up, runs the middleware for every request around the answer and
+ * delegates route middleware and handlers to specialized classes.
  */
 class RouteDispatcher implements RequestHandlerInterface
 {
@@ -39,7 +40,7 @@ class RouteDispatcher implements RequestHandlerInterface
      */
     public function __construct(
         array $dispatchData,
-        private readonly ?ContainerInterface $container = null,
+        private ?ContainerInterface $container = null,
         string $basePath = '',
         string $trailingSlash = 'strict',
         bool $debug = false
@@ -51,15 +52,89 @@ class RouteDispatcher implements RequestHandlerInterface
     }
 
     /**
-     * PSR-15: Handle a request and return a response.
+     * Set the PSR-11 container used to resolve middleware and controllers.
      *
-     * @param ServerRequestInterface $request PSR-7 request
-     *
-     * @return ResponseInterface PSR-7 response
+     * Router::match() may have built the dispatcher before the application had its container.
      */
-    public function handle(ServerRequestInterface $request): ResponseInterface
+    public function setContainer(?ContainerInterface $container): static
+    {
+        $this->container = $container;
+        return $this;
+    }
+
+    // ==================== Lookup ====================
+
+    /**
+     * Look the request up in the route table without executing anything.
+     *
+     * No hook fires, no middleware or handler runs, no container is needed.
+     */
+    public function match(ServerRequestInterface $request): RouteMatch
+    {
+        return $this->lookup($request);
+    }
+
+    private function lookup(ServerRequestInterface $request): RouteMatch
     {
         $method = $request->getMethod();
+        $path = $this->normalizePath($request);
+
+        if ($path === null) {
+            // Outside the base path. The path stays as requested (decoded), as the notFound hook reports it.
+            return new RouteMatch(RouteMatch::NOT_FOUND, $method, rawurldecode($request->getUri()->getPath()));
+        }
+
+        $result = $this->dispatcher->dispatch($method, $path);
+
+        return match ($result[0]) {
+            Dispatcher::FOUND => new RouteMatch(
+                RouteMatch::FOUND,
+                $method,
+                $path,
+                $this->ensureRoute($result[1]),
+                $result[2],
+                $result[3],
+                // For a hit the list costs another pass over the table, so it is built on demand
+                allowedMethods: fn (): array => $this->dispatcher->allowedMethods($path),
+            ),
+            Dispatcher::METHOD_NOT_ALLOWED => new RouteMatch(
+                RouteMatch::METHOD_NOT_ALLOWED,
+                $method,
+                $path,
+                $this->routeOfPath($path, $this->ensureStringArray($result[1])),
+                allowedMethods: $this->ensureStringArray($result[1]),
+            ),
+            default => new RouteMatch(RouteMatch::NOT_FOUND, $method, $path),
+        };
+    }
+
+    /**
+     * A route registered for the path although the request's method is not: the GET route
+     * if there is one, otherwise the route of the first allowed method.
+     *
+     * @param list<string> $allowed
+     */
+    private function routeOfPath(string $path, array $allowed): ?Route
+    {
+        $method = in_array('GET', $allowed, true) ? 'GET' : ($allowed[0] ?? null);
+        if ($method === null) {
+            // @codeCoverageIgnoreStart
+            // METHOD_NOT_ALLOWED always comes with at least one method
+            return null;
+            // @codeCoverageIgnoreEnd
+        }
+
+        $result = $this->dispatcher->dispatch($method, $path);
+
+        return $result[0] === Dispatcher::FOUND ? $this->ensureRoute($result[1]) : null;
+    }
+
+    /**
+     * The path the route table is asked with: decoded, base path removed, trailing slash
+     * as configured. Null when the request lies outside the base path.
+     */
+    private function normalizePath(ServerRequestInterface $request): ?string
+    {
         $uri = rawurldecode($request->getUri()->getPath());
 
         // BasePath handling: requests MUST start with basePath
@@ -69,8 +144,7 @@ class RouteDispatcher implements RequestHandlerInterface
             // This prevents /api from matching /apiX
             if (!str_starts_with($uri, $this->basePath) ||
                 (strlen($uri) > $basePathLen && $uri[$basePathLen] !== '/')) {
-                // Request doesn't have required basePath prefix -> 404
-                return $this->handleNotFound($method, $uri);
+                return null;
             }
             $uri = substr($uri, $basePathLen) ?: '/';
         }
@@ -80,29 +154,47 @@ class RouteDispatcher implements RequestHandlerInterface
             $uri = rtrim($uri, '/');
         }
 
+        return $uri;
+    }
+
+    // ==================== Request Handling ====================
+
+    /**
+     * PSR-15: Handle a request and return a response.
+     *
+     * @param ServerRequestInterface $request PSR-7 request
+     *
+     * @return ResponseInterface PSR-7 response
+     */
+    public function handle(ServerRequestInterface $request): ResponseInterface
+    {
         $startTime = microtime(true);
-        $match = $this->dispatcher->dispatch($method, $uri);
+
+        return $this->respond($this->lookup($request), $request, $startTime);
+    }
+
+    /**
+     * The answer of the route table itself: 404, 405, 400 for a parameter that does not
+     * cast, or what the route's middleware and handler return.
+     */
+    private function respond(RouteMatch $match, ServerRequestInterface $request, float $startTime): ResponseInterface
+    {
+        $method = $match->method;
+        $uri = $match->path;
 
         // Handle non-FOUND cases directly (no casting involved)
-        if ($match[0] === Dispatcher::NOT_FOUND) {
+        if ($match->status === RouteMatch::NOT_FOUND) {
             return $this->handleNotFound($method, $uri);
         }
 
-        if ($match[0] === Dispatcher::METHOD_NOT_ALLOWED) {
-            return $this->handleMethodNotAllowed($method, $uri, $this->ensureStringArray($match[1]));
-        }
-
-        if ($match[0] !== Dispatcher::FOUND) {
-            // @codeCoverageIgnoreStart
-            // Defense-in-depth: Dispatcher only returns FOUND, NOT_FOUND, or METHOD_NOT_ALLOWED
-            return Response::serverError('Unknown dispatcher result');
-            // @codeCoverageIgnoreEnd
+        if ($match->status === RouteMatch::METHOD_NOT_ALLOWED) {
+            return $this->handleMethodNotAllowed($method, $uri, $match->allowedMethods());
         }
 
         // FOUND: Cast parameters first (wrapped in try-catch)
         // This ONLY catches casting errors, not controller TypeErrors!
         try {
-            $castedParams = $this->castParams($match[2], $match[3]);
+            $castedParams = $this->castParams($match->params, $match->casts);
         } catch (\TypeError $e) {
             // Casting errors (invalid int, float, bool) -> 400 Bad Request
             // This is a client error (invalid parameter), not a server error
@@ -116,7 +208,7 @@ class RouteDispatcher implements RequestHandlerInterface
         }
 
         // Controller execution is NOT wrapped - TypeErrors here are real 500s
-        return $this->handleFound($this->ensureRoute($match[1]), $castedParams, $request, $method, $uri, $startTime);
+        return $this->handleFound($this->ensureRoute($match->route), $castedParams, $request, $method, $uri, $startTime);
     }
 
     /**
@@ -323,11 +415,11 @@ class RouteDispatcher implements RequestHandlerInterface
         return $value;
     }
 
-    /** @return string[] */
+    /** @return list<string> */
     private function ensureStringArray(mixed $value): array
     {
         assert(is_array($value));
-        /** @var string[] $value */
+        /** @var list<string> $value */
         return $value;
     }
 }

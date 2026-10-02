@@ -202,6 +202,10 @@ class Router implements RequestHandlerInterface
     public function setContainer(ContainerInterface $container): self
     {
         $this->container = $container;
+
+        // match() may have built the dispatcher before the application had its container
+        $this->dispatcher?->setContainer($container);
+
         return $this;
     }
 
@@ -362,6 +366,24 @@ class Router implements RequestHandlerInterface
                 ] : null
             );
         }
+    }
+
+    /**
+     * Look a request up in the route table without executing anything: no middleware or
+     * handler runs, none of the routing hooks fires, no container is needed.
+     *
+     * Pass the request on with the result as attribute RouteMatch::class and handle() does
+     * not look it up a second time.
+     *
+     * The first call loads the routes, as the first handle() or url() does — with all that
+     * belongs to it: trouble with the route cache is reported through the error hook, and
+     * base path and trailing slash mode are taken as they are at that moment.
+     *
+     * @throws RouterException If no routes are loaded or routes file is invalid
+     */
+    public function match(ServerRequestInterface $request): RouteMatch
+    {
+        return $this->getDispatcher()->match($request);
     }
 
     // ==================== Internal ====================

@@ -89,6 +89,9 @@ class CacheRoundTripTest extends TestCase
                     $r->get('/public/{id:int}', [RoundTripController::class, 'show'])->middleware(new RoundTripTag('tagged'));
                     $r->get('/static', [RoundTripController::class, 'show'])->middleware(RoundTripGate::class);
                     $r->redirect('/old/{id}', '/public/{id}', 301);
+                    $r->attributeGroup(['format' => 'oauth'], function ($r) {
+                        $r->get('/tagged/{id}', [RoundTripController::class, 'show'])->attribute('cors', true);
+                    });
                 PHP
         );
 
@@ -119,6 +122,12 @@ class CacheRoundTripTest extends TestCase
 
         // names
         $this->assertSame('/private/9', $router->url('private.show', ['id' => 9]));
+
+        // attributes
+        $this->assertSame(
+            ['format' => 'oauth', 'cors' => true],
+            $router->match(new ServerRequest('GET', '/tagged/1'))->route?->attributes
+        );
 
         // method table
         $notAllowed = $router->handle(new ServerRequest('POST', '/static'));
