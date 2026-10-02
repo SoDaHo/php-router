@@ -15,7 +15,11 @@ table; what is not listed works as in 1.2.
   or segments that end in a dot or space; a path with a colon below the prefix is never
   looked up as a file. Cache headers are configurable: everything goes out with `no-cache`
   until the application says which files never change (`'immutable' => AppFolder::HASHED`
-  for what a bundler hashed in `assets/` or `static/`). See README, "Serving a Web App".
+  for what a bundler hashed in `assets/` or `static/`). Files carry an `ETag` (a hash of
+  the content up to 64 KiB, so that a new start page of the same size is told apart; none
+  for larger files where the file system reports no file numbers);
+  `If-None-Match` is answered with 304; a `Range` counts for `GET` only, and one with an
+  `If-Range` gets the whole file. See README, "Serving a Web App".
 - `emitChunkSize` config option: how many bytes `run()`/`emit()` read from the response body
   at a time (default 8192 as before; 1024 to 16777216, anything else is refused).
 
