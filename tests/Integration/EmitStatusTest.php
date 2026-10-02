@@ -131,4 +131,19 @@ class EmitStatusTest extends TestCase
         $this->assertSame('', $this->serve('HEAD', '/page'));
         $this->assertSame(200, http_response_code());
     }
+
+    public function testEmitCanBeCalledForAResponseOfOnesOwn(): void
+    {
+        $router = Router::create(['debug' => false]);
+
+        ob_start();
+        $router->emit(\Sodaho\Router\Response::json(['ok' => true], 202));
+        $this->assertSame('{"ok":true}', ob_get_clean());
+        $this->assertSame(202, http_response_code());
+
+        ob_start();
+        $router->emit(\Sodaho\Router\Response::text('never read'), withBody: false);
+        $this->assertSame('', ob_get_clean());
+        $this->assertSame(200, http_response_code());
+    }
 }

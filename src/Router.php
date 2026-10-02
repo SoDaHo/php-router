@@ -331,7 +331,7 @@ class Router implements RequestHandlerInterface
         $psr17 = new Psr17Factory();
         $creator = new ServerRequestCreator($psr17, $psr17, $psr17, $psr17);
         $request = $creator->fromGlobals();
-        $this->emit($this->handle($request), $request->getMethod() !== 'HEAD');
+        $this->send($this->handle($request), $request->getMethod() !== 'HEAD');
     }
 
     /**
@@ -509,7 +509,16 @@ class Router implements RequestHandlerInterface
         return $this->urlGenerator;
     }
 
-    private function emit(ResponseInterface $response, bool $withBody = true): void
+    public function emit(ResponseInterface $response, bool $withBody = true): void
+    {
+        $this->send($response, $withBody);
+    }
+
+    /**
+     * What emit() does. run() calls it directly: a subclass with an emit() of its own had
+     * no say in run() while emit() was private, and still has none.
+     */
+    private function send(ResponseInterface $response, bool $withBody): void
     {
         // @codeCoverageIgnoreStart
         // headers_sent() is always false in CLI/PHPUnit; EmitOverHttpTest covers it over HTTP

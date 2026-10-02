@@ -187,4 +187,44 @@ class RouterOutputTest extends TestCase
         $this->assertTrue($data['success']);
         $this->assertTrue($data['data']['complete']);
     }
+
+    /**
+     * emit() became public in 1.2. A subclass that already had an emit() of its own had no
+     * say in run() before and has none now.
+     */
+    public function testSubclassWithItsOwnEmitDoesNotTakeOverRun(): void
+    {
+        $this->createRoutesFile(
+            <<<'PHP_ROUTES'
+                <?php
+                use Sodaho\Router\RouteCollector;
+                use Sodaho\Router\Response;
+
+                return function (RouteCollector $r) {
+                    $r->get('/complete', fn($req) => Response::text('from the router'));
+                };
+                PHP_ROUTES
+        );
+
+        $_SERVER['REQUEST_METHOD'] = 'GET';
+        $_SERVER['REQUEST_URI'] = '/complete';
+        $_SERVER['SERVER_PROTOCOL'] = 'HTTP/1.1';
+
+        $router = new class (['debug' => false]) extends Router {
+            public bool $called = false;
+
+            public function emit(\Psr\Http\Message\ResponseInterface $response, bool $withBody = true): void
+            {
+                $this->called = true;
+            }
+        };
+        $router->loadRoutes($this->routesFile);
+
+        ob_start();
+        $router->run();
+        $output = ob_get_clean();
+
+        $this->assertSame('from the router', $output);
+        $this->assertFalse($router->called);
+    }
 }
