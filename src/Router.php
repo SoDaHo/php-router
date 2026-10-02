@@ -79,16 +79,16 @@ class Router implements RequestHandlerInterface
     /**
      * Create a new Router instance.
      *
-     * @param array{debug?: bool, basePath?: string, baseUrl?: string, trailingSlash?: string, cacheFile?: string, cacheSignature?: string, routesFile?: string, urlEncoding?: bool} $config
+     * @param array{debug?: bool|int|string|null, basePath?: string, baseUrl?: string, trailingSlash?: string, cacheFile?: string, cacheSignature?: string, routesFile?: string, urlEncoding?: bool} $config
+     *
+     * @throws RouterException If 'debug' is neither a boolean nor a boolean-like value
      */
     public function __construct(array $config = [])
     {
         // Config precedence: $config > $_ENV > getenv() > default (consistent with pdo-wrapper)
         $this->config = [
-            'debug' => $config['debug']
-                ?? filter_var(self::env('APP_DEBUG') ?? false, FILTER_VALIDATE_BOOL)
-                ?: in_array(self::env('APP_ENV') ?? '', ['local', 'dev', 'development'], true),
-            'basePath' => (string) ($config['basePath'] ?? self::env('ROUTER_BASE_PATH') ?? ''),
+            'debug' => self::resolveDebug($config['debug'] ?? null),
+            'basePath' => self::normalizeBasePath((string) ($config['basePath'] ?? self::env('ROUTER_BASE_PATH') ?? '')),
             'baseUrl' => $config['baseUrl'] ?? self::env('APP_URL'),
             'trailingSlash' => (string) ($config['trailingSlash'] ?? self::env('ROUTER_TRAILING_SLASH') ?? 'strict'),
             'cacheFile' => $config['cacheFile'] ?? self::env('ROUTER_CACHE_FILE'),
@@ -105,8 +105,9 @@ class Router implements RequestHandlerInterface
     private static function env(string $key): ?string
     {
         // $_ENV is thread-safe, preferred
-        if (isset($_ENV[$key])) {
-            return (string) $_ENV[$key];
+        $value = $_ENV[$key] ?? null;
+        if (is_scalar($value)) {
+            return (string) $value;
         }
 
         // getenv() fallback for legacy compatibility
@@ -116,9 +117,47 @@ class Router implements RequestHandlerInterface
     }
 
     /**
+     * An explicit config value always wins — an explicit false included. Only without one
+     * do APP_DEBUG and APP_ENV decide.
+     *
+     * @throws RouterException If the config value is not a boolean
+     */
+    private static function resolveDebug(mixed $debug): bool
+    {
+        if ($debug === null) {
+            return filter_var(self::env('APP_DEBUG') ?? false, FILTER_VALIDATE_BOOL)
+                || in_array(self::env('APP_ENV') ?? '', ['local', 'dev', 'development'], true);
+        }
+
+        // Config arrays are often built from env files, so 'true'/'false'/'1'/'0' count too.
+        $flag = filter_var($debug, FILTER_VALIDATE_BOOL, FILTER_NULL_ON_FAILURE);
+        if ($flag !== null) {
+            return $flag;
+        }
+
+        // Neither a boolean nor boolean-like. Something truthy used to end in a TypeError on
+        // every request; something empty ([]) simply is not "on".
+        if (!$debug) {
+            return false;
+        }
+
+        throw new RouterException(sprintf("Config 'debug' must be a boolean, got %s", get_debug_type($debug)));
+    }
+
+    /**
+     * '/api', '/api/' and 'api' all mean the same prefix; the dispatcher compares against '/api'.
+     */
+    private static function normalizeBasePath(string $basePath): string
+    {
+        $trimmed = trim($basePath, '/');
+
+        return $trimmed === '' ? '' : '/' . $trimmed;
+    }
+
+    /**
      * Factory method for fluent creation.
      *
-     * @param array{debug?: bool, basePath?: string, baseUrl?: string, trailingSlash?: string, cacheFile?: string, cacheSignature?: string, routesFile?: string, urlEncoding?: bool} $config
+     * @param array{debug?: bool|int|string|null, basePath?: string, baseUrl?: string, trailingSlash?: string, cacheFile?: string, cacheSignature?: string, routesFile?: string, urlEncoding?: bool} $config
      */
     public static function create(array $config = []): self
     {
@@ -128,7 +167,7 @@ class Router implements RequestHandlerInterface
     /**
      * Quick boot: create, load routes, and run.
      *
-     * @param array{debug?: bool, basePath?: string, baseUrl?: string, trailingSlash?: string, cacheFile?: string, cacheSignature?: string, routesFile?: string, urlEncoding?: bool} $config
+     * @param array{debug?: bool|int|string|null, basePath?: string, baseUrl?: string, trailingSlash?: string, cacheFile?: string, cacheSignature?: string, routesFile?: string, urlEncoding?: bool} $config
      * @param string $routesFile Path to routes file
      */
     public static function boot(array $config, string $routesFile): void
@@ -168,7 +207,7 @@ class Router implements RequestHandlerInterface
      */
     public function setBasePath(string $basePath): self
     {
-        $this->config['basePath'] = rtrim($basePath, '/');
+        $this->config['basePath'] = self::normalizeBasePath($basePath);
         return $this;
     }
 
@@ -176,12 +215,13 @@ class Router implements RequestHandlerInterface
      * Enable route caching.
      *
      * @param string $file Path to cache file
-     * @param string|null $signature HMAC key for integrity verification (required in production)
+     * @param string|null $signature HMAC key for integrity verification (required outside debug mode);
+     *                               null keeps the key already configured (config or ROUTER_CACHE_KEY)
      */
     public function enableCache(string $file, ?string $signature = null): self
     {
         $this->config['cacheFile'] = $file;
-        $this->config['cacheSignature'] = $signature;
+        $this->config['cacheSignature'] = $signature ?? $this->config['cacheSignature'];
         return $this;
     }
 
