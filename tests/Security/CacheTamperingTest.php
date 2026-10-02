@@ -265,6 +265,8 @@ class CacheTamperingTest extends TestCase
             'inside an SplObjectStorage' => [
                 'a:1:{s:1:"x";O:16:"SplObjectStorage":2:{i:0;a:2:{i:0;' . $unknown . 'i:1;N;}i:1;a:0:{}}}',
             ],
+            // What classes implementing Serializable wrote before __serialize() existed
+            'in the old C: format' => ['a:1:{s:1:"x";C:29:"Sodaho\Router\Tests\NoSuchOne":0:{}}'],
             'as the class of an enum case' => ['a:1:{s:1:"x";E:34:"Sodaho\Router\Tests\NoSuchOne:Case";}'],
             'in the middleware of a route' => [
                 'a:1:{s:1:"x";O:19:"Sodaho\Router\Route":5:{s:7:"methods";a:1:{i:0;s:3:"GET";}s:7:"pattern";s:2:"/x";'
