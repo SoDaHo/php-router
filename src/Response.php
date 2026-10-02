@@ -457,7 +457,7 @@ final class Response
      *
      * Three problems are handled here, all reachable through uploaded filenames:
      * control characters (a raw \r\n makes PSR-7 reject the header and the download dies
-     * with a 500), bidi overrides (U+202E turns "Rechnungexe.pdf" into a disguised .exe in
+     * with a 500), bidi controls (U+202E turns "Rechnungexe.pdf" into a disguised .exe in
      * the download dialog) and path separators. Non-ASCII names additionally get the RFC
      * 5987 form, without which strict clients decode UTF-8 as latin1 ("RÃ¶ntgen.pdf").
      */
@@ -499,10 +499,10 @@ final class Response
             $clean = $stem . $extension;
         }
 
-        // 4. Bidi/format overrides — needs /u, so on invalid UTF-8 preg_replace returns null
+        // 4. Bidi overrides, isolates and marks (LRM/RLM/ALM) — needs /u, so on invalid UTF-8 preg_replace returns null
         //    and the name stays as it is. Those bytes cannot reach the header anyway: the
         //    ASCII fallback masks them and filename* is skipped for invalid UTF-8.
-        $noBidi = preg_replace('/[\x{202A}-\x{202E}\x{2066}-\x{2069}]/u', '', $clean);
+        $noBidi = preg_replace('/[\x{061C}\x{200E}\x{200F}\x{202A}-\x{202E}\x{2066}-\x{2069}]/u', '', $clean);
         if ($noBidi !== null) {
             $clean = $noBidi;
         }

@@ -88,6 +88,21 @@ class ResponseFileTest extends TestCase
         $this->assertStringContainsString('Rechnungfdp.exe', rawurldecode($r->getHeaderLine('Content-Disposition')));
     }
 
+    public function testBidiMarksAreStrippedFromFilename(): void
+    {
+        // Overrides were removed, the plain marks were not: LRM, RLM and the Arabic letter
+        // mark reorder the visible name just as well and travelled on inside filename*.
+        foreach (["\u{200E}" => 'LRM', "\u{200F}" => 'RLM', "\u{061C}" => 'ALM', "\u{2066}" => 'LRI', "\u{2069}" => 'PDI'] as $mark => $label) {
+            $header = Response::file($this->path, "Rechnung{$mark}fdp.exe")->getHeaderLine('Content-Disposition');
+
+            $this->assertSame('attachment; filename="Rechnungfdp.exe"', $header, $label);
+        }
+
+        // Characters next to the stripped ranges are ordinary text
+        $header = Response::download('x', "a\u{200D}b\u{061B}c.txt")->getHeaderLine('Content-Disposition');
+        $this->assertStringContainsString(rawurlencode("a\u{200D}b\u{061B}c.txt"), $header);
+    }
+
     public function testInlineDisposition(): void
     {
         $r = Response::file($this->path, 'clip.mp4', 'video/mp4', true);
