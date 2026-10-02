@@ -277,7 +277,16 @@ class RouteDispatcher implements RequestHandlerInterface
             );
         }
 
-        return (float) $value;
+        $floatVal = (float) $value;
+
+        // Overflow check: a few hundred digits pass the pattern and cast to INF
+        if (!is_finite($floatVal)) {
+            throw new \TypeError(
+                sprintf("Parameter '%s': decimal overflow", $key)
+            );
+        }
+
+        return $floatVal;
     }
 
     /**

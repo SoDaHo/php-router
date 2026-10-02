@@ -107,6 +107,26 @@ class CastingTest extends TestCase
         }
     }
 
+    public function testFloatCastingOverflowCheck(): void
+    {
+        $collector = new RouteCollector();
+        $collector->get('/test/{val:float}', fn ($req, float $val) => Response::success(['val' => $val]));
+
+        $dispatcher = new RouteDispatcher($collector->getData());
+
+        // 400 digits pass the pattern and cast to INF, which json_encode() refuses: the
+        // client's bad input came back as a 500. Same rule as for int now: 400.
+        foreach ([str_repeat('9', 400), '-' . str_repeat('9', 400), str_repeat('9', 400) . '.5'] as $value) {
+            $response = $dispatcher->handle(new ServerRequest('GET', "/test/{$value}"));
+            $this->assertSame(400, $response->getStatusCode());
+            $this->assertStringContainsString('INVALID_PARAMETER', (string) $response->getBody());
+        }
+
+        // Large but finite stays valid
+        $response = $dispatcher->handle(new ServerRequest('GET', '/test/' . str_repeat('9', 300)));
+        $this->assertSame(200, $response->getStatusCode());
+    }
+
     public function testFloatCastingRejectsScientificNotation(): void
     {
         $collector = new RouteCollector();
