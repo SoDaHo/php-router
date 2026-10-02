@@ -362,6 +362,16 @@ class RouteCollector
     }
 
     /**
+     * The pattern shortcuts: the built-in ones and those added with addPattern().
+     *
+     * @return array<string, string> name => regular expression fragment
+     */
+    public function getPatterns(): array
+    {
+        return $this->patterns;
+    }
+
+    /**
      * Compile routes for the Dispatcher.
      *
      * @return array{0: array<string, array<string, Route>>, 1: array<string, array<int, array{regex: string, route: Route, casts: array<string, string>}>>} [staticRoutes, dynamicRoutes]

@@ -12,6 +12,7 @@ use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Message\UriInterface;
 use Psr\Http\Server\MiddlewareInterface;
 use Psr\Http\Server\RequestHandlerInterface;
+use Sodaho\Router\Exception\RouterException;
 use Sodaho\Router\RouteMatch;
 use Sodaho\Router\Router;
 
@@ -192,5 +193,124 @@ class EncodedSeparatorTest extends TestCase
         $this->assertCount(1, $seen);
         $this->assertSame(RouteMatch::NOT_FOUND, $seen[0]->status);
         $this->assertSame('/a%2Fb', $seen[0]->path);
+    }
+
+    // ==================== url() ====================
+
+    /**
+     * @return array<string, array{0: string, 1: array<string, mixed>, 2: string, 3: string}>
+     */
+    public static function valuesThatHaveAnAddress(): array
+    {
+        return [
+            'several segments, each encoded on its own' => ['files', ['path' => 'my dir/b c.txt'], '/files/my%20dir/b%20c.txt', 'files: my dir/b c.txt'],
+            'one segment' => ['files', ['path' => 'a b'], '/files/a%20b', 'files: a b'],
+            'empty segments' => ['files', ['path' => 'a//b'], '/files/a//b', 'files: a//b'],
+            'own pattern that takes a slash' => ['pair', ['pair' => '1/2'], '/pairs/1/2', 'pair: 1/2'],
+            'own pattern with alternatives' => ['side', ['side' => 'right/out'], '/sides/right/out', 'side: right/out'],
+            'dots that are no segment of their own' => ['files', ['path' => '.env/a..b/...'], '/files/.env/a..b/...', 'files: .env/a..b/...'],
+            'dots in a one-segment value' => ['tag', ['tag' => 'v1.2..'], '/tags/v1.2..', 'tag: v1.2..'],
+            'percent sign' => ['tag', ['tag' => 'a%2Fb'], '/tags/a%252Fb', 'tag: a%2Fb'],
+            'number' => ['doc', ['id' => 5], '/docs/5', 'doc: 5'],
+            // Dots that become no segment of their own in the finished address
+            'two dots in front of a suffix' => ['dl', ['name' => '..'], '/dl/...json', 'dl: ..'],
+            'one dot in front of a suffix' => ['dl', ['name' => '.'], '/dl/..json', 'dl: .'],
+            'a dot behind a literal in the same segment' => ['suffix', ['suffix' => '.'], '/name.', 'suffix: .'],
+            'a dot next to another placeholder' => ['ab', ['a' => '.', 'b' => 'x'], '/ab/.-x', 'ab: . x'],
+            'two dots next to another placeholder' => ['ab', ['a' => 'x', 'b' => '..'], '/ab/x-..', 'ab: x ..'],
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $params
+     */
+    #[DataProvider('valuesThatHaveAnAddress')]
+    public function testUrlLeadsBackToItsRoute(string $name, array $params, string $url, string $body): void
+    {
+        $router = $this->router();
+
+        $this->assertSame($url, $router->url($name, $params));
+        $this->assertSame($body, $this->body($router->handle(new ServerRequest('GET', $url))));
+    }
+
+    /**
+     * @return array<string, array{0: string, 1: array<string, mixed>, 2: string, 3?: string}>
+     */
+    public static function valuesWithoutAnAddress(): array
+    {
+        $slash = 'Parameter "%s" contains a slash, which its placeholder does not accept';
+        $backslash = 'Parameter "%s" contains a backslash, which no route accepts';
+        $dots = 'The address would contain a "." or ".." path segment, which a client resolves before it asks';
+
+        return [
+            'slash in a one-segment placeholder' => ['tag', ['tag' => 'a/b'], sprintf($slash, 'tag')],
+            'slash in a typed one-segment placeholder' => ['doc', ['id' => '1/2'], sprintf($slash, 'id')],
+            'slash where the pattern type is unknown' => ['odd', ['x' => 'a/b'], sprintf($slash, 'x')],
+            'slash that the own pattern does not take' => ['pair', ['pair' => 'a/b'], sprintf($slash, 'pair')],
+            'value that only starts like the own pattern' => ['pair', ['pair' => "1/2\n"], sprintf($slash, 'pair')],
+            'value that only ends like the own pattern' => ['pair', ['pair' => 'x/1/2'], sprintf($slash, 'pair')],
+            'value that only starts like an alternative of the own pattern' => ['side', ['side' => 'left/in/deep'], sprintf($slash, 'side')],
+            'value that only ends like an alternative of the own pattern' => ['side', ['side' => 'far/right/out'], sprintf($slash, 'side')],
+            'backslash' => ['tag', ['tag' => 'a\\b'], sprintf($backslash, 'tag')],
+            'backslash where slashes are taken' => ['files', ['path' => 'a/b\\c'], sprintf($backslash, 'path')],
+            'parent segment' => ['files', ['path' => '../secret'], $dots, '/files/../secret'],
+            'parent segment in the middle' => ['files', ['path' => 'a/../b'], $dots, '/files/a/../b'],
+            'parent segment at the end' => ['files', ['path' => 'a/..'], $dots, '/files/a/..'],
+            'current segment' => ['files', ['path' => 'a/./b'], $dots, '/files/a/./b'],
+            'value that is the parent segment' => ['tag', ['tag' => '..'], $dots, '/tags/..'],
+            'value that is the current segment' => ['tag', ['tag' => '.'], $dots, '/tags/.'],
+            // A segment that only pattern and value together make
+            'empty value in front of a dot of the pattern' => ['end', ['a' => ''], $dots, '/end/.'],
+            'slash in front of a dot of the pattern' => ['pre', ['p' => 'x/'], $dots, '/pre/x/.'],
+            'dot in front of a dot of the pattern' => ['end', ['a' => '.'], $dots, '/end/..'],
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $params
+     */
+    #[DataProvider('valuesWithoutAnAddress')]
+    public function testUrlRefusesWhatCannotReachTheRoute(string $name, array $params, string $message, ?string $debug = null): void
+    {
+        $router = $this->router(['baseUrl' => 'https://example.org']);
+        $value = $debug ?? (string) array_values($params)[0];
+
+        foreach (['url', 'absoluteUrl'] as $method) {
+            try {
+                $router->{$method}($name, $params);
+                $this->fail('An address was generated');
+            } catch (RouterException $e) {
+                // The message names the parameter at most; values are for the debug message only
+                $this->assertSame($message, $e->getMessage());
+                $this->assertSame($value, $e->getDebugMessage());
+            }
+        }
+    }
+
+    public function testBasePathWithABackslashGivesNoAddress(): void
+    {
+        // The router puts a slash in front of what it is given: '\evil.example' becomes
+        // '/\evil.example' — which a client reads as '//evil.example'
+        // … and a tab alone becomes '/<tab>', which a client drops: '/<tab>/a/b' is '//a/b'
+        foreach (['\\evil.example', "\t", "\n"] as $basePath) {
+            try {
+                $this->router(['basePath' => $basePath])->url('static');
+                $this->fail('An address was generated');
+            } catch (RouterException $e) {
+                $this->assertStringStartsWith('The address would not be a path on this site', $e->getMessage());
+            }
+        }
+    }
+
+    public function testWithoutUrlEncodingValuesGoInAsGiven(): void
+    {
+        $router = $this->router(['urlEncoding' => false]);
+
+        // The application encodes itself — and answers for what it writes
+        $this->assertSame('/tags/a/b', $router->url('tag', ['tag' => 'a/b']));
+        $this->assertSame('/tags/a%2Fb', $router->url('tag', ['tag' => 'a%2Fb']));
+        $this->assertSame('/files/../x', $router->url('files', ['path' => '../x']));
+        $this->assertSame('/tags/..', $router->url('tag', ['tag' => '..']));
+        $this->assertSame('/tags/a\\b', $router->url('tag', ['tag' => 'a\\b']));
     }
 }

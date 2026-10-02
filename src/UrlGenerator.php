@@ -19,13 +19,20 @@ final class UrlGenerator
     private ?string $baseUrl = null;
     private bool $encodeParams = true;
 
+    /** @var array<string, string> Pattern shortcut => regular expression fragment */
+    private array $patterns;
+
     /**
      * Create a new UrlGenerator instance.
      *
      * @param array<Route>|array<string, string> $routes Route objects or name => pattern mapping
+     * @param array<string, string>|null $patterns The collector's pattern shortcuts (RouteCollector::getPatterns());
+     *                                             null: the built-in ones
      */
-    public function __construct(array $routes = [])
+    public function __construct(array $routes = [], ?array $patterns = null)
     {
+        $this->patterns = $patterns ?? (new RouteCollector())->getPatterns();
+
         foreach ($routes as $key => $value) {
             if ($value instanceof Route) {
                 // Route object: extract name and pattern
@@ -85,9 +92,21 @@ final class UrlGenerator
     public function url(string $name, array $params = []): string
     {
         $pattern = $this->getPatternByName($name);
-        $url = $this->replaceParameters($pattern, $params);
+        $address = $this->basePath . $this->replaceParameters($pattern, $params);
 
-        return $this->basePath . $url;
+        // What goes out has the form of a path on this site: one slash in front, no
+        // backslash (a client reads it as a slash), no control character (a client drops
+        // tab and line breaks before it reads the address — '/<tab>/host' is '//host').
+        // Parameter values cannot break that form, they are encoded; a route pattern or a
+        // base path could.
+        if ($this->encodeParams && preg_match('#\A/(?!/)[^\\\\\x00-\x1F\x7F]*\z#', $address) !== 1) {
+            throw new RouterException(
+                'The address would not be a path on this site: it has to begin with a single "/" and contain no backslash or control character',
+                debugMessage: $address,
+            );
+        }
+
+        return $address;
     }
 
     /**
@@ -156,7 +175,7 @@ final class UrlGenerator
 
         // Replace parameters: {name} or {name:constraint}
         $url = preg_replace_callback(
-            '/\{([a-zA-Z_][a-zA-Z0-9_]*)(?::[^}]+)?\}/',
+            '/\{([a-zA-Z_][a-zA-Z0-9_]*)(?::([^}]+))?\}/',
             function (array $matches) use ($params): string {
                 $name = $matches[1];
 
@@ -169,12 +188,82 @@ final class UrlGenerator
                 $rawValue = $params[$name];
                 $value = is_bool($rawValue) ? ($rawValue ? '1' : '0') : (string) $rawValue;
 
-                return $this->encodeParams ? rawurlencode($value) : $value;
+                return $this->encodeParams ? $this->encode($name, $value, $matches[2] ?? null) : $value;
             },
             $pattern
         );
 
         // preg_replace_callback returns null only on error, which won't happen with valid pattern
-        return $url ?? $pattern;
+        $url ??= $pattern;
+
+        // A '.' or '..' segment never arrives: a client resolves it before it asks (the
+        // encoded forms too). Looked for in the finished address — '/dl/{name}.json' with
+        // the value '..' has none, '/x/{a}.' with an empty value has one.
+        if ($this->encodeParams && preg_match('#(?:^|/)\.\.?(?:/|$)#D', $url) === 1) {
+            throw new RouterException(
+                'The address would contain a "." or ".." path segment, which a client resolves before it asks',
+                debugMessage: $url,
+            );
+        }
+
+        // Nor does one that begins with '//': a client reads what follows as another host.
+        // ('/{path:any}' with the value '/evil.example/x' — 1.x wrote '/%2Fevil.example%2Fx'.)
+        if ($this->encodeParams && str_starts_with($url, '//')) {
+            throw new RouterException(
+                'The address would begin with "//", which a client reads as another host',
+                debugMessage: $url,
+            );
+        }
+
+        return $url;
+    }
+
+    /**
+     * A parameter value as it goes into the path.
+     *
+     * The router refuses requests with an encoded separator (%2F, %5C), so a slash is never
+     * written as %2F: where the placeholder takes several segments ({path:any}) the slashes
+     * stay and each segment is encoded on its own; everywhere else a value with a slash
+     * has no address. Neither has a value with a backslash. ('.' and '..' segments are
+     * looked for in the finished address, see replaceParameters().)
+     *
+     * @throws RouterException When the value cannot be part of a path that reaches the route
+     */
+    private function encode(string $name, string $value, ?string $type): string
+    {
+        if (str_contains($value, '\\')) {
+            throw new RouterException(
+                sprintf('Parameter "%s" contains a backslash, which no route accepts', $name),
+                debugMessage: $value,
+            );
+        }
+
+        $segments = explode('/', $value);
+
+        if (count($segments) > 1) {
+            $fragment = $this->patterns[$type ?? ''] ?? '[^/]+';
+
+            // The fragment is asked on its own. One that does not stand on its own — it
+            // looks at the text around it or refers to another placeholder — does not
+            // compile or does not match here; that is a refusal like any other, whatever
+            // the application's error handler makes of a warning. (The handler is swapped
+            // for the length of this one call; the swap goes away when the finished
+            // address is checked against the whole route instead.)
+            set_error_handler(static fn (): bool => true);
+            try {
+                $fits = preg_match('#\A(?:' . $fragment . ')\z#', $value) === 1;
+            } finally {
+                restore_error_handler();
+            }
+
+            if (!$fits) {
+                throw new RouterException(
+                    sprintf('Parameter "%s" contains a slash, which its placeholder does not accept', $name),
+                    debugMessage: $value,
+                );
+            }
+        }
+
+        return implode('/', array_map(rawurlencode(...), $segments));
     }
 }

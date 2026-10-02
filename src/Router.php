@@ -617,7 +617,7 @@ class Router implements RequestHandlerInterface
             $this->getDispatcher();
             assert($this->collector !== null);
 
-            $this->urlGenerator = new UrlGenerator($this->collector->getRoutes());
+            $this->urlGenerator = new UrlGenerator($this->collector->getRoutes(), $this->collector->getPatterns());
 
             $this->urlGenerator->setBasePath($this->config['basePath']);
             $this->urlGenerator->setEncodeParams($this->config['urlEncoding']);
