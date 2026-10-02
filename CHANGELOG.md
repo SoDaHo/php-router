@@ -5,6 +5,20 @@
 2.0.0, in progress on branch `2.x`. Every change that breaks something from 1.x is in the
 table; what is not listed works as in 1.2.
 
+### Added
+- **`Router::app()`** serves a folder with a built web app under a prefix — one line per
+  app, also at `/`. Routes come first; where none matches, a file of the folder is sent
+  (`Content-Type`, `nosniff`, `Range`, HEAD), otherwise the start page, and a path that looks
+  like a missing file is a 404. Never served: anything outside the folder, hidden and
+  unreadable files, types that are not on the list (PHP sources cannot be put on it, source
+  maps are off by default), paths with NUL, backslash, encoded separators, empty segments
+  or segments that end in a dot or space; a path with a colon below the prefix is never
+  looked up as a file. Cache headers are configurable: everything goes out with `no-cache`
+  until the application says which files never change (`'immutable' => AppFolder::HASHED`
+  for what a bundler hashed in `assets/` or `static/`). See README, "Serving a Web App".
+- `emitChunkSize` config option: how many bytes `run()`/`emit()` read from the response body
+  at a time (default 8192 as before; 1024 to 16777216, anything else is refused).
+
 ### Upgrading from 1.x
 
 | 1.x | 2.0 |
@@ -19,6 +33,8 @@ table; what is not listed works as in 1.2.
 | `->enableCache($file, $key)`, `'cacheFile'`, `'cacheSignature'`, `ROUTER_CACHE_FILE`, `ROUTER_CACHE_KEY` | Remove them: there is no route cache (measured, it made requests slower). `enableCache()` no longer exists; the config keys — also `'cacheFile' => ''`, the 1.x way to keep the cache off — and the variables have no effect any more (a later beta will refuse config keys the router does not know). Delete old cache files |
 | `error` hook with `type: 'cache'`, `CacheException`, `Cache\RouteCache` | Gone with the cache |
 | `Route::__set_state()`, `RedirectHandler::__set_state()`, `RouteCollector::getNamedRoutesData()` | Removed. Build routes from the routes file instead of `var_export()`ing them; named routes: `getRoutes()` |
+| A config key `'emitChunkSize'` is ignored like every key the router does not know | It is an option now: an integer, or a string of digits, from 1024 to 16777216; anything else throws `RouterException` |
+| A subclass may have its own `Router::app()` or `RouteDispatcher::setApps()` | Both are methods of the library now; a member of the same name in a subclass has to be compatible |
 | HEAD on a route registered with `get()`: 405, unless `'implicitHead' => true` | `implicitHead` is on by default — see below. `'implicitHead' => false` (on a `RouteDispatcher` of your own: `setImplicitHead(false)`) brings 1.x back |
 
 What HEAD by default means for an application that changes nothing:
