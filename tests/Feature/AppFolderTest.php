@@ -8,7 +8,13 @@ use Nyholm\Psr7\ServerRequest;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Psr\Http\Message\ResponseInterface;
+use Psr\Http\Message\ServerRequestInterface;
+use Psr\Http\Server\MiddlewareInterface;
+use Psr\Http\Server\RequestHandlerInterface;
 use Sodaho\Router\AppFolder;
+use Sodaho\Router\Exception\RouterException;
+use Sodaho\Router\Response;
+use Sodaho\Router\RouteMatch;
 use Sodaho\Router\Router;
 
 /**
@@ -492,5 +498,575 @@ class AppFolderTest extends TestCase
         $folded = new ServerRequest('GET', 'http://example.org//login/assets/style.css');
         $this->assertSame('/login/assets/style.css', $folded->getUri()->getPath());
         $this->assertSame('p{}', (string) $router->handle($folded)->getBody());
+    }
+
+    // ==================== the folder ====================
+
+    public function testFolderThatIsALinkServesWhatTheLinkPointsTo(): void
+    {
+        symlink($this->base . '/site', $this->base . '/current');
+
+        $router = Router::create(['debug' => false])->loadRoutes($this->routesFile)->app('/site', $this->base . '/current');
+
+        $this->assertSame('about', (string) $this->get($router, '/site/about.html')->getBody());
+
+        // ... and follows when the link is pointed elsewhere while the process lives. Done
+        // by another process, as a deployment would: PHP remembers resolved paths for two
+        // minutes and only forgets them by itself when the change was its own.
+        exec(sprintf('ln -sfn %s %s', escapeshellarg($this->base . '/login'), escapeshellarg($this->base . '/current')), $output, $code);
+        $this->assertSame(0, $code);
+
+        $this->assertSame(404, $this->get($router, '/site/about.html')->getStatusCode());
+        $this->assertSame('p{}', (string) $this->get($router, '/site/assets/style.css')->getBody());
+    }
+
+    public function testFolderThatDisappearsIsNotFound(): void
+    {
+        $router = Router::create(['debug' => false])->loadRoutes($this->routesFile)->app('/site', $this->base . '/site');
+        $this->assertSame(200, $this->get($router, '/site/')->getStatusCode());
+
+        $this->remove($this->base . '/site');
+
+        $this->assertSame(404, $this->get($router, '/site/')->getStatusCode());
+        $this->assertSame(404, $this->get($router, '/site/about.html')->getStatusCode());
+    }
+
+    public function testRelativeFolderMeansTheWorkingDirectoryOfTheRegistration(): void
+    {
+        $before = (string) getcwd();
+
+        try {
+            chdir($this->base);
+            $router = Router::create(['debug' => false])->loadRoutes($this->routesFile)->app('/login', 'login');
+
+            // Another directory that has a 'login' folder with other content, and a start page
+            chdir($this->base . '/site');
+
+            $this->assertSame('<!doctype html><title>login</title>', (string) $this->get($router, '/login/')->getBody());
+            $this->assertSame('p{}', (string) $this->get($router, '/login/assets/style.css')->getBody());
+            $this->assertSame(404, $this->get($router, '/login/shadow.js')->getStatusCode());
+        } finally {
+            chdir($before);
+        }
+    }
+
+    /**
+     * @return array<string, array{0: string}>
+     */
+    public static function relativeNamesThatLookAbsoluteElsewhere(): array
+    {
+        return [
+            'drive letter' => ['C:/site'],
+            'backslash in front' => ['\\site'],
+            'drive letter and backslash' => ['C:\\site'],
+        ];
+    }
+
+    #[DataProvider('relativeNamesThatLookAbsoluteElsewhere')]
+    public function testWhatIsAbsoluteIsTheSystemsMatter(string $name): void
+    {
+        if (DIRECTORY_SEPARATOR !== '/') {
+            $this->markTestSkipped('on Windows these names are bound or refused, see the next test');
+        }
+
+        $before = (string) getcwd();
+        @mkdir($this->base . '/' . $name, 0o777, true);
+        file_put_contents($this->base . '/' . $name . '/index.html', 'bound');
+
+        try {
+            chdir($this->base);
+            $router = Router::create(['debug' => false])->loadRoutes($this->routesFile)->app('/x', $name);
+
+            // Another directory with a folder of the same relative name
+            @mkdir($this->base . '/site/' . $name, 0o777, true);
+            file_put_contents($this->base . '/site/' . $name . '/index.html', 'swapped');
+            chdir($this->base . '/site');
+
+            $this->assertSame('bound', (string) $this->get($router, '/x/')->getBody());
+        } finally {
+            chdir($before);
+        }
+    }
+
+    /**
+     * @return array<string, array{0: string, 1: string|false, 2: string, 3: string}>
+     */
+    public static function foldersAndWhatTheyAreBoundTo(): array
+    {
+        return [
+            // where '/' is the separator
+            'absolute' => ['/var/www/site', '/srv', '/', '/var/www/site'],
+            'absolute, no working directory needed' => ['/var/www/site', false, '/', '/var/www/site'],
+            'relative' => ['site', '/srv', '/', '/srv/site'],
+            'relative with a parent step' => ['../site', '/srv', '/', '/srv/../site'],
+            'drive letter is a relative name' => ['C:/site', '/srv', '/', '/srv/C:/site'],
+            'backslash in front is a relative name' => ['\\site', '/srv', '/', '/srv/\\site'],
+            'two backslashes in front are a relative name' => ['\\\\server\\share', '/srv', '/', '/srv/\\\\server\\share'],
+            'empty' => ['', '/srv', '/', ''],
+            'relative without a working directory' => ['site', false, '/', ''],
+            // on Windows
+            'drive and backslash' => ['C:\\site', 'D:\\srv', '\\', 'C:\\site'],
+            'drive and slash' => ['c:/site', 'D:\\srv', '\\', 'c:/site'],
+            'server' => ['\\\\server\\share\\site', 'D:\\srv', '\\', '\\\\server\\share\\site'],
+            'server, slashes' => ['//server/share/site', 'D:\\srv', '\\', '//server/share/site'],
+            'drive, no working directory needed' => ['C:\\site', false, '\\', 'C:\\site'],
+            'relative on Windows' => ['site', 'D:\\srv', '\\', 'D:\\srv\\site'],
+            'relative on Windows, slash inside' => ['web/site', 'D:\\srv', '\\', 'D:\\srv\\web/site'],
+            // Half bound: Windows would complete these from the current drive or its working
+            // directory — and fold 'D:\srv\\site' into a folder that was never meant
+            'root of the current drive' => ['\\site', 'D:\\srv', '\\', ''],
+            'root of the current drive, slash' => ['/site', 'D:\\srv', '\\', ''],
+            'working directory of a drive' => ['C:site', 'D:\\srv', '\\', ''],
+            'a drive alone' => ['C:', 'D:\\srv', '\\', ''],
+            'empty on Windows' => ['', 'D:\\srv', '\\', ''],
+            'relative on Windows without a working directory' => ['site', false, '\\', ''],
+        ];
+    }
+
+    #[DataProvider('foldersAndWhatTheyAreBoundTo')]
+    public function testFolderIsBoundByTheRulesOfTheSystem(string $directory, string|false $cwd, string $separator, string $bound): void
+    {
+        $this->assertSame($bound, AppFolder::bind($directory, $cwd, $separator));
+    }
+
+    public function testRelativeFolderWithoutAWorkingDirectoryIsRefused(): void
+    {
+        $before = (string) getcwd();
+        $gone = $this->base . '/gone';
+        mkdir($gone);
+
+        try {
+            chdir($gone);
+            rmdir($gone);
+
+            if (getcwd() !== false) {
+                $this->markTestSkipped('this system still reports a removed working directory');
+            }
+
+            // Resolved against nothing, 'tmp' would mean '/tmp'
+            foreach (['tmp', 'etc', ltrim($this->app, '/')] as $relative) {
+                try {
+                    Router::create()->app('/x', $relative);
+                    $this->fail('A relative folder was accepted without a working directory');
+                } catch (RouterException $e) {
+                    $this->assertSame('App folder is not a directory', $e->getMessage());
+                }
+            }
+        } finally {
+            chdir($before);
+        }
+    }
+
+    public function testEmptyFolderNameIsNotTheWorkingDirectory(): void
+    {
+        $before = (string) getcwd();
+
+        try {
+            // What an unset variable makes of a path must not serve the directory the
+            // process happens to run in
+            chdir($this->app);
+
+            Router::create()->app('/x', '');
+            $this->fail('An empty folder name was accepted');
+        } catch (RouterException $e) {
+            $this->assertSame('App folder is not a directory', $e->getMessage());
+            $this->assertSame('', $e->getDebugMessage());
+        } finally {
+            chdir($before);
+        }
+    }
+
+    // ==================== several apps, base path, middleware, hooks ====================
+
+    public function testMostSpecificPrefixDecidesAlone(): void
+    {
+        // Registered root first — the order of the calls does not matter
+        $router = Router::create(['debug' => false])
+            ->loadRoutes($this->routesFile)
+            ->app('/', $this->base . '/site')
+            ->app('/login', $this->app);
+
+        $this->assertSame('<!doctype html><title>site</title>', (string) $this->get($router, '/')->getBody());
+        $this->assertSame('about', (string) $this->get($router, '/about.html')->getBody());
+        $this->assertSame('<!doctype html><title>site</title>', (string) $this->get($router, '/pricing')->getBody());
+        $this->assertSame('<!doctype html><title>login</title>', (string) $this->get($router, '/login/reset')->getBody());
+        $this->assertSame('ok', (string) $this->get($router, '/health')->getBody());
+
+        // The root folder has login/shadow.js; '/login' belongs to the other app, which
+        // has no such file: 404, no second try further up
+        $this->assertSame(404, $this->get($router, '/login/shadow.js')->getStatusCode());
+
+        // What the app at '/login' refuses is not handed to the root app either
+        $this->assertSame(404, $this->get($router, '/login/.env')->getStatusCode());
+    }
+
+    public function testPrefixIsRelativeToTheBasePath(): void
+    {
+        $router = $this->router(['basePath' => '/auth']);
+
+        $this->assertSame('p{}', (string) $this->get($router, '/auth/login/assets/style.css')->getBody());
+        $this->assertSame(200, $this->get($router, '/auth/login/reset')->getStatusCode());
+
+        // Outside the base path there is no app
+        $this->assertSame(404, $this->get($router, '/login/assets/style.css')->getStatusCode());
+        $this->assertSame(404, $this->get($router, '/login/')->getStatusCode());
+    }
+
+    public function testTrailingSlashModeIgnore(): void
+    {
+        $router = $this->router(['trailingSlash' => 'ignore']);
+
+        $this->assertSame(200, $this->get($router, '/login/')->getStatusCode());
+        $this->assertSame('<!doctype html><title>docs</title>', (string) $this->get($router, '/login/docs/')->getBody());
+
+        // The mode drops slashes at the end before the folder is asked — an empty segment
+        // stays one
+        foreach (['/login//', '/login/reset//', '/login/docs//', '/login/assets/style.css//'] as $path) {
+            $this->assertSame(404, $this->get($router, $path)->getStatusCode(), $path);
+        }
+    }
+
+    public function testMiddlewareForEveryRequestRunsBefore(): void
+    {
+        $seen = [];
+        $guard = new class ($seen) implements MiddlewareInterface {
+            /** @param array<int, mixed> $seen */
+            public function __construct(private array &$seen)
+            {
+            }
+
+            public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
+            {
+                // For the route table an app path is a path without a route
+                $this->seen[] = $request->getAttribute(RouteMatch::class)->status;
+
+                if ($request->hasHeader('X-Blocked')) {
+                    return Response::text('blocked', 403);
+                }
+
+                return $handler->handle($request)->withHeader('X-Frame-Options', 'DENY');
+            }
+        };
+
+        $router = $this->router()->middleware($guard);
+
+        $response = $this->get($router, '/login/assets/style.css');
+        $this->assertSame('p{}', (string) $response->getBody());
+        $this->assertSame('DENY', $response->getHeaderLine('X-Frame-Options'));
+
+        $blocked = $router->handle((new ServerRequest('GET', '/login/assets/style.css'))->withHeader('X-Blocked', '1'));
+        $this->assertSame(403, $blocked->getStatusCode());
+
+        $this->assertSame([RouteMatch::NOT_FOUND, RouteMatch::NOT_FOUND], $seen);
+    }
+
+    /**
+     * The README's example: an application with a 404 page of its own. Answering every
+     * NOT_FOUND there would get in before the folder — so it leaves the app's paths alone.
+     */
+    public function testMiddlewareThatAnswersNotFoundHasToLeaveTheAppsPathsAlone(): void
+    {
+        $ownPage = fn (bool $everywhere): MiddlewareInterface => new class ($everywhere) implements MiddlewareInterface {
+            public function __construct(private readonly bool $everywhere)
+            {
+            }
+
+            public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
+            {
+                $match = $request->getAttribute(RouteMatch::class);
+                $underAnApp = str_starts_with($match->path . '/', '/login/');
+
+                if ($match->status === RouteMatch::NOT_FOUND && ($this->everywhere || !$underAnApp)) {
+                    return Response::html('<h1>Not here</h1>', 404);
+                }
+
+                return $handler->handle($request);
+            }
+        };
+
+        $careful = $this->router()->middleware($ownPage(false));
+        $this->assertSame('p{}', (string) $this->get($careful, '/login/assets/style.css')->getBody());
+        $this->assertSame('<!doctype html><title>login</title>', (string) $this->get($careful, '/login')->getBody());
+        $this->assertSame('<h1>Not here</h1>', (string) $this->get($careful, '/nowhere')->getBody());
+        $this->assertSame('<h1>Not here</h1>', (string) $this->get($careful, '/loginx')->getBody());
+        // What the folder does not have is the router's 404 — the middleware stepped aside
+        $this->assertStringContainsString('NOT_FOUND', (string) $this->get($careful, '/login/gone.js')->getBody());
+
+        $blanket = $this->router()->middleware($ownPage(true));
+        $this->assertSame('<h1>Not here</h1>', (string) $this->get($blanket, '/login/assets/style.css')->getBody());
+    }
+
+    public function testErrorHookAndDispatchHookStaySilentForAppFiles(): void
+    {
+        $fired = [];
+        $router = $this->router();
+        foreach (['dispatch', 'notFound', 'methodNotAllowed', 'error'] as $event) {
+            $router->on($event, function () use (&$fired, $event): void {
+                $fired[] = $event;
+            });
+        }
+
+        $this->get($router, '/login/assets/style.css');
+        $this->get($router, '/login/reset');
+
+        $this->assertSame([], $fired);
+    }
+
+    public function testAppAddedAfterTheFirstRequestApplies(): void
+    {
+        $router = Router::create(['debug' => false])->loadRoutes($this->routesFile);
+        $this->assertSame(404, $this->get($router, '/login/')->getStatusCode());
+
+        $router->app('/login', $this->app);
+        $this->assertSame(200, $this->get($router, '/login/')->getStatusCode());
+    }
+
+    // ==================== options ====================
+
+    public function testOptions(): void
+    {
+        file_put_contents($this->app . '/start.html', 'start');
+        file_put_contents($this->app . '/notes.md', '# notes');
+
+        $router = Router::create(['debug' => false])->loadRoutes($this->routesFile)->app('/login', $this->app, [
+            'index' => 'start.html',
+            // Taking a PHP extension off the list is allowed: it was never on it
+            'types' => ['md' => 'text/markdown; charset=utf-8', 'ico' => null, 'php' => null],
+            // Matched against the requested path below the prefix
+            'immutable' => '~^assets/style\.css$~',
+            'cacheIndex' => 'no-store',
+            'cacheImmutable' => 'public, max-age=60',
+            'cacheOther' => null,
+        ]);
+
+        $start = $this->get($router, '/login/somewhere');
+        $this->assertSame('start', (string) $start->getBody());
+        $this->assertSame('no-store', $start->getHeaderLine('Cache-Control'));
+
+        $this->assertSame('text/markdown; charset=utf-8', $this->get($router, '/login/notes.md')->getHeaderLine('Content-Type'));
+        $this->assertSame(404, $this->get($router, '/login/favicon.ico')->getStatusCode(), 'taken off the list');
+        $this->assertSame(404, $this->get($router, '/login/secret.php')->getStatusCode());
+        $this->assertFalse($this->get($router, '/login/link-inside.css')->hasHeader('Cache-Control'), 'the requested path decides, not the file a link leads to');
+        $this->assertSame('public, max-age=60', $this->get($router, '/login/assets/style.css')->getHeaderLine('Cache-Control'));
+
+        $other = $this->get($router, '/login/assets/app.4f9a2b1c.js');
+        $this->assertSame(200, $other->getStatusCode());
+        $this->assertFalse($other->hasHeader('Cache-Control'));
+
+        // index.html is an ordinary file now
+        $this->assertFalse($this->get($router, '/login/index.html')->hasHeader('Cache-Control'));
+
+        // immutable => null is the default: no name counts as unchanging
+        $none = Router::create(['debug' => false])->loadRoutes($this->routesFile)->app('/login', $this->app, ['immutable' => null]);
+        $this->assertSame('no-cache', $this->get($none, '/login/assets/app.4f9a2b1c.js')->getHeaderLine('Cache-Control'));
+    }
+
+    public function testSourceMapsAreServedOnceTheirTypeIsOnTheList(): void
+    {
+        $router = Router::create(['debug' => false])->loadRoutes($this->routesFile)
+            ->app('/login', $this->app, ['types' => ['map' => 'application/json']]);
+
+        $map = $this->get($router, '/login/assets/app.4f9a2b1c.js.map');
+
+        $this->assertSame(200, $map->getStatusCode());
+        $this->assertSame('application/json', $map->getHeaderLine('Content-Type'));
+        $this->assertSame('no-cache', $map->getHeaderLine('Cache-Control'));
+    }
+
+    public function testExtensionsThatOnlyResembleThePhpOnesCanBePutOnTheList(): void
+    {
+        file_put_contents($this->app . '/notes.phpx', 'x');
+
+        $router = Router::create(['debug' => false])->loadRoutes($this->routesFile)
+            ->app('/login', $this->app, ['types' => ['phpx' => 'text/plain', 'xphp' => 'text/plain', 'incl' => 'text/plain', 'phtm' => 'text/plain']]);
+
+        $this->assertSame(200, $this->get($router, '/login/notes.phpx')->getStatusCode());
+    }
+
+    /**
+     * @return array<string, array{0: string, 1: array<mixed>, 2: string, 3: string|null}>
+     */
+    public static function registrationsThatAreRefused(): array
+    {
+        return [
+            'folder that does not exist' => ['/x', [], 'App folder is not a directory', 'DIR/nowhere'],
+            'file instead of a folder' => ['/x', [], 'App folder is not a directory', 'DIR/login/index.html'],
+            'prefix with a parent step' => ['/a/../b', [], 'App prefix must be a plain path', '/a/../b'],
+            'hidden prefix' => ['/.well-known', [], 'App prefix must be a plain path', '/.well-known'],
+            'unknown option' => ['/x', ['indx' => 'start.html'], 'Unknown app option. Known options: index, types, immutable, cacheIndex, cacheImmutable, cacheOther', 'Unknown: indx'],
+            'index with a path' => ['/x', ['index' => 'sub/index.html'], "App option 'index' must be a file name", null],
+            'empty index' => ['/x', ['index' => ''], "App option 'index' must be a file name", null],
+            'index with a colon' => ['/x', ['index' => 'in:dex.html'], "App option 'index' must be a file name", null],
+            'hidden index' => ['/x', ['index' => '.index.html'], "App option 'index' must be a file name", null],
+            'index that is no string' => ['/x', ['index' => true], "App option 'index' must be a file name", null],
+            'types that are no map' => ['/x', ['types' => 'md'], "App option 'types' must map extensions to content types", null],
+            'extension with a dot' => ['/x', ['types' => ['.md' => 'text/markdown']], "App option 'types' must map extensions (lowercase, without dot) to content types", null],
+            'extension in capitals' => ['/x', ['types' => ['MD' => 'text/markdown']], "App option 'types' must map extensions (lowercase, without dot) to content types", null],
+            // Found at registration, not as a 500 at the first request
+            'content type with a line break' => ['/x', ['types' => ['js' => "text/javascript\r\nX-Injected: 1"]], "App option 'types' must map extensions (lowercase, without dot) to content types", null],
+            'content type with a NUL' => ['/x', ['types' => ['js' => "text/javascript\0"]], "App option 'types' must map extensions (lowercase, without dot) to content types", null],
+            'content type that is no string' => ['/x', ['types' => ['js' => 1]], "App option 'types' must map extensions (lowercase, without dot) to content types", null],
+            'cache value with a NUL' => ['/x', ['cacheIndex' => "no-cache\0evil"], "App option 'cacheIndex' must be a Cache-Control value or null", null],
+            'cache value with a DEL' => ['/x', ['cacheOther' => "no-cache\x7F"], "App option 'cacheOther' must be a Cache-Control value or null", null],
+            'cache value with a tab' => ['/x', ['cacheImmutable' => "public,\tmax-age=60"], "App option 'cacheImmutable' must be a Cache-Control value or null", null],
+            'empty content type' => ['/x', ['types' => ['md' => '']], "App option 'types' must map extensions (lowercase, without dot) to content types", null],
+            'list of extensions' => ['/x', ['types' => ['md']], "App option 'types' must map extensions (lowercase, without dot) to content types", null],
+            'extension with a line break' => ['/x', ['types' => ["md\n" => 'text/markdown']], "App option 'types' must map extensions (lowercase, without dot) to content types", null],
+            'PHP source put on the list' => ['/x', ['types' => ['php' => 'text/plain']], "App option 'types' cannot put PHP sources on the list", 'php'],
+            'PHP source put on the list, other extension' => ['/x', ['types' => ['phtml' => 'text/html']], "App option 'types' cannot put PHP sources on the list", 'phtml'],
+            'PHP source put on the list, version in the extension' => ['/x', ['types' => ['php6' => 'text/plain']], "App option 'types' cannot put PHP sources on the list", 'php6'],
+            'PHP source put on the list, two digits' => ['/x', ['types' => ['php74' => 'text/plain']], "App option 'types' cannot put PHP sources on the list", 'php74'],
+            'PHP source put on the list, pht' => ['/x', ['types' => ['pht' => 'text/plain']], "App option 'types' cannot put PHP sources on the list", 'pht'],
+            'PHP source put on the list, phps' => ['/x', ['types' => ['phps' => 'text/plain']], "App option 'types' cannot put PHP sources on the list", 'phps'],
+            'PHP test file put on the list' => ['/x', ['types' => ['phpt' => 'text/plain']], "App option 'types' cannot put PHP sources on the list", 'phpt'],
+            'PHP archive put on the list' => ['/x', ['types' => ['phar' => 'application/octet-stream']], "App option 'types' cannot put PHP sources on the list", 'phar'],
+            'content type of blanks' => ['/x', ['types' => ['js' => '   ']], "App option 'types' must map extensions (lowercase, without dot) to content types", null],
+            'cache value of blanks' => ['/x', ['cacheOther' => '  '], "App option 'cacheOther' must be a Cache-Control value or null", null],
+            'PHP include put on the list' => ['/x', ['types' => ['inc' => 'text/plain']], "App option 'types' cannot put PHP sources on the list", 'inc'],
+            'prefix whose segment ends in a dot' => ['/a./b', [], 'App prefix must be a plain path', '/a./b'],
+            'index that ends in a space' => ['/x', ['index' => 'index.html '], "App option 'index' must be a file name", null],
+            'broken regular expression' => ['/x', ['immutable' => '~[~'], "App option 'immutable' must be a regular expression or null", null],
+            'immutable that is no string' => ['/x', ['immutable' => true], "App option 'immutable' must be a regular expression or null", null],
+            'cache value with a line break' => ['/x', ['cacheIndex' => "no-cache\r\nX-Injected: 1"], "App option 'cacheIndex' must be a Cache-Control value or null", null],
+            'empty cache value' => ['/x', ['cacheOther' => ''], "App option 'cacheOther' must be a Cache-Control value or null", null],
+            'cache value that is no string' => ['/x', ['cacheImmutable' => 60], "App option 'cacheImmutable' must be a Cache-Control value or null", null],
+        ];
+    }
+
+    /**
+     * @param array<mixed> $options
+     */
+    #[DataProvider('registrationsThatAreRefused')]
+    public function testRegistrationIsRefused(string $prefix, array $options, string $message, ?string $debugMessage): void
+    {
+        $directory = match (true) {
+            str_starts_with((string) $debugMessage, 'DIR/') => $this->base . substr((string) $debugMessage, 3),
+            default => $this->app,
+        };
+
+        try {
+            /** @phpstan-ignore argument.type */
+            Router::create()->app($prefix, $directory, $options);
+            $this->fail('The registration was accepted');
+        } catch (RouterException $e) {
+            // The message names no value from the configuration; the debug message may
+            $this->assertSame($message, $e->getMessage());
+            $this->assertSame(
+                str_starts_with((string) $debugMessage, 'DIR/') ? $directory : $debugMessage,
+                $e->getDebugMessage()
+            );
+        }
+    }
+
+    public function testColonInThePrefixIsPartOfTheAddress(): void
+    {
+        // Only the path below the prefix is kept away from the file system
+        $router = Router::create(['debug' => false])->loadRoutes($this->routesFile)->app('/urn:isbn', $this->app);
+
+        $this->assertSame('p{}', (string) $this->get($router, '/urn:isbn/assets/style.css')->getBody());
+        $this->assertSame(404, $this->get($router, '/urn:isbn/colon:name.js')->getStatusCode());
+    }
+
+    public function testPrefixCanBeUsedOnce(): void
+    {
+        $router = Router::create()->app('/login', $this->app);
+
+        try {
+            // The same prefix, spelled differently
+            $router->app('login/', $this->base . '/site');
+            $this->fail('The second app was accepted');
+        } catch (RouterException $e) {
+            $this->assertSame('App prefix is already in use', $e->getMessage());
+            $this->assertSame('login/', $e->getDebugMessage());
+        }
+    }
+
+    // ==================== which files count as unchanging ====================
+
+    /**
+     * @return array<string, array{0: string, 1: bool}>
+     */
+    public static function namesAndWhetherTheyCountAsHashed(): array
+    {
+        $hashed = [
+            // Vite, Rollup, esbuild: hyphen and eight characters — letters only, '_' and '-' included
+            'assets/index-wVeeiXs6.js',
+            'assets/index-CaIQYQta.css',
+            'assets/index-Ab-_12cd.js',
+            'assets/polyfills-legacy-AbCdEfGh.js',
+            'assets/chunks/vendor-4XZ7KQ2M.js',
+            // webpack, Create React App, older Vite: dot and 8 to 32 hexadecimal digits
+            'assets/app.deadbeef.js',
+            'static/js/787.a1b2c3d4.chunk.js',
+            'static/media/logo.6ce24c58023cc2f8fd88.svg',
+            'static/css/main.0123456789abcdef0123456789abcdef.css',
+            // The price of a rule by form: eight characters behind a hyphen look like a
+            // hash. That is why the rule is not the default — and why hand-written files
+            // do not belong into assets/ or static/ of an app that passes it (README).
+            'assets/app-settings.js',
+            'assets/chacha20-poly1305.js',
+            'assets/user-12345678.png',
+            'assets/release-20261002.json',
+        ];
+        $plain = [
+            // Copied from public/ as they are — a year of caching would be real damage
+            'apple-touch-icon-180x180.png',
+            'android-chrome-192x192.png',
+            'index-B1fQx9cD.css',
+            'main.a1b2c3d4.chunk.js',
+            'chacha20-poly1305.js',
+            'user-12345678.png',
+            'release-20261002.json',
+            'other/assets/index-B1fQx9cD.css',
+            'assetsx/index-B1fQx9cD.css',
+            // In the bundler's directory, but not in its form
+            'assets/apple-touch-icon-180x180.png',
+            'assets/maskable-icon-512x512.png',
+            'assets/og-image-2024.png',
+            'assets/hero-1920x1080.jpg',
+            'assets/logo-2024-10-01.png',
+            'assets/photo-1234567890.jpg',
+            'assets/roboto-v30-latin-regular.woff2',
+            'assets/my-component-v2.js',
+            'assets/jquery-3.7.1.min.js',
+            'assets/app.min.js',
+            // Eight letters behind a dot that are no hexadecimal digits
+            'assets/app.settings.js',
+            'assets/service-worker.js',
+            'assets/chunk-vendors.js',
+            'assets/app.4f9a2b1.js',
+            'assets/app.0123456789abcdef0123456789abcdef0.js',
+            'assets/main.4F9A2B1C.js',
+            'assets/index-B1fQx9cDe.css',
+            'assets/index-B1fQx9c.css',
+            'assets/index_B1fQx9cD.css',
+            'assets/B1fQx9cD.css',
+            'assets/-B1fQx9cD.css',
+        ];
+
+        $cases = [];
+        foreach ($hashed as $path) {
+            $cases[$path] = [$path, true];
+        }
+        foreach ($plain as $path) {
+            $cases[$path] = [$path, false];
+        }
+
+        return $cases;
+    }
+
+    #[DataProvider('namesAndWhetherTheyCountAsHashed')]
+    public function testOnlyWhatABundlerHashedIsCachedForAYear(string $path, bool $hashed): void
+    {
+        @mkdir(dirname($this->app . '/' . $path), 0o777, true);
+        file_put_contents($this->app . '/' . $path, '//');
+
+        $response = $this->get($this->routerThatTrustsHashedNames(), '/login/' . $path);
+
+        $this->assertSame(200, $response->getStatusCode());
+        $this->assertSame(
+            $hashed ? 'public, max-age=31536000, immutable' : 'no-cache',
+            $response->getHeaderLine('Cache-Control')
+        );
     }
 }
