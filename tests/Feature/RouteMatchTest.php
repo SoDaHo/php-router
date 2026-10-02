@@ -86,7 +86,7 @@ class RouteMatchTest extends TestCase
         $this->assertSame(['id' => 'int'], $match->casts);
 
         // Every method the path knows, in the order of the 405 list
-        $this->assertSame(['GET', 'PATCH'], $match->allowedMethods());
+        $this->assertSame(['GET', 'HEAD', 'PATCH'], $match->allowedMethods());
     }
 
     public function testStaticHit(): void
@@ -96,7 +96,7 @@ class RouteMatchTest extends TestCase
         $this->assertTrue($match->isFound());
         $this->assertSame([], $match->params);
         $this->assertSame([], $match->casts);
-        $this->assertSame(['GET'], $match->allowedMethods());
+        $this->assertSame(['GET', 'HEAD'], $match->allowedMethods());
     }
 
     public function testNoRoute(): void
@@ -124,13 +124,13 @@ class RouteMatchTest extends TestCase
         $withGet = $router->match(new ServerRequest('OPTIONS', '/users/5'));
         $this->assertSame(RouteMatch::METHOD_NOT_ALLOWED, $withGet->status);
         $this->assertFalse($withGet->isFound());
-        $this->assertSame(['GET', 'PATCH'], $withGet->allowedMethods());
+        $this->assertSame(['GET', 'HEAD', 'PATCH'], $withGet->allowedMethods());
         $this->assertSame('users.show', $withGet->route?->name);
         $this->assertSame([], $withGet->params);
 
         // The GET route also when it is not the first in the list (methods of static routes come first)
         $getSecond = $router->match(new ServerRequest('OPTIONS', '/things/new'));
-        $this->assertSame(['POST', 'GET'], $getSecond->allowedMethods());
+        $this->assertSame(['POST', 'GET', 'HEAD'], $getSecond->allowedMethods());
         $this->assertSame('things.show', $getSecond->route?->name);
 
         $withoutGet = $router->match(new ServerRequest('OPTIONS', '/token'));

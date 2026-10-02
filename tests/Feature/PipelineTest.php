@@ -162,7 +162,7 @@ class PipelineTest extends TestCase
 
         $preflight = $router->handle(new ServerRequest('OPTIONS', '/ok'));
         $this->assertSame(204, $preflight->getStatusCode());
-        $this->assertSame('GET, POST, DELETE', $preflight->getHeaderLine('Access-Control-Allow-Methods'));
+        $this->assertSame('GET, HEAD, POST, DELETE', $preflight->getHeaderLine('Access-Control-Allow-Methods'));
 
         // The router never got to answer, so its hooks did not fire
         $this->assertSame([], $hooks);

@@ -56,14 +56,18 @@ class EmitStatusTest extends TestCase
         }
     }
 
-    private function serve(string $method, string $uri): string
+    /**
+     * @param array<string, mixed> $config
+     */
+    private function serve(string $method, string $uri, array $config = []): string
     {
         $_SERVER['REQUEST_METHOD'] = $method;
         $_SERVER['REQUEST_URI'] = $uri;
         $_SERVER['SERVER_PROTOCOL'] = 'HTTP/1.1';
 
         ob_start();
-        Router::create(['debug' => false])->loadRoutes($this->routesFile)->run();
+        /** @phpstan-ignore argument.type */
+        Router::create($config + ['debug' => false])->loadRoutes($this->routesFile)->run();
 
         return (string) ob_get_clean();
     }
@@ -130,6 +134,10 @@ class EmitStatusTest extends TestCase
         $this->assertSame('BODY', $this->serve('GET', '/page'));
         $this->assertSame('', $this->serve('HEAD', '/page'));
         $this->assertSame(200, http_response_code());
+
+        // run() leaves the body out itself — also where the router did not cut it: with
+        // implicitHead off, the HEAD route of this path hands its body through untouched
+        $this->assertSame('', $this->serve('HEAD', '/page', ['implicitHead' => false]));
     }
 
     public function testEmitCanBeCalledForAResponseOfOnesOwn(): void

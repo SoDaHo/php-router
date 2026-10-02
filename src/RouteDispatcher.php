@@ -28,7 +28,7 @@ class RouteDispatcher implements RequestHandlerInterface
     private string $basePath;
     private string $trailingSlash;
     private bool $debug;
-    private bool $implicitHead = false;
+    private bool $implicitHead = true;
 
     /** @var array<int, string|object> Middleware for every request, outermost first */
     private array $middleware = [];

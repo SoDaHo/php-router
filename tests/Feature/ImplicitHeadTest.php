@@ -18,9 +18,9 @@ use Sodaho\Router\RouteMatch;
 use Sodaho\Router\Router;
 
 /**
- * 'implicitHead' => true: a HEAD request without a HEAD route of its own runs through the
- * GET route (RFC 9110: HEAD is GET without the content). Off by default — until 2.0 a HEAD
- * on a GET route is the 405 it has always been.
+ * implicitHead: a HEAD request without a HEAD route of its own runs through the GET route
+ * (RFC 9110: HEAD is GET without the content). On by default since 2.0; switched off, a
+ * HEAD on a GET route is the 405 it was in 1.x.
  */
 class ImplicitHeadTest extends TestCase
 {
@@ -65,19 +65,30 @@ class ImplicitHeadTest extends TestCase
             ->loadRoutes($this->routesFile);
     }
 
-    public function testOffByDefault(): void
+    public function testOnByDefault(): void
     {
-        foreach ([$this->router(false), Router::create(['debug' => false])->loadRoutes($this->routesFile)] as $router) {
-            $response = $router->handle(new ServerRequest('HEAD', '/page'));
+        $router = Router::create(['debug' => false])->loadRoutes($this->routesFile);
 
-            $this->assertSame(405, $response->getStatusCode());
-            $this->assertSame('GET, PATCH', $response->getHeaderLine('Allow'));
-            $this->assertStringContainsString('"allowed":["GET","PATCH"]', (string) $response->getBody());
-            $this->assertSame(['GET', 'PATCH'], $router->match(new ServerRequest('HEAD', '/page'))->allowedMethods());
-        }
+        $response = $router->handle(new ServerRequest('HEAD', '/page'));
+
+        $this->assertSame(200, $response->getStatusCode());
+        $this->assertSame('', (string) $response->getBody());
+        $this->assertSame(['GET', 'HEAD', 'PATCH'], $router->match(new ServerRequest('HEAD', '/page'))->allowedMethods());
+    }
+
+    public function testSwitchedOffHeadOnAGetRouteIsThe405ItWasIn1x(): void
+    {
+        $router = $this->router(false);
+
+        $response = $router->handle(new ServerRequest('HEAD', '/page'));
+
+        $this->assertSame(405, $response->getStatusCode());
+        $this->assertSame('GET, PATCH', $response->getHeaderLine('Allow'));
+        $this->assertStringContainsString('"allowed":["GET","PATCH"]', (string) $response->getBody());
+        $this->assertSame(['GET', 'PATCH'], $router->match(new ServerRequest('HEAD', '/page'))->allowedMethods());
 
         // An explicit HEAD route keeps its body as well: nothing is touched while the switch is off
-        $this->assertSame('from HEAD', (string) $this->router(false)->handle(new ServerRequest('HEAD', '/both'))->getBody());
+        $this->assertSame('from HEAD', (string) $router->handle(new ServerRequest('HEAD', '/both'))->getBody());
     }
 
     public function testHeadIsGetWithoutTheBody(): void
@@ -233,7 +244,7 @@ class ImplicitHeadTest extends TestCase
         $this->assertStringContainsString('SERVER_ERROR', (string) $get->getBody());
 
         // ... and with the switch off the body stays, as it always has
-        $off = Router::create(['debug' => false])->handle(new ServerRequest('HEAD', '/page'));
+        $off = Router::create(['debug' => false, 'implicitHead' => false])->handle(new ServerRequest('HEAD', '/page'));
         $this->assertStringContainsString('SERVER_ERROR', (string) $off->getBody());
     }
 
@@ -245,8 +256,8 @@ class ImplicitHeadTest extends TestCase
         $collector->post('/head-first', fn () => Response::text('post'));
         $collector->get('/head-first', fn () => Response::text('get'));
 
-        $off = new RouteDispatcher($collector->getData());
-        $on = (new RouteDispatcher($collector->getData()))->setImplicitHead(true);
+        $off = (new RouteDispatcher($collector->getData()))->setImplicitHead(false);
+        $on = new RouteDispatcher($collector->getData());
 
         // As registered while the switch is off ...
         $this->assertSame(['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'], $off->match(new ServerRequest('GET', '/any'))->allowedMethods());
@@ -283,7 +294,7 @@ class ImplicitHeadTest extends TestCase
     {
         $collector = new RouteCollector();
         $collector->get('/page', fn () => Response::text('page'));
-        $dispatcher = new RouteDispatcher($collector->getData());
+        $dispatcher = (new RouteDispatcher($collector->getData()))->setImplicitHead(false);
         $request = new ServerRequest('HEAD', '/page');
 
         $before = $dispatcher->match($request);
@@ -375,7 +386,7 @@ class ImplicitHeadTest extends TestCase
         $collector = new RouteCollector();
         $collector->get('/page', fn () => Response::text('page'));
         $collector->post('/page', fn () => Response::text('posted'));
-        $dispatcher = new RouteDispatcher($collector->getData());
+        $dispatcher = (new RouteDispatcher($collector->getData()))->setImplicitHead(false);
 
         $before = $dispatcher->match(new ServerRequest('GET', '/page'));
         $dispatcher->setImplicitHead(true);

@@ -357,9 +357,9 @@ class RouteDispatcherTest extends TestCase
         $response = $dispatcher->handle(new ServerRequest('DELETE', '/users/me'));
 
         $this->assertSame(405, $response->getStatusCode());
-        $this->assertSame('POST, GET', $response->getHeaderLine('Allow'));
-        $this->assertStringContainsString('"allowed":["POST","GET"]', (string) $response->getBody());
-        $this->assertSame(['POST', 'GET'], $hookData['allowed_methods']);
+        $this->assertSame('POST, GET, HEAD', $response->getHeaderLine('Allow'));
+        $this->assertStringContainsString('"allowed":["POST","GET","HEAD"]', (string) $response->getBody());
+        $this->assertSame(['POST', 'GET', 'HEAD'], $hookData['allowed_methods']);
     }
 
     public function testMiddlewareWithConstructorParametersGetsAnActionableError(): void

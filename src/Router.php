@@ -107,7 +107,7 @@ class Router implements RequestHandlerInterface
             'trailingSlash' => (string) ($config['trailingSlash'] ?? 'strict'),
             'routesFile' => $config['routesFile'] ?? null,
             'urlEncoding' => self::flag('urlEncoding', $config['urlEncoding'] ?? true),
-            'implicitHead' => self::flag('implicitHead', $config['implicitHead'] ?? false),
+            'implicitHead' => self::flag('implicitHead', $config['implicitHead'] ?? true),
         ];
     }
 
