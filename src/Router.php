@@ -165,6 +165,22 @@ class Router implements RequestHandlerInterface
     }
 
     /**
+     * Create a router that takes what $config does not say from the environment
+     * ($_ENV, then getenv()): APP_DEBUG, APP_ENV, APP_URL and the ROUTER_* variables.
+     *
+     * Today create() and the constructor do the same. That silent fallback is deprecated
+     * and ends with 2.0 — from then on only fromEnv() reads the environment.
+     *
+     * @param array{debug?: bool|int|string|null, basePath?: string, baseUrl?: string, trailingSlash?: string, cacheFile?: string, cacheSignature?: string, routesFile?: string, urlEncoding?: bool} $config Values that take precedence
+     *
+     * @throws RouterException If 'debug' is neither a boolean nor a boolean-like value
+     */
+    public static function fromEnv(array $config = []): self
+    {
+        return new self($config);
+    }
+
+    /**
      * Quick boot: create, load routes, and run.
      *
      * @param array{debug?: bool|int|string|null, basePath?: string, baseUrl?: string, trailingSlash?: string, cacheFile?: string, cacheSignature?: string, routesFile?: string, urlEncoding?: bool} $config
@@ -198,6 +214,14 @@ class Router implements RequestHandlerInterface
     {
         $this->config['debug'] = $debug;
         return $this;
+    }
+
+    /**
+     * Whether debug mode is on — as the router decided it from config and environment.
+     */
+    public function isDebug(): bool
+    {
+        return $this->config['debug'];
     }
 
     /**

@@ -452,6 +452,40 @@ class RouterConfigTest extends TestCase
         );
         $this->assertFileDoesNotExist($this->cacheFile);
     }
+
+    // ==================== 1.2 ====================
+
+    public function testIsDebugTellsWhatTheRouterDecided(): void
+    {
+        $this->assertFalse($this->router()->isDebug());
+        $this->assertTrue($this->router(['debug' => true])->isDebug());
+        $this->assertTrue($this->router()->setDebug(true)->isDebug());
+
+        // The same formula the 500 response follows — nobody has to rebuild it outside
+        $_ENV['APP_ENV'] = 'dev';
+        $this->assertTrue($this->router()->isDebug());
+        $this->assertFalse($this->router(['debug' => false])->isDebug());
+
+        $_ENV['APP_ENV'] = 'DEV';
+        $this->assertFalse($this->router()->isDebug(), 'the comparison is case-sensitive');
+    }
+
+    public function testFromEnvReadsTheEnvironmentAndLetsPassedValuesWin(): void
+    {
+        $_ENV['APP_DEBUG'] = 'true';
+        $_ENV['ROUTER_BASE_PATH'] = '/env';
+        $_ENV['APP_URL'] = 'https://env.example.com';
+
+        $router = Router::fromEnv()->loadRoutes($this->routesFile);
+        $this->assertTrue($router->isDebug());
+        $this->assertSame(200, $router->handle(new ServerRequest('GET', '/env/users'))->getStatusCode());
+        $this->assertSame('https://env.example.com/env/users/5', $router->absoluteUrl('users.show', ['id' => 5]));
+
+        $router = Router::fromEnv(['debug' => false, 'basePath' => '/config'])->loadRoutes($this->routesFile);
+        $this->assertFalse($router->isDebug());
+        $this->assertSame(200, $router->handle(new ServerRequest('GET', '/config/users'))->getStatusCode());
+        $this->assertSame('https://env.example.com/config/users/5', $router->absoluteUrl('users.show', ['id' => 5]));
+    }
 }
 
 final class RouterConfigController
