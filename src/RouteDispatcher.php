@@ -36,6 +36,9 @@ class RouteDispatcher implements RequestHandlerInterface
     /** @var (\Closure(\Throwable, ServerRequestInterface): ResponseInterface)|null */
     private ?\Closure $errorResponder = null;
 
+    /** @var list<AppFolder> Web app folders, the longest prefix first */
+    private array $apps = [];
+
     /**
      * The lookups this dispatcher made, each with the request path it was made for. Only
      * these are taken over from a request — a RouteMatch built elsewhere never is.
@@ -99,6 +102,18 @@ class RouteDispatcher implements RequestHandlerInterface
         // What was looked up under the other setting no longer stands in for a fresh lookup
         $this->issued = new \WeakMap();
 
+        return $this;
+    }
+
+    /**
+     * Web app folders that answer where the route table has nothing (see AppFolder).
+     *
+     * @param list<AppFolder> $apps The longest prefix first: the first app whose prefix
+     *                              fits the path decides alone
+     */
+    public function setApps(array $apps): static
+    {
+        $this->apps = $apps;
         return $this;
     }
 
@@ -386,7 +401,7 @@ class RouteDispatcher implements RequestHandlerInterface
 
         // Handle non-FOUND cases directly (no casting involved)
         if ($match->status === RouteMatch::NOT_FOUND) {
-            return $this->handleNotFound($method, $uri);
+            return $this->serveApp($request) ?? $this->handleNotFound($method, $uri);
         }
 
         if ($match->status === RouteMatch::METHOD_NOT_ALLOWED) {
@@ -481,6 +496,33 @@ class RouteDispatcher implements RequestHandlerInterface
         }
 
         return $result;
+    }
+
+    /**
+     * A file or the start page of a web app folder — for a path no route knows. Routes come
+     * first, always: this is only asked when the lookup said NOT_FOUND.
+     */
+    private function serveApp(ServerRequestInterface $request): ?ResponseInterface
+    {
+        if ($this->apps === []) {
+            return null;
+        }
+
+        // Prefixes are relative to the base path, like routes; outside it there is no app
+        $path = $this->normalizePath($request);
+        if ($path === null) {
+            return null;
+        }
+
+        foreach ($this->apps as $app) {
+            if ($app->owns($path)) {
+                // The most specific prefix decides alone. What it refuses is a 404 — it does
+                // not fall through to an app further up (the one at '/').
+                return $app->serve($request, $path);
+            }
+        }
+
+        return null;
     }
 
     private function handleNotFound(string $method, string $uri): ResponseInterface

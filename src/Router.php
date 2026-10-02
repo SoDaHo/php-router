@@ -76,6 +76,9 @@ class Router implements RequestHandlerInterface
     /** @var (\Closure(\Throwable, ServerRequestInterface): ?ResponseInterface)|null */
     private ?\Closure $errorHandler = null;
 
+    /** @var list<AppFolder> Web app folders, the longest prefix first */
+    private array $apps = [];
+
     private ?ContainerInterface $container = null;
     private ?RouteDispatcher $dispatcher = null;
     private ?RouteCollector $collector = null;
@@ -308,6 +311,41 @@ class Router implements RequestHandlerInterface
     {
         $this->middleware = array_merge($this->middleware, is_array($middleware) ? $middleware : [$middleware]);
         $this->dispatcher?->setMiddleware($this->middleware);
+
+        return $this;
+    }
+
+    /**
+     * Serve a folder with a built web app (index.html plus assets) under a path prefix.
+     *
+     * Routes come first. Where no route matches a GET or HEAD request under the prefix, an
+     * existing file of the folder is sent; every other path gets the start page (the app's
+     * own router takes over) — unless it looks like a file (a dot in its last segment):
+     * that is a 404. Middleware added with middleware() runs before. See AppFolder for the
+     * options and for what is never served.
+     *
+     * @param string $prefix Path prefix, relative to the base path ('/login'; '/' for the root)
+     * @param string $directory The folder with the start page
+     * @param array{index?: string, types?: array<string, string|null>, immutable?: string|null, cacheIndex?: string|null, cacheImmutable?: string|null, cacheOther?: string|null} $options
+     *
+     * @throws RouterException If the folder does not exist, the prefix is taken or an option is not understood
+     */
+    public function app(string $prefix, string $directory, array $options = []): self
+    {
+        $app = new AppFolder($prefix, $directory, $options);
+
+        foreach ($this->apps as $existing) {
+            if ($existing->prefix === $app->prefix) {
+                throw new RouterException('App prefix is already in use', debugMessage: $prefix);
+            }
+        }
+
+        $this->apps[] = $app;
+
+        // '/login' before '/': the most specific prefix gets the request
+        usort($this->apps, static fn (AppFolder $a, AppFolder $b): int => strlen($b->prefix) <=> strlen($a->prefix));
+
+        $this->dispatcher?->setApps($this->apps);
 
         return $this;
     }
@@ -559,6 +597,7 @@ class Router implements RequestHandlerInterface
         $this->dispatcher
             ->setImplicitHead($this->config['implicitHead'])
             ->setMiddleware($this->middleware)
+            ->setApps($this->apps)
             ->setErrorResponder($this->errorResponse(...));
 
         // Forward hooks from Router to Dispatcher
