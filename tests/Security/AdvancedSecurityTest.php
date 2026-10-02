@@ -23,7 +23,7 @@ class AdvancedSecurityTest extends TestCase
     public function testMassiveUrlDosAttempt(): void
     {
         $collector = new RouteCollector();
-        $collector->get('/users/{name:alpha}', fn () => Response::success([]));
+        $collector->get('/users/{name:alpha}', fn ($req, $name) => Response::success(['length' => strlen($name)]));
 
         $dispatcher = new RouteDispatcher($collector->getData());
 
@@ -32,16 +32,14 @@ class AdvancedSecurityTest extends TestCase
 
         $start = microtime(true);
 
-        // This should either match (if memory allows) or fail quickly.
-        // It should NOT hang for seconds.
-        try {
-            $dispatcher->handle(new ServerRequest('GET', $massivePath));
-        } catch (\Throwable $e) {
-            // Memory exhaustion is possible in testing environment, but timeout is bad.
-        }
+        // It has to match, and quickly. (This test used to swallow every Throwable — and
+        // there was one on each run: the handler took no parameters.)
+        $response = $dispatcher->handle(new ServerRequest('GET', $massivePath));
 
         $duration = microtime(true) - $start;
 
+        $this->assertSame(200, $response->getStatusCode());
+        $this->assertSame(1024 * 1024, json_decode((string) $response->getBody(), true)['data']['length']);
         $this->assertLessThan(2.0, $duration, 'Router regex engine too slow on large input (Possible DoS vector)');
     }
 
@@ -62,10 +60,9 @@ class AdvancedSecurityTest extends TestCase
         $response = $dispatcher->handle(new ServerRequest('GET', $path));
         $body = json_decode((string)$response->getBody(), true);
 
-        if ($response->getStatusCode() === 200) {
-            // It matched, but the null byte should still be there (not truncated)
-            $this->assertStringContainsString("\0", $body['data']['file'], 'Null byte was silently stripped or truncated string!');
-        }
+        // It matches, and the null byte is still there (not truncated)
+        $this->assertSame(200, $response->getStatusCode());
+        $this->assertSame("safe_file.txt\0.exe", $body['data']['file'], 'Null byte was silently stripped or truncated string!');
     }
 
     /**
@@ -142,13 +139,11 @@ class AdvancedSecurityTest extends TestCase
         // json_encode fails on invalid UTF-8 unless flags are set.
         // Let's see if our Response class handles this gracefully or crashes.
 
-        // We expect a 500 because Response::success() likely fails to encode the invalid UTF-8
-        // OR the Router strips it.
-
-        // If status is 200, verify body is valid JSON (not empty)
-        if ($response->getStatusCode() === 200) {
-            $body = (string)$response->getBody();
-            $this->assertJson($body, 'Response with invalid UTF-8 produced invalid JSON');
-        }
+        // Response encodes with JSON_INVALID_UTF8_SUBSTITUTE: the broken byte becomes U+FFFD
+        // instead of making json_encode() throw.
+        $this->assertSame(200, $response->getStatusCode());
+        $body = (string)$response->getBody();
+        $this->assertJson($body, 'Response with invalid UTF-8 produced invalid JSON');
+        $this->assertSame("invalid-\u{FFFD}-utf8", json_decode($body, true)['data']['msg']);
     }
 }

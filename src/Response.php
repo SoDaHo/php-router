@@ -377,9 +377,13 @@ final class Response
         }
 
         $size = filesize($path);
+        // @codeCoverageIgnoreStart
+        // Not reachable in a test: is_file() above filled PHP's stat cache, and filesize()
+        // answers from it. Kept for wrappers that stat without a size.
         if ($size === false) {
             throw new RouterException(sprintf('Cannot determine size of: %s', $path));
         }
+        // @codeCoverageIgnoreEnd
 
         $headers = [
             'Content-Type' => $contentType,

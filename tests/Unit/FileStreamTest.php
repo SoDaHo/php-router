@@ -51,6 +51,67 @@ class NonSeekableWrapper
     }
 }
 
+/**
+ * Seekable stream wrapper that can be told to fail: a source that went away between two
+ * calls (network mount, revoked handle).
+ */
+class FlakyWrapper
+{
+    public static bool $failSeek = false;
+    public static bool $failRead = false;
+
+    /** @var resource|null */
+    public $context;
+
+    private int $pos = 0;
+
+    public function stream_open(string $path, string $mode, int $options, ?string &$opened): bool
+    {
+        $this->pos = 0;
+
+        return true;
+    }
+
+    public function stream_read(int $count): string|false
+    {
+        if (self::$failRead) {
+            return false;
+        }
+
+        $out = substr('abcdefghij', $this->pos, $count);
+        $this->pos += strlen($out);
+
+        return $out;
+    }
+
+    public function stream_eof(): bool
+    {
+        return $this->pos >= 10;
+    }
+
+    public function stream_seek(int $offset, int $whence): bool
+    {
+        if (self::$failSeek) {
+            return false;
+        }
+
+        $this->pos = $offset;
+
+        return true;
+    }
+
+    public function stream_tell(): int
+    {
+        return $this->pos;
+    }
+
+    /** @return array<string, int> */
+    public function stream_stat(): array
+    {
+        return ['size' => 10];
+    }
+}
+
 class FileStreamTest extends TestCase
 {
     private string $path;
@@ -62,11 +123,15 @@ class FileStreamTest extends TestCase
 
         NonSeekableWrapper::$data = 'abcdefghij';
         stream_wrapper_register('nonseek', NonSeekableWrapper::class);
+        stream_wrapper_register('flaky', FlakyWrapper::class);
+        FlakyWrapper::$failSeek = false;
+        FlakyWrapper::$failRead = false;
     }
 
     protected function tearDown(): void
     {
         stream_wrapper_unregister('nonseek');
+        stream_wrapper_unregister('flaky');
 
         if (file_exists($this->path)) {
             @unlink($this->path);
@@ -330,5 +395,36 @@ class FileStreamTest extends TestCase
         } finally {
             @unlink($gz);
         }
+    }
+
+    public function testSeekFailureOfTheSourceIsReported(): void
+    {
+        $stream = new FileStream('flaky://x');
+        $this->assertTrue($stream->isSeekable());
+        $this->assertSame('abcd', $stream->read(4));
+
+        FlakyWrapper::$failSeek = true;
+
+        try {
+            $stream->seek(2);
+            $this->fail('A failed seek went unnoticed');
+        } catch (\RuntimeException $e) {
+            $this->assertSame('Seek failed', $e->getMessage());
+        }
+
+        // The position is only moved once the source confirmed the seek
+        $this->assertSame(4, $stream->tell());
+    }
+
+    public function testReadFailureOfTheSourceIsReported(): void
+    {
+        $stream = new FileStream('flaky://x');
+
+        // Before the first read: PHP buffers, a later read would be served from memory
+        FlakyWrapper::$failRead = true;
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('Read failed');
+        $stream->read(2);
     }
 }

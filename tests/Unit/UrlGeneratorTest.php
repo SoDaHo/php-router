@@ -414,4 +414,11 @@ class UrlGeneratorTest extends TestCase
         $url = $generator->url('posts.show', ['slug' => 'hello-world_2025.test~draft']);
         $this->assertSame('/posts/hello-world_2025.test~draft', $url);
     }
+
+    public function testFalsyParametersAreValues(): void
+    {
+        $generator = new UrlGenerator(['p' => '/p/{a}/{b}/{c}/{d}']);
+
+        $this->assertSame('/p/0/0/0/', $generator->url('p', ['a' => 0, 'b' => '0', 'c' => false, 'd' => '']));
+    }
 }

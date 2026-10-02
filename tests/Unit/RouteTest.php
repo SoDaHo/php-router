@@ -113,4 +113,28 @@ class RouteTest extends TestCase
 
         $this->assertContains($middlewareInstance, $route->middleware);
     }
+
+    public function testSetStateRestoresEverythingVarExportWrites(): void
+    {
+        // The route cache no longer goes through var_export(), but __set_state() stays public
+        // API for applications that export routes themselves. Dropping the middleware here
+        // would strip the authentication off every restored route.
+        $route = (new Route(['GET', 'HEAD'], '/users/{id}', ['UserController', 'show']))
+            ->middleware(['AuthMiddleware', 'JsonMiddleware'])
+            ->name('users.show');
+
+        $restored = eval('return ' . var_export($route, true) . ';');
+
+        $this->assertEquals($route, $restored);
+        $this->assertSame(['AuthMiddleware', 'JsonMiddleware'], $restored->middleware);
+        $this->assertSame('users.show', $restored->name);
+    }
+
+    public function testSetStateDefaultsForMissingKeys(): void
+    {
+        $restored = Route::__set_state(['methods' => ['GET'], 'pattern' => '/x', 'handler' => 'h']);
+
+        $this->assertSame([], $restored->middleware);
+        $this->assertNull($restored->name);
+    }
 }

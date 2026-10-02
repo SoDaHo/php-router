@@ -69,10 +69,10 @@ class SecurityTest extends TestCase
         // Null byte injection attempt
         $response = $dispatcher->handle(new ServerRequest('GET', "/files/test.php\x00.jpg"));
 
-        // URL should be properly decoded and handled (or 404)
-        $this->assertTrue(
-            $response->getStatusCode() === 404 || $response->getStatusCode() === 200
-        );
+        // A raw NUL never reaches the router: PHP's URL parsing replaces control characters
+        // with "_" before PSR-7 hands the path over. The name arrives whole, not cut at the NUL.
+        $this->assertSame(200, $response->getStatusCode());
+        $this->assertSame('test.php_.jpg', json_decode((string) $response->getBody(), true)['data']['name']);
     }
 
     // ==================== Parameter Type Injection ====================
