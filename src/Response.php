@@ -338,17 +338,19 @@ final class Response
      * @param string $content File content
      * @param string $filename Download filename
      * @param string $contentType MIME type (default: 'application/octet-stream')
+     * @param bool $inline Content-Disposition: inline instead of attachment
      */
     public static function download(
         string $content,
         string $filename,
         string $contentType = 'application/octet-stream',
+        bool $inline = false,
     ): ResponseInterface {
         return new Psr7Response(
             200,
             [
                 'Content-Type' => $contentType,
-                'Content-Disposition' => self::contentDisposition($filename, false),
+                'Content-Disposition' => self::contentDisposition($filename, $inline),
                 'Content-Length' => (string) strlen($content),
             ],
             $content,

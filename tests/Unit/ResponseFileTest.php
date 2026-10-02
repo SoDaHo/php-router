@@ -337,6 +337,17 @@ class ResponseFileTest extends TestCase
         }
     }
 
+    public function testDownloadCanBeInline(): void
+    {
+        $attachment = Response::download('PNG', 'avatar.png', 'image/png');
+        $inline = Response::download('PNG', 'avatar.png', 'image/png', inline: true);
+
+        $this->assertSame('attachment; filename="avatar.png"', $attachment->getHeaderLine('Content-Disposition'));
+        $this->assertSame('inline; filename="avatar.png"', $inline->getHeaderLine('Content-Disposition'));
+        $this->assertSame($attachment->getHeaderLine('Content-Length'), $inline->getHeaderLine('Content-Length'));
+        $this->assertSame('PNG', (string) $inline->getBody());
+    }
+
     public function testDownloadSanitizesItsFilenameToo(): void
     {
         // download() takes the same untrusted names; a raw CRLF used to kill the response.
