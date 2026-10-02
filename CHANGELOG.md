@@ -2,6 +2,53 @@
 
 ## [Unreleased]
 
+### Added
+- **Middleware for every request:** `Router::middleware()`. Unlike route middleware it also
+  runs for requests that end in 404, 405 or 400 and sees the response made from an
+  exception — the place for an access log, security headers or CORS.
+- **Error handler:** `Router::setErrorHandler()` builds the response for what route
+  middleware and handlers throw; `null` keeps the router's own 500. It runs inside the
+  middleware for every request. `handle()` does not throw for a failing error handler.
+- **Route lookup without execution:** `Router::match()` returns a `RouteMatch` (status,
+  route, raw parameters, `allowedMethods()`), fires no routing hook and needs no container. Every
+  request passing through `handle()` carries it as attribute `RouteMatch::class`, and on a
+  hit the route as `Route::class` — available to middleware before the handler runs. At 405
+  the match names a route of the path. A middleware for every request that changes method
+  or path gets the request looked up again for everything further in.
+- **Route attributes:** `Route::attribute()`, `Route::getAttribute()`,
+  `RouteCollector::attributeGroup()` (nestable; the inner group wins per key, the route
+  wins over groups).
+- **`implicitHead`** config option (default `false`): HEAD without a route of its own runs
+  through the GET route, the response loses its body, `Allow` and `allowedMethods()` name
+  HEAD right behind GET. Will be the default in 2.0.
+- `hookError` hook: receives event and exception when a hook throws; without it — or when
+  it fails itself — the line goes to stderr as before.
+- `Router::isDebug()`, `Router::fromEnv()`, `Response::json()` (JSON without the envelope),
+  `Response::download(..., inline: true)`, `Dispatcher::allowedMethods()`.
+- `Router::emit()` is public.
+
+### Changed
+- `Router::setContainer()` reaches a dispatcher that already exists. Until now a container
+  set after the first request (or after `url()`) was silently ignored.
+- **Subclasses:** the classes got new public methods (`Router`: `middleware`, `match`,
+  `setErrorHandler`, `isDebug`, `fromEnv`, `emit`; `RouteDispatcher`: `match`,
+  `setContainer`, `setMiddleware`, `setImplicitHead`, `setErrorResponder`; `Route`:
+  `attribute`, `getAttribute` and the property `$attributes`; `RouteCollector`:
+  `attributeGroup`; `Dispatcher`: `allowedMethods`). A subclass with a member of the same
+  name has to be compatible with it; the library itself does not call them from its
+  existing code paths. `Router` will be final in 2.0.
+
+### Deprecated
+- The route cache (`enableCache()`, `cacheFile`, `cacheSignature`, `ROUTER_CACHE_*`). It
+  will be removed in 2.0; measured, it makes requests slower.
+- Reading the environment in `Router::create()` and the constructor. Use
+  `Router::fromEnv()`; from 2.0 on nothing else looks at the environment, and `APP_ENV` no
+  longer switches debug on.
+
+### Fixed
+- A `group()` or `middlewareGroup()` whose callback throws no longer stays open: routes
+  registered after the exception was caught got its prefix or middleware.
+
 ## [1.1.1] - 2026-10-02
 
 ### Security
