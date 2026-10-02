@@ -398,7 +398,8 @@ $router->run();
   Use `[Controller::class, 'method']` syntax; objects in routes (middleware instances) must
   survive `serialize()` and their classes must be autoloadable — a class declared inside the
   routes file is unknown to the next request, which reports the cache as outdated and
-  rebuilds it every time.
+  rebuilds it every time. The same happens when a string in a route looks exactly like a
+  serialized object of an unknown class.
 - **A cache file that cannot be written** is reported through the `error` hook as well; the
   request is served from the routes file.
 - **The cache does not notice a changed routes file.** Delete the cache file on deploy.
