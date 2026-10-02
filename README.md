@@ -783,9 +783,25 @@ Angular build, where `assets/` is the directory that is copied as it is.
 For a build that hashes differently (Angular, a custom output directory) `immutable` takes
 a regular expression of your own; it is matched against the requested path below the
 prefix — what the browser caches by, not the file a link leads to. The start page keeps
-its own rule under every name that leads to it. Conditional requests (`ETag`,
-`If-Modified-Since`) are not answered yet, so `no-cache` means the file is sent again on
-every load.
+its own rule under every name that leads to it.
+
+**Conditional requests:** files go out with an `ETag` (with one exception, below). A
+browser that asks again
+with `If-None-Match` gets `304 Not Modified` without a body while its copy holds — so
+`no-cache` costs a request, not the file. A `Range` counts for `GET` only, and one that
+comes with an `If-Range` gets the whole file.
+
+Up to 64 KiB the `ETag` is a hash of the content. That is the start page: two builds of it
+often have the same size (only a hash in it differs), and a pipeline may give them the
+same time — told apart by time and size alone, the browser would keep a page whose
+scripts are gone. Larger files are told apart by device, file number, time of the last
+change and size, and their tag is marked weak (`W/`): one that is overwritten in place by
+a file of the same size and the same modification time — the same second, or a time that
+`cp -p`, `rsync -t` or the build pipeline keeps — is not told apart. (A release switched
+by a link, or a file moved into place, is. Where the system reports no file numbers,
+large files go out without an `ETag` and are sent again every time.) No
+`Last-Modified` goes out and `If-Modified-Since` is not answered: a date cannot tell two
+such start pages apart either.
 
 ```php
 $router->app('/login', $dir, [
@@ -815,6 +831,39 @@ public function process($request, $handler): ResponseInterface
 
     return $handler->handle($request);          // route, app folder, or the router's own 404
 }
+```
+
+A middleware that rewrites a page of the app on its way out — a CSP nonce in the start
+page — has to work on the whole page, never on a 304 or a piece of it: the browser would
+keep the old body under the new header. Which request ends at a page only the folder
+knows (the start page has many paths and may have another name), so the middleware goes
+by the answer — but only where no route matched, so that no handler of yours runs twice:
+where a page of its app comes back as 304 or 206, it asks once more without the
+condition. (An app with a more specific prefix below it — `/login/help` — would be
+covered as well; exclude it the same way.) **Register it last**, so that it stands innermost and no other middleware runs
+twice either. And what it makes is made for one request: no validator, not the length of
+the file, not to be stored.
+
+```php
+$match = $request->getAttribute(RouteMatch::class);
+$folder = in_array($request->getMethod(), ['GET', 'HEAD'], true)
+    && $match->status === RouteMatch::NOT_FOUND           // no route: only an app folder has a file for this
+    && str_starts_with($match->path . '/', '/login/');    // this app, not another one (/admin, /)
+$isPage = static fn (ResponseInterface $r): bool =>
+    strtolower(trim(explode(';', $r->getHeaderLine('Content-Type'))[0])) === 'text/html';
+
+$response = $handler->handle($request);
+
+if ($folder && $isPage($response) && in_array($response->getStatusCode(), [304, 206], true)) {
+    $response = $handler->handle($request->withoutHeader('If-None-Match')->withoutHeader('Range'));
+}
+if (!$folder || !$isPage($response) || $response->getStatusCode() !== 200) {
+    return $response;                                     // routes, assets and their 304, a 404: as they are
+}
+// ... rewrite the body ...
+return $rewritten
+    ->withoutHeader('ETag')->withoutHeader('Content-Length')
+    ->withHeader('Cache-Control', 'no-store');
 ```
 
 `$match->path` is the path without the base path — except for a request outside the base
