@@ -114,13 +114,14 @@ final class Router implements RouterInterface
      * Only what $config says counts: the constructor does not look at the environment
      * (fromEnv() does). A key that is missing or null takes its default.
      *
-     * @param array{debug?: bool|int|string|null, basePath?: string|null, baseUrl?: string|null, trailingSlash?: string|null, routesFile?: string|null, urlEncoding?: bool|int|string|null, implicitHead?: bool|int|string|null, emitChunkSize?: int|string|null} $config
+     * @param array{debug?: bool|int|string|null, basePath?: string|null, baseUrl?: string|false|0|null, trailingSlash?: string|null, routesFile?: string|null, urlEncoding?: bool|int|string|null, implicitHead?: bool|int|string|null, emitChunkSize?: int|string|null} $config
      *
      * @throws RouterException If $config has a key the router does not know, if 'debug',
      *                         'urlEncoding' or 'implicitHead' is neither a boolean nor
      *                         boolean-like nor empty ('' and 0 count as off; null is the
-     *                         default), or if 'emitChunkSize' is not an integer (or a
-     *                         string of digits) from 1024 to 16777216
+     *                         default), if 'emitChunkSize' is not an integer (or a string
+     *                         of digits) from 1024 to 16777216, or if 'baseUrl' is neither
+     *                         a string nor empty
      */
     public function __construct(array $config = [])
     {
@@ -137,7 +138,7 @@ final class Router implements RouterInterface
         $this->config = [
             'debug' => self::flag('debug', $config['debug'] ?? false),
             'basePath' => self::normalizeBasePath((string) ($config['basePath'] ?? '')),
-            'baseUrl' => $config['baseUrl'] ?? null,
+            'baseUrl' => self::baseUrl($config['baseUrl'] ?? null),
             'trailingSlash' => self::trailingSlash($config['trailingSlash'] ?? 'strict'),
             'routesFile' => $config['routesFile'] ?? null,
             'urlEncoding' => self::flag('urlEncoding', $config['urlEncoding'] ?? true),
@@ -193,6 +194,27 @@ final class Router implements RouterInterface
         }
 
         throw new RouterException(sprintf("Config '%s' must be a boolean, got %s", $name, get_debug_type($value)));
+    }
+
+    /**
+     * The base URL as the router keeps it, null for none. Empty means none: null, '' and,
+     * as in 1.x, false ('baseUrl' => getenv('APP_URL') without the variable), 0 and '0'.
+     * Any other string is put in front of the address as it is (a slash at its end is
+     * dropped); anything else is refused.
+     *
+     * @throws RouterException If the value is neither a string nor empty
+     */
+    private static function baseUrl(mixed $value): ?string
+    {
+        if ($value === null || $value === false || $value === '' || $value === '0' || $value === 0) {
+            return null;
+        }
+
+        if (!is_string($value)) {
+            throw new RouterException("Config 'baseUrl' must be a string, or empty for none");
+        }
+
+        return $value;
     }
 
     /**
@@ -262,7 +284,7 @@ final class Router implements RouterInterface
     {
         if ($this->dispatcher !== null) {
             throw new RouterException(sprintf(
-                '%s() has to be called before the first request, match() or url(): the routing table is already built',
+                '%s() has to be called before the routing table is built: the first request, match(), url() or absoluteUrl() built it',
                 $method
             ));
         }
@@ -272,7 +294,7 @@ final class Router implements RouterInterface
      * Factory method for fluent creation. Like the constructor it does not look at the
      * environment.
      *
-     * @param array{debug?: bool|int|string|null, basePath?: string|null, baseUrl?: string|null, trailingSlash?: string|null, routesFile?: string|null, urlEncoding?: bool|int|string|null, implicitHead?: bool|int|string|null, emitChunkSize?: int|string|null} $config
+     * @param array{debug?: bool|int|string|null, basePath?: string|null, baseUrl?: string|false|0|null, trailingSlash?: string|null, routesFile?: string|null, urlEncoding?: bool|int|string|null, implicitHead?: bool|int|string|null, emitChunkSize?: int|string|null} $config
      */
     public static function create(array $config = []): self
     {
@@ -287,7 +309,7 @@ final class Router implements RouterInterface
      * ROUTER_URL_ENCODING (urlEncoding). A key that $config contains wins over its variable —
      * also with null, false or an empty value.
      *
-     * @param array{debug?: bool|int|string|null, basePath?: string|null, baseUrl?: string|null, trailingSlash?: string|null, routesFile?: string|null, urlEncoding?: bool|int|string|null, implicitHead?: bool|int|string|null, emitChunkSize?: int|string|null} $config Values that take precedence
+     * @param array{debug?: bool|int|string|null, basePath?: string|null, baseUrl?: string|false|0|null, trailingSlash?: string|null, routesFile?: string|null, urlEncoding?: bool|int|string|null, implicitHead?: bool|int|string|null, emitChunkSize?: int|string|null} $config Values that take precedence
      *
      * @throws RouterException As the constructor; and if APP_DEBUG or ROUTER_URL_ENCODING is
      *                         read and its value is not boolean-like (APP_DEBUG=maybe)
@@ -333,7 +355,7 @@ final class Router implements RouterInterface
      * Quick boot: create, load routes, and run. Reads no environment either — for that:
      * Router::fromEnv()->loadRoutes($routesFile)->run().
      *
-     * @param array{debug?: bool|int|string|null, basePath?: string|null, baseUrl?: string|null, trailingSlash?: string|null, routesFile?: string|null, urlEncoding?: bool|int|string|null, implicitHead?: bool|int|string|null, emitChunkSize?: int|string|null} $config
+     * @param array{debug?: bool|int|string|null, basePath?: string|null, baseUrl?: string|false|0|null, trailingSlash?: string|null, routesFile?: string|null, urlEncoding?: bool|int|string|null, implicitHead?: bool|int|string|null, emitChunkSize?: int|string|null} $config
      * @param string $routesFile Path to routes file
      */
     public static function boot(array $config, string $routesFile): void
@@ -385,6 +407,21 @@ final class Router implements RouterInterface
     {
         $this->assertNotInUse('setDebug');
         $this->config['debug'] = $debug;
+        return $this;
+    }
+
+    /**
+     * Set the base URL for absoluteUrl() — for an application that knows it only after the
+     * router was built (an .env read later). Like setBasePath(): before the route table is
+     * built (by the first request, match(), url() or absoluteUrl()). Null, '' and '0' mean
+     * none, as for the config key.
+     *
+     * @throws RouterException When the route table is built already
+     */
+    public function setBaseUrl(?string $baseUrl): self
+    {
+        $this->assertNotInUse('setBaseUrl');
+        $this->config['baseUrl'] = self::baseUrl($baseUrl);
         return $this;
     }
 
@@ -533,7 +570,7 @@ final class Router implements RouterInterface
     /**
      * Generate absolute URL for a named route.
      *
-     * Requires baseUrl: from the config, or APP_URL through fromEnv(). What
+     * Requires baseUrl: from the config, setBaseUrl(), or APP_URL through fromEnv(). What
      * the routes file itself throws while it is loaded comes out as it is.
      *
      * @param string $name Route name
@@ -881,15 +918,18 @@ final class Router implements RouterInterface
             $this->getDispatcher();
             assert($this->collector !== null);
 
-            $this->urlGenerator = new UrlGenerator($this->collector->getRoutes(), $this->collector->getPatterns());
+            // Kept only once it is set up completely
+            $generator = new UrlGenerator($this->collector->getRoutes(), $this->collector->getPatterns());
 
-            $this->urlGenerator->setBasePath($this->config['basePath']);
-            $this->urlGenerator->setEncodeParams($this->config['urlEncoding']);
-            $this->urlGenerator->setIgnoreTrailingSlash($this->config['trailingSlash'] === 'ignore');
+            $generator->setBasePath($this->config['basePath']);
+            $generator->setEncodeParams($this->config['urlEncoding']);
+            $generator->setIgnoreTrailingSlash($this->config['trailingSlash'] === 'ignore');
 
-            if ($this->config['baseUrl']) {
-                $this->urlGenerator->setBaseUrl($this->config['baseUrl']);
+            if ($this->config['baseUrl'] !== null) {
+                $generator->setBaseUrl($this->config['baseUrl']);
             }
+
+            $this->urlGenerator = $generator;
         }
 
         return $this->urlGenerator;

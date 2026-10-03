@@ -850,6 +850,7 @@ class RouterConfigTest extends TestCase
             'a request' => ['handle', fn (Router $router) => $router->handle(new ServerRequest('GET', '/users'))],
             'a lookup' => ['match', fn (Router $router) => $router->match(new ServerRequest('GET', '/users'))],
             'an address' => ['url', fn (Router $router) => $router->url('users.show', ['id' => 5])],
+            'an absolute address' => ['absoluteUrl', fn (Router $router) => $router->absoluteUrl('users.show', ['id' => 5])],
         ];
     }
 
@@ -858,12 +859,13 @@ class RouterConfigTest extends TestCase
     {
         $router = $this->router();
         // Before the first use everything can still be set
-        $router->setDebug(false)->setBasePath('')->loadRoutes($this->routesFile);
+        $router->setDebug(false)->setBasePath('')->setBaseUrl('https://example.org')->loadRoutes($this->routesFile);
         $use($router);
 
         $late = [
             'setBasePath' => fn () => $router->setBasePath('/api'),
             'setDebug' => fn () => $router->setDebug(true),
+            'setBaseUrl' => fn () => $router->setBaseUrl('https://late.example'),
             'loadRoutes' => fn () => $router->loadRoutes($this->routesFile),
         ];
 
@@ -874,7 +876,7 @@ class RouterConfigTest extends TestCase
                 $this->fail($method . '() was accepted after ' . $how);
             } catch (RouterException $e) {
                 $this->assertSame(
-                    $method . '() has to be called before the first request, match() or url(): the routing table is already built',
+                    $method . '() has to be called before the routing table is built: the first request, match(), url() or absoluteUrl() built it',
                     $e->getMessage()
                 );
             }
@@ -884,6 +886,54 @@ class RouterConfigTest extends TestCase
         $this->assertFalse($router->isDebug());
         $this->assertSame(200, $router->handle(new ServerRequest('GET', '/users'))->getStatusCode());
         $this->assertSame(404, $router->handle(new ServerRequest('GET', '/api/users'))->getStatusCode());
+    }
+
+    public function testBaseUrlCanBeSetAfterTheRouterWasCreated(): void
+    {
+        // An application that reads its .env only after the router was built
+        $router = $this->router()->loadRoutes($this->routesFile)->setBaseUrl('https://example.org');
+        $this->assertSame('https://example.org/users/5', $router->absoluteUrl('users.show', ['id' => 5]));
+
+        // Empty takes it away again, as for the config key
+        foreach ([null, '', '0'] as $none) {
+            $router = $this->router(['baseUrl' => 'https://example.org'])->loadRoutes($this->routesFile)->setBaseUrl($none);
+            $this->assertSame('/users/5', $router->url('users.show', ['id' => 5]));
+            try {
+                $router->absoluteUrl('users.show', ['id' => 5]);
+                $this->fail('An absolute address without a base URL');
+            } catch (RouterException $e) {
+                $this->assertStringContainsString('call setBaseUrl()', $e->getMessage());
+            }
+        }
+    }
+
+    public function testEmptyBaseUrlMeansNoneAsIn1x(): void
+    {
+        // 'baseUrl' => getenv('APP_URL') without the variable is false
+        foreach ([null, false, '', '0', 0] as $none) {
+            $router = $this->router(['baseUrl' => $none])->loadRoutes($this->routesFile);
+            $label = var_export($none, true);
+            $this->assertSame('/users/5', $router->url('users.show', ['id' => 5]), $label);
+            try {
+                $router->absoluteUrl('users.show', ['id' => 5]);
+                $this->fail("An absolute address for {$label}");
+            } catch (RouterException $e) {
+                $this->assertStringContainsString('baseUrl is not configured', $e->getMessage(), $label);
+            }
+        }
+    }
+
+    public function testBaseUrlOfAnotherTypeIsRefused(): void
+    {
+        foreach ([['https://example.org'], 5, true, 1.5] as $value) {
+            try {
+                /** @phpstan-ignore argument.type */
+                Router::create(['baseUrl' => $value]);
+                $this->fail('Accepted ' . var_export($value, true));
+            } catch (RouterException $e) {
+                $this->assertSame("Config 'baseUrl' must be a string, or empty for none", $e->getMessage());
+            }
+        }
     }
 
     // ==================== emitChunkSize ====================
