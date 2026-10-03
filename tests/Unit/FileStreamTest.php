@@ -364,8 +364,14 @@ class FileStreamTest extends TestCase
 
     public function testMissingFileThrows(): void
     {
-        $this->expectException(RouterException::class);
-        new FileStream($this->path . '_missing');
+        try {
+            new FileStream($this->path . '_missing');
+            $this->fail('The stream was opened');
+        } catch (RouterException $e) {
+            // The path is not part of the message
+            $this->assertSame('Cannot open file for reading', $e->getMessage());
+            $this->assertSame($this->path . '_missing', $e->getDebugMessage());
+        }
     }
 
     public function testNonSeekableSourceIsReportedAsSuch(): void
@@ -380,8 +386,13 @@ class FileStreamTest extends TestCase
     {
         // Silently starting at byte 0 under a Content-Range promising byte 4 would produce
         // a corrupt download that neither side notices.
-        $this->expectException(RouterException::class);
-        new FileStream('nonseek://x', 4, 2);
+        try {
+            new FileStream('nonseek://x', 4, 2);
+            $this->fail('The stream was opened');
+        } catch (RouterException $e) {
+            $this->assertSame('Cannot seek to the start of the range in file', $e->getMessage());
+            $this->assertSame('byte 4 in nonseek://x', $e->getDebugMessage());
+        }
     }
 
     public function testUnsizableSourceThrows(): void
@@ -390,8 +401,11 @@ class FileStreamTest extends TestCase
         file_put_contents($gz, (string) gzencode(str_repeat('z', 100)));
 
         try {
-            $this->expectException(RouterException::class);
             new FileStream('compress.zlib://' . $gz);
+            $this->fail('The stream was opened');
+        } catch (RouterException $e) {
+            $this->assertSame('Cannot determine size of file', $e->getMessage());
+            $this->assertSame('compress.zlib://' . $gz, $e->getDebugMessage());
         } finally {
             @unlink($gz);
         }

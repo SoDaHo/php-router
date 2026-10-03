@@ -167,8 +167,12 @@ class ResponseFileTest extends TestCase
 
     public function testMaxChunkBelowOneIsRejected(): void
     {
-        $this->expectException(RouterException::class);
-        Response::file($this->path, null, 'application/octet-stream', false, 'bytes=0-', 0);
+        try {
+            Response::file($this->path, null, 'application/octet-stream', false, 'bytes=0-', 0);
+            $this->fail('The response was built');
+        } catch (RouterException $e) {
+            $this->assertSame('maxChunk must be at least 1', $e->getMessage());
+        }
     }
 
     public function testUnsatisfiableRangeReturns416(): void
@@ -303,8 +307,14 @@ class ResponseFileTest extends TestCase
 
     public function testMissingFileThrows(): void
     {
-        $this->expectException(RouterException::class);
-        Response::file($this->path . '_missing');
+        try {
+            Response::file($this->path . '_missing');
+            $this->fail('The response was built');
+        } catch (RouterException $e) {
+            // The path is not part of the message
+            $this->assertSame('Cannot read file', $e->getMessage());
+            $this->assertSame($this->path . '_missing', $e->getDebugMessage());
+        }
     }
 
     public function testDirectoryPathThrows(): void

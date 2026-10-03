@@ -52,7 +52,7 @@ final class FileStream implements StreamInterface
     {
         $handle = @fopen($path, 'rb');
         if ($handle === false) {
-            throw new RouterException(sprintf('Cannot open file for reading: %s', $path));
+            throw new RouterException('Cannot open file for reading', debugMessage: $path);
         }
 
         $this->handle = $handle;
@@ -64,7 +64,7 @@ final class FileStream implements StreamInterface
             fclose($handle);
             $this->handle = null;
 
-            throw new RouterException(sprintf('Cannot determine size of: %s', $path));
+            throw new RouterException('Cannot determine size of file', debugMessage: $path);
         }
         $size = (int) $stat['size'];
 
@@ -84,7 +84,7 @@ final class FileStream implements StreamInterface
 
             // Silently starting at byte 0 would serve the head of the file under a
             // Content-Range header promising something else — a corrupt download nobody sees.
-            throw new RouterException(sprintf('Cannot seek to byte %d in: %s', $this->start, $path));
+            throw new RouterException('Cannot seek to the start of the range in file', debugMessage: sprintf('byte %d in %s', $this->start, $path));
         }
     }
 

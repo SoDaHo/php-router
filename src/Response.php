@@ -390,11 +390,11 @@ final class Response
         // is_file() before filesize(): a directory reports a size, opens on some platforms
         // and only blows up on the first read — long after the headers went out.
         if (!is_file($path) || !is_readable($path)) {
-            throw new RouterException(sprintf('Cannot read file: %s', $path));
+            throw new RouterException('Cannot read file', debugMessage: $path);
         }
 
         if ($maxChunk !== null && $maxChunk < 1) {
-            throw new RouterException(sprintf('maxChunk must be at least 1, got %d', $maxChunk));
+            throw new RouterException('maxChunk must be at least 1');
         }
 
         $size = filesize($path);
@@ -402,7 +402,7 @@ final class Response
         // Not reachable in a test: is_file() above filled PHP's stat cache, and filesize()
         // answers from it. Kept for wrappers that stat without a size.
         if ($size === false) {
-            throw new RouterException(sprintf('Cannot determine size of: %s', $path));
+            throw new RouterException('Cannot determine size of file', debugMessage: $path);
         }
         // @codeCoverageIgnoreEnd
 
