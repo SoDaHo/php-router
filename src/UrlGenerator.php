@@ -18,6 +18,10 @@ final class UrlGenerator
     private string $basePath = '';
     private ?string $baseUrl = null;
     private bool $encodeParams = true;
+    private bool $ignoreTrailingSlash = false;
+
+    /** @var array<string, list<array{literal: string, name: string|null, type: string|null}>> Patterns taken apart, once each */
+    private array $parsed = [];
 
     /** @var array<string, string> Pattern shortcut => regular expression fragment */
     private array $patterns;
@@ -80,6 +84,18 @@ final class UrlGenerator
     }
 
     /**
+     * Tell the generator that the router runs in the trailing slash mode 'ignore': it drops
+     * the slashes at the end of a request path before it looks the route up, so a value
+     * that ends in a slash (or is empty at the end of the path) does not come back.
+     *
+     * @param bool $ignore Whether slashes at the end of a path are ignored
+     */
+    public function setIgnoreTrailingSlash(bool $ignore): void
+    {
+        $this->ignoreTrailingSlash = $ignore;
+    }
+
+    /**
      * Generate a relative URL for a named route.
      *
      * @param string $name Route name
@@ -92,16 +108,16 @@ final class UrlGenerator
     public function url(string $name, array $params = []): string
     {
         $pattern = $this->getPatternByName($name);
-        $address = $this->basePath . $this->replaceParameters($pattern, $params);
+        $address = ($this->encodeParams ? self::encodeLiteral($this->basePath) : $this->basePath)
+            . $this->replaceParameters($name, $pattern, $params);
 
-        // What goes out has the form of a path on this site: one slash in front, no
-        // backslash (a client reads it as a slash), no control character (a client drops
-        // tab and line breaks before it reads the address — '/<tab>/host' is '//host').
-        // Parameter values cannot break that form, they are encoded; a route pattern or a
-        // base path could.
-        if ($this->encodeParams && preg_match('#\A/(?!/)[^\\\\\x00-\x1F\x7F]*\z#', $address) !== 1) {
+        // What goes out has the form of a path on this site: one slash in front and no
+        // backslash (a client reads it as a slash). Parameter values cannot break that
+        // form, they are encoded, and so is the literal text of route pattern and base
+        // path — all but the backslash, which no request path may contain in any form.
+        if ($this->encodeParams && preg_match('#\A/(?!/)[^\\\\]*\z#', $address) !== 1) {
             throw new RouterException(
-                'The address would not be a path on this site: it has to begin with a single "/" and contain no backslash or control character',
+                'The address would not be a path on this site: it has to begin with a single "/" and contain no backslash',
                 debugMessage: $address,
             );
         }
@@ -159,47 +175,124 @@ final class UrlGenerator
     }
 
     /**
-     * @param array<string, string|int|float|bool> $params
+     * The path of a route with the parameter values in place.
+     *
+     * With URL encoding on, the address is only returned when it leads back to its route
+     * with exactly these values: the path as the router would see it — values in place, not
+     * yet encoded — has to match the route's own regular expression, each placeholder
+     * capturing its value. That refuses a value that does not fit its placeholder ('12a'
+     * for {id:int}, an empty one, a slash where one segment is expected) and values that
+     * the pattern would split differently among its placeholders. A slash that the
+     * placeholder takes ({path:any}) stays a slash; each segment is encoded on its own —
+     * the router refuses %2F.
+     *
+     * @param array<string, string|int|float|bool|null> $params
+     *
+     * @throws RouterException When a parameter is missing or null, or the address would not reach the route
      */
-    private function replaceParameters(string $pattern, array $params): string
+    private function replaceParameters(string $name, string $pattern, array $params): string
     {
         // Optional segments [/suffix] are not supported - fail fast instead of silent misbehavior
         if (str_contains($pattern, '[') || str_contains($pattern, ']')) {
             throw new RouterException(
-                sprintf(
-                    'Optional segments [] are not supported in pattern "%s". Define separate routes instead.',
-                    $pattern
-                )
+                'Optional segments [] are not supported in a route pattern. Define separate routes instead.',
+                debugMessage: $pattern,
             );
         }
 
-        // Replace parameters: {name} or {name:constraint}
-        $url = preg_replace_callback(
-            '/\{([a-zA-Z_][a-zA-Z0-9_]*)(?::([^}]+))?\}/',
-            function (array $matches) use ($params): string {
-                $name = $matches[1];
+        $parts = $this->parsed[$pattern] ??= RouteCollector::parts($pattern);
+        $values = [];
 
-                if (!isset($params[$name]) && !array_key_exists($name, $params)) {
+        foreach ($parts as $part) {
+            $parameter = $part['name'];
+
+            if ($parameter === null) {
+                continue;
+            }
+
+            if (!array_key_exists($parameter, $params)) {
+                throw new RouterException(sprintf('Missing parameter "%s" for URL generation', $parameter));
+            }
+            if ($params[$parameter] === null) {
+                throw new RouterException(sprintf('Parameter "%s" for URL generation is null', $parameter));
+            }
+
+            $value = $params[$parameter];
+            $values[$parameter] = is_bool($value) ? ($value ? '1' : '0') : (string) $value;
+        }
+
+        // The path as the router sees it after decoding
+        $candidate = self::fill($parts, $values);
+
+        if (!$this->encodeParams) {
+            // The application encodes itself — and answers for what it writes
+            return $candidate;
+        }
+
+        foreach ($values as $parameter => $value) {
+            if (str_contains($value, '\\')) {
+                throw new RouterException(
+                    sprintf('Parameter "%s" contains a backslash, which no route accepts', $parameter),
+                    debugMessage: $value,
+                );
+            }
+        }
+
+        if ($values !== []) {
+            // A generator built without the collector's patterns does not know a type of
+            // the application's own — the router's table would have refused the route
+            foreach ($parts as $part) {
+                if ($part['type'] !== null && !isset($this->patterns[$part['type']])) {
                     throw new RouterException(
-                        sprintf('Missing parameter "%s" for URL generation', $name)
+                        sprintf('The URL generator does not know the pattern type "%s": pass the patterns of the route collector (getPatterns()) to its constructor', $part['type']),
+                        debugMessage: $pattern,
                     );
                 }
+            }
 
-                $rawValue = $params[$name];
-                $value = is_bool($rawValue) ? ($rawValue ? '1' : '0') : (string) $rawValue;
+            [$regex, $casts] = RouteCollector::compile($pattern, $this->patterns);
 
-                return $this->encodeParams ? $this->encode($name, $value, $matches[2] ?? null) : $value;
-            },
-            $pattern
+            // … and, in the mode 'ignore', without the slashes at its end
+            $seen = $this->ignoreTrailingSlash && $candidate !== '/' ? rtrim($candidate, '/') : $candidate;
+
+            if (preg_match($regex, $seen, $captured) !== 1 || array_intersect_key($captured, $values) !== $values) {
+                throw new RouterException(
+                    sprintf('The parameters do not fit the pattern of route "%s": the address would not lead back to it', $name),
+                    debugMessage: $candidate,
+                );
+            }
+
+            // … and a value the pattern takes may still be one the router does not hand
+            // on: '01' for an integer, a number too large for one (400 for the request)
+            foreach ($casts as $parameter => $type) {
+                try {
+                    RouteDispatcher::castValue($type, $values[$parameter], $parameter);
+                } catch (\TypeError) {
+                    throw new RouterException(
+                        sprintf('The parameters do not fit the pattern of route "%s": the address would not lead back to it', $name),
+                        debugMessage: $candidate,
+                    );
+                }
+            }
+        }
+
+        // Literal text is encoded like the values: the route '/a b/{x}' is asked for as
+        // '/a%20b/…', '/100%' as '/100%25'
+        $url = self::fill(
+            array_map(
+                static fn (array $part): array => ['literal' => self::encodeLiteral($part['literal'])] + $part,
+                $parts,
+            ),
+            array_map(
+                static fn (string $value): string => implode('/', array_map(rawurlencode(...), explode('/', $value))),
+                $values,
+            ),
         );
-
-        // preg_replace_callback returns null only on error, which won't happen with valid pattern
-        $url ??= $pattern;
 
         // A '.' or '..' segment never arrives: a client resolves it before it asks (the
         // encoded forms too). Looked for in the finished address — '/dl/{name}.json' with
-        // the value '..' has none, '/x/{a}.' with an empty value has one.
-        if ($this->encodeParams && preg_match('#(?:^|/)\.\.?(?:/|$)#D', $url) === 1) {
+        // the value '..' has none, '/x/{a}.' with a value that the pattern lets be '.' has one.
+        if (preg_match('#(?:^|/)\.\.?(?:/|$)#D', $url) === 1) {
             throw new RouterException(
                 'The address would contain a "." or ".." path segment, which a client resolves before it asks',
                 debugMessage: $url,
@@ -208,7 +301,7 @@ final class UrlGenerator
 
         // Nor does one that begins with '//': a client reads what follows as another host.
         // ('/{path:any}' with the value '/evil.example/x' — 1.x wrote '/%2Fevil.example%2Fx'.)
-        if ($this->encodeParams && str_starts_with($url, '//')) {
+        if (str_starts_with($url, '//')) {
             throw new RouterException(
                 'The address would begin with "//", which a client reads as another host',
                 debugMessage: $url,
@@ -219,51 +312,29 @@ final class UrlGenerator
     }
 
     /**
-     * A parameter value as it goes into the path.
-     *
-     * The router refuses requests with an encoded separator (%2F, %5C), so a slash is never
-     * written as %2F: where the placeholder takes several segments ({path:any}) the slashes
-     * stay and each segment is encoded on its own; everywhere else a value with a slash
-     * has no address. Neither has a value with a backslash. ('.' and '..' segments are
-     * looked for in the finished address, see replaceParameters().)
-     *
-     * @throws RouterException When the value cannot be part of a path that reaches the route
+     * Literal text of a route pattern or base path as it stands in an address: what a
+     * path may contain as it is stays (also ':', '@' and the sub-delimiters, so that
+     * '/v1:batch' and '/@{user}' read as before), everything else is percent-encoded. The
+     * backslash is left for url() to refuse.
      */
-    private function encode(string $name, string $value, ?string $type): string
+    private static function encodeLiteral(string $literal): string
     {
-        if (str_contains($value, '\\')) {
-            throw new RouterException(
-                sprintf('Parameter "%s" contains a backslash, which no route accepts', $name),
-                debugMessage: $value,
-            );
-        }
+        return (string) preg_replace_callback(
+            '/[^A-Za-z0-9\-._~!$&\'()*+,;=:@\/\\\\]/',
+            static fn (array $match): string => rawurlencode($match[0]),
+            $literal,
+        );
+    }
 
-        $segments = explode('/', $value);
-
-        if (count($segments) > 1) {
-            $fragment = $this->patterns[$type ?? ''] ?? '[^/]+';
-
-            // The fragment is asked on its own. One that does not stand on its own — it
-            // looks at the text around it or refers to another placeholder — does not
-            // compile or does not match here; that is a refusal like any other, whatever
-            // the application's error handler makes of a warning. (The handler is swapped
-            // for the length of this one call; the swap goes away when the finished
-            // address is checked against the whole route instead.)
-            set_error_handler(static fn (): bool => true);
-            try {
-                $fits = preg_match('#\A(?:' . $fragment . ')\z#', $value) === 1;
-            } finally {
-                restore_error_handler();
-            }
-
-            if (!$fits) {
-                throw new RouterException(
-                    sprintf('Parameter "%s" contains a slash, which its placeholder does not accept', $name),
-                    debugMessage: $value,
-                );
-            }
-        }
-
-        return implode('/', array_map(rawurlencode(...), $segments));
+    /**
+     * @param list<array{literal: string, name: string|null, type: string|null}> $parts
+     * @param array<string, string> $values
+     */
+    private static function fill(array $parts, array $values): string
+    {
+        return implode('', array_map(
+            static fn (array $part): string => $part['name'] === null ? $part['literal'] : $values[$part['name']],
+            $parts,
+        ));
     }
 }

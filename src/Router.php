@@ -678,6 +678,7 @@ class Router implements RequestHandlerInterface
 
             $this->urlGenerator->setBasePath($this->config['basePath']);
             $this->urlGenerator->setEncodeParams($this->config['urlEncoding']);
+            $this->urlGenerator->setIgnoreTrailingSlash($this->config['trailingSlash'] === 'ignore');
 
             if ($this->config['baseUrl']) {
                 $this->urlGenerator->setBaseUrl($this->config['baseUrl']);

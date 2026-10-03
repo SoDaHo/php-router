@@ -237,18 +237,18 @@ class EncodedSeparatorTest extends TestCase
      */
     public static function valuesWithoutAnAddress(): array
     {
-        $slash = 'Parameter "%s" contains a slash, which its placeholder does not accept';
+        $fit = 'The parameters do not fit the pattern of route "%s": the address would not lead back to it';
         $backslash = 'Parameter "%s" contains a backslash, which no route accepts';
         $dots = 'The address would contain a "." or ".." path segment, which a client resolves before it asks';
 
         return [
-            'slash in a one-segment placeholder' => ['tag', ['tag' => 'a/b'], sprintf($slash, 'tag')],
-            'slash in a typed one-segment placeholder' => ['doc', ['id' => '1/2'], sprintf($slash, 'id')],
-            'slash that the own pattern does not take' => ['pair', ['pair' => 'a/b'], sprintf($slash, 'pair')],
-            'value that only starts like the own pattern' => ['pair', ['pair' => "1/2\n"], sprintf($slash, 'pair')],
-            'value that only ends like the own pattern' => ['pair', ['pair' => 'x/1/2'], sprintf($slash, 'pair')],
-            'value that only starts like an alternative of the own pattern' => ['side', ['side' => 'left/in/deep'], sprintf($slash, 'side')],
-            'value that only ends like an alternative of the own pattern' => ['side', ['side' => 'far/right/out'], sprintf($slash, 'side')],
+            'slash in a one-segment placeholder' => ['tag', ['tag' => 'a/b'], sprintf($fit, 'tag'), '/tags/a/b'],
+            'slash in a typed one-segment placeholder' => ['doc', ['id' => '1/2'], sprintf($fit, 'doc'), '/docs/1/2'],
+            'slash that the own pattern does not take' => ['pair', ['pair' => 'a/b'], sprintf($fit, 'pair'), '/pairs/a/b'],
+            'value that only starts like the own pattern' => ['pair', ['pair' => "1/2\n"], sprintf($fit, 'pair'), "/pairs/1/2\n"],
+            'value that only ends like the own pattern' => ['pair', ['pair' => 'x/1/2'], sprintf($fit, 'pair'), '/pairs/x/1/2'],
+            'value that only starts like an alternative of the own pattern' => ['side', ['side' => 'left/in/deep'], sprintf($fit, 'side'), '/sides/left/in/deep'],
+            'value that only ends like an alternative of the own pattern' => ['side', ['side' => 'far/right/out'], sprintf($fit, 'side'), '/sides/far/right/out'],
             'backslash' => ['tag', ['tag' => 'a\\b'], sprintf($backslash, 'tag')],
             'backslash where slashes are taken' => ['files', ['path' => 'a/b\\c'], sprintf($backslash, 'path')],
             'parent segment' => ['files', ['path' => '../secret'], $dots, '/files/../secret'],
@@ -258,7 +258,7 @@ class EncodedSeparatorTest extends TestCase
             'value that is the parent segment' => ['tag', ['tag' => '..'], $dots, '/tags/..'],
             'value that is the current segment' => ['tag', ['tag' => '.'], $dots, '/tags/.'],
             // A segment that only pattern and value together make
-            'empty value in front of a dot of the pattern' => ['end', ['a' => ''], $dots, '/end/.'],
+            'empty value in front of a dot of the pattern' => ['end', ['a' => ''], sprintf($fit, 'end'), '/end/.'],
             'slash in front of a dot of the pattern' => ['pre', ['p' => 'x/'], $dots, '/pre/x/.'],
             'dot in front of a dot of the pattern' => ['end', ['a' => '.'], $dots, '/end/..'],
         ];
@@ -299,6 +299,39 @@ class EncodedSeparatorTest extends TestCase
                 $this->assertStringStartsWith("Config 'basePath' must be a plain path", $e->getMessage());
             }
         }
+    }
+
+    public function testInTheModeIgnoreAValueThatEndsInASlashDoesNotComeBack(): void
+    {
+        $fit = 'The parameters do not fit the pattern of route "files": the address would not lead back to it';
+
+        // strict: the slash at the end is part of the value, and arrives
+        $strict = $this->router();
+        foreach (['a/' => '/files/a/', '' => '/files/', '/' => '/files//', 'a//' => '/files/a//'] as $value => $url) {
+            $this->assertSame($url, $strict->url('files', ['path' => (string) $value]));
+            $this->assertSame('files: ' . $value, $this->body($strict->handle(new ServerRequest('GET', $url))));
+        }
+
+        // ignore: the router drops the slashes at the end of the path before it looks the
+        // route up — 'a/' would arrive as 'a', and '/files/' has no route at all
+        $ignore = $this->router(['trailingSlash' => 'ignore']);
+        foreach (['a/' => '/files/a/', '' => '/files/', '/' => '/files//', 'a//' => '/files/a//'] as $value => $candidate) {
+            try {
+                $ignore->url('files', ['path' => (string) $value]);
+                $this->fail('An address was generated');
+            } catch (RouterException $e) {
+                $this->assertSame($fit, $e->getMessage());
+                $this->assertSame($candidate, $e->getDebugMessage());
+            }
+        }
+
+        // What does come back is written as before, also with a base path
+        $this->assertSame('/files/a/b', $ignore->url('files', ['path' => 'a/b']));
+        $this->assertSame('files: a/b', $this->body($ignore->handle(new ServerRequest('GET', '/files/a/b'))));
+        $this->assertSame('/api/files/a', $this->router(['trailingSlash' => 'ignore', 'basePath' => '/api'])->url('files', ['path' => 'a']));
+
+        // … and without URL encoding nothing is checked, as in the mode strict
+        $this->assertSame('/files/a/', $this->router(['trailingSlash' => 'ignore', 'urlEncoding' => false])->url('files', ['path' => 'a/']));
     }
 
     public function testWithoutUrlEncodingValuesGoInAsGiven(): void
