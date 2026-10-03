@@ -59,11 +59,19 @@ class RouteHandler implements RequestHandlerInterface
                 : $this->instantiateController($class);
 
             // PHP 8 Named Arguments: ['id' => 5] becomes id: 5
-            $response = $instance->{$method}($request, ...$arguments);
+            try {
+                $response = $instance->{$method}($request, ...$arguments);
+            } catch (\Error $e) {
+                throw self::nameClash([$instance, $method], $arguments, $e) ?? $e;
+            }
 
         } elseif (is_callable($this->handler)) {
             // Closure or callable
-            $response = ($this->handler)($request, ...$arguments);
+            try {
+                $response = ($this->handler)($request, ...$arguments);
+            } catch (\Error $e) {
+                throw self::nameClash($this->handler, $arguments, $e) ?? $e;
+            }
 
         } else {
             throw new RouterException('Invalid route handler.');
@@ -103,6 +111,37 @@ class RouteHandler implements RequestHandlerInterface
                 'Controller "%s" requires constructor parameters. Register it in a PSR-11 container or use setContainer().',
                 $class
             )
+        );
+    }
+
+    /**
+     * A placeholder that has the name of the handler's first parameter: PHP refuses the
+     * call ("Named parameter $request overwrites previous argument") before the handler
+     * runs. Said in the router's words, with the name of the placeholder. Null when the
+     * error has another cause — then it came out of the handler itself.
+     *
+     * @param mixed $handler What was called
+     * @param mixed $arguments The route parameters it was called with
+     */
+    private static function nameClash(mixed $handler, mixed $arguments, \Error $error): ?RouterException
+    {
+        if (!is_callable($handler) || !is_array($arguments)) {
+            return null;
+        }
+
+        $first = (new \ReflectionFunction(\Closure::fromCallable($handler)))->getParameters()[0] ?? null;
+
+        // With a name of its own for the first parameter PHP refuses the call before the
+        // handler runs. A variadic first parameter collects the named value instead: the
+        // handler runs, and its errors are its own.
+        if ($first === null || $first->isVariadic() || !array_key_exists($first->getName(), $arguments)) {
+            return null;
+        }
+
+        return new RouterException(
+            sprintf('Placeholder "%s" has the name of the handler\'s first parameter, which receives the request. Rename one of them.', $first->getName()),
+            0,
+            $error,
         );
     }
 }

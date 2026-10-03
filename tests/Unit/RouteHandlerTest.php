@@ -43,6 +43,78 @@ class RouteHandlerTest extends TestCase
         $this->assertSame('John', $body['data']['name']);
     }
 
+    /**
+     * @return array<string, array{0: mixed, 1: string}>
+     */
+    public static function handlersWhoseFirstParameterHasThePlaceholdersName(): array
+    {
+        return [
+            'closure' => [fn ($request, $id) => Response::success([]), 'request'],
+            'closure, other name' => [fn (ServerRequestInterface $req, $id) => Response::success([]), 'req'],
+            'controller' => [[ClashingController::class, 'show'], 'request'],
+            'invokable object' => [new ClashingController(), 'request'],
+            'callable string' => [__NAMESPACE__ . '\clashingHandler', 'request'],
+        ];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('handlersWhoseFirstParameterHasThePlaceholdersName')]
+    public function testPlaceholderWithTheNameOfTheFirstParameterIsNamed(mixed $callable, string $name): void
+    {
+        $request = (new ServerRequest('GET', '/'))->withAttribute('_route_params', [$name => 'x', 'id' => 5]);
+
+        try {
+            (new RouteHandler($callable))->handle($request);
+            $this->fail('The handler was called');
+        } catch (RouterException $e) {
+            // PHP says "Named parameter $request overwrites previous argument"
+            $this->assertSame(
+                sprintf('Placeholder "%s" has the name of the handler\'s first parameter, which receives the request. Rename one of them.', $name),
+                $e->getMessage()
+            );
+            $this->assertInstanceOf(\Error::class, $e->getPrevious());
+        }
+    }
+
+    public function testErrorFromInsideTheHandlerStaysWhatItIs(): void
+    {
+        $request = (new ServerRequest('GET', '/'))->withAttribute('_route_params', ['id' => 5]);
+
+        foreach ([fn ($request, $id) => throw new \Error('from the closure'), [ClashingController::class, 'fails']] as $callable) {
+            try {
+                (new RouteHandler($callable))->handle($request);
+                $this->fail('No error');
+            } catch (\Error $e) {
+                $this->assertStringStartsWith('from the ', $e->getMessage());
+            }
+        }
+
+        // A variadic first parameter takes the placeholder of its name: the handler runs,
+        // and what it throws is not a clash
+        $variadic = function (...$request) {
+            throw new \Error('from the variadic handler, with ' . implode(',', array_keys($request)));
+        };
+
+        try {
+            (new RouteHandler($variadic))->handle($request->withAttribute('_route_params', ['request' => 'x']));
+            $this->fail('No error');
+        } catch (\Error $e) {
+            $this->assertSame('from the variadic handler, with 0,request', $e->getMessage());
+        }
+
+        // Arguments that are no list of parameters at all (a middleware overwrote the attribute)
+        try {
+            (new RouteHandler(fn ($request) => Response::success([])))->handle($request->withAttribute('_route_params', 'text'));
+            $this->fail('No error');
+        } catch (\Error $e) {
+            $this->assertStringContainsString('unpacked', $e->getMessage());
+        }
+
+        // A parameter the handler does not have is PHP's own error, not a clash
+        $this->expectException(\Error::class);
+        $this->expectExceptionMessage('Unknown named parameter $id');
+        (new RouteHandler(fn ($request) => Response::success([])))->handle($request->withAttribute('_route_params', ['id' => 5, 'x' => 1]));
+    }
+
     public function testHandlesControllerArray(): void
     {
         $handler = new RouteHandler([TestController::class, 'index']);
@@ -186,4 +258,27 @@ class ControllerWithOptionalParams
     {
         return Response::success(['value' => $this->value]);
     }
+}
+
+class ClashingController
+{
+    public function show(ServerRequestInterface $request, int $id): ResponseInterface
+    {
+        return Response::success([]);
+    }
+
+    public function fails(ServerRequestInterface $request, int $id): ResponseInterface
+    {
+        throw new \Error('from the controller');
+    }
+
+    public function __invoke(ServerRequestInterface $request, int $id): ResponseInterface
+    {
+        return Response::success([]);
+    }
+}
+
+function clashingHandler(ServerRequestInterface $request, int $id): ResponseInterface
+{
+    return Response::success([]);
 }
