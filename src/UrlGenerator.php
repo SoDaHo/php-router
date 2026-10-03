@@ -218,7 +218,10 @@ final class UrlGenerator
             }
 
             $value = $params[$parameter];
-
+            if (is_float($value) && !is_finite($value)) {
+                // PHP would warn and write NAN or INF
+                throw new RouterException(sprintf('Parameter "%s" is not a finite number', $parameter));
+            }
             $values[$parameter] = is_bool($value) ? ($value ? '1' : '0') : (string) $value;
         }
 

@@ -736,6 +736,26 @@ class UrlGeneratorTest extends TestCase
         $this->assertSame($candidate, $generator->url('r', $params));
     }
 
+    public function testFloatThatIsNotFiniteIsRefused(): void
+    {
+        $generator = new UrlGenerator(['p' => '/p/{v}']);
+
+        // With URL encoding off as well: the application writes the address, not this value
+        foreach ([true, false] as $encode) {
+            $generator->setEncodeParams($encode);
+            foreach ([NAN, INF, -INF] as $value) {
+                try {
+                    $generator->url('p', ['v' => $value]);
+                    $this->fail('An address was generated');
+                } catch (RouterException $e) {
+                    $this->assertSame('Parameter "v" is not a finite number', $e->getMessage());
+                }
+            }
+        }
+
+        $this->assertSame('/p/1.5', $generator->url('p', ['v' => 1.5]));
+    }
+
     public function testLineBreakAtTheEndIsNoNumber(): void
     {
         // What "$" instead of "\z" would let through. A control character is refused before
