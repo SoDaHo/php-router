@@ -354,30 +354,6 @@ class EmitStatusTest extends TestCase
         $this->assertSame(['router exception mid-body | 503'], $reports);
     }
 
-    public function testHandleOfASubclassThatThrowsGivesA500(): void
-    {
-        // Router::handle() does not throw; one of a subclass may (Router is not final yet)
-        $router = new class (['debug' => false]) extends Router {
-            public function handle(\Psr\Http\Message\ServerRequestInterface $request): \Psr\Http\Message\ResponseInterface
-            {
-                throw new \RuntimeException('override failed');
-            }
-        };
-        $_SERVER['REQUEST_METHOD'] = 'GET';
-        $_SERVER['REQUEST_URI'] = '/plain';
-        $reports = [];
-
-        ob_start();
-        $router->on('error', function (array $data) use (&$reports): void {
-            $reports[] = [$data['exception']->getMessage(), $data['method'], $data['path'], $data['status']];
-        })->run();
-        $sent = (string) ob_get_clean();
-
-        $this->assertSame('Internal Server Error', $sent);
-        $this->assertSame(500, http_response_code());
-        $this->assertSame([['override failed', 'GET', '/plain', 500]], $reports);
-    }
-
     public function testHeaderThatFailsBeforeTheStatusLineReportsTheStatusPhpSet(): void
     {
         // A header PHP refuses (a line break in the value; the PSR-7 object of an

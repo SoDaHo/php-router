@@ -7,9 +7,12 @@ namespace Sodaho\Router;
 /**
  * Low-level route matching.
  *
- * Matches request method and URI against compiled route data.
+ * Matches request method and URI against compiled route data. It takes the path as it is
+ * given, decoded and unchecked: what RouteDispatcher refuses before it asks (a hidden
+ * separator, a control character, a path outside the base path) is not refused here —
+ * '/u/a' . "\n" finds the route '/u/{id}'. Ask Router::match() for what the router does.
  */
-class Dispatcher
+final class Dispatcher
 {
     /** Route not found */
     public const NOT_FOUND = 0;

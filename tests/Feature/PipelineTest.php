@@ -809,21 +809,6 @@ class PipelineTest extends TestCase
         $this->assertSame(['/boom'], $hook);
     }
 
-    public function testSubclassOfTheDispatcherWithItsOwnMatchDoesNotChangeHandle(): void
-    {
-        $collector = new RouteCollector();
-        $collector->get('/ok', fn () => Response::text('ok'));
-
-        $dispatcher = new class ($collector->getData()) extends RouteDispatcher {
-            public function match(ServerRequestInterface $request): RouteMatch
-            {
-                throw new \LogicException('a helper of the subclass, never meant for handle()');
-            }
-        };
-
-        $this->assertSame('ok', (string) $dispatcher->handle(new ServerRequest('GET', '/ok'))->getBody());
-    }
-
     /**
      * handle() called from inside a handler, with a responder that fails: the inner call
      * settles its own failure, and the outer handler gets a response like any other.

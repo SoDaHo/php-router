@@ -14,7 +14,7 @@ use Sodaho\Router\Response;
  *
  * A class instead of a Closure, so that a redirect route can be inspected (target, status).
  */
-class RedirectHandler implements RequestHandlerInterface
+final class RedirectHandler implements RequestHandlerInterface
 {
     /**
      * Create a new RedirectHandler instance.

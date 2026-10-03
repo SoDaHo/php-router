@@ -308,6 +308,77 @@ class RouterTest extends TestCase
         $this->assertSame(200, $response2->getStatusCode());
     }
 
+    public function testRouterCanBeWrappedThroughItsInterface(): void
+    {
+        $this->createRoutesFile('<?php return function ($r) { $r->get("/users/{id}", fn ($request, string $id) => Sodaho\Router\Response::text("user " . $id))->name("users.show"); $r->get("/price/{p}", fn () => Sodaho\Router\Response::text("p"))->name("price"); };');
+        $inner = Router::create(['baseUrl' => 'https://example.org'])->loadRoutes($this->routesFile);
+
+        // A decorator: what an application adds around the router, without extending it
+        $wrapped = new class ($inner) implements \Sodaho\Router\Contract\RouterInterface {
+            /** @var list<string> */
+            public array $seen = [];
+
+            public function __construct(private \Sodaho\Router\Contract\RouterInterface $inner)
+            {
+            }
+
+            public function handle(\Psr\Http\Message\ServerRequestInterface $request): \Psr\Http\Message\ResponseInterface
+            {
+                $this->seen[] = $request->getUri()->getPath();
+
+                return $this->inner->handle($request);
+            }
+
+            public function match(\Psr\Http\Message\ServerRequestInterface $request): \Sodaho\Router\RouteMatch
+            {
+                return $this->inner->match($request);
+            }
+
+            public function url(string $name, array $params = []): string
+            {
+                return $this->inner->url($name, $params);
+            }
+
+            public function absoluteUrl(string $name, array $params = []): string
+            {
+                return $this->inner->absoluteUrl($name, $params);
+            }
+        };
+
+        $this->assertSame('user 5', (string) $wrapped->handle(new ServerRequest('GET', '/users/5'))->getBody());
+        $this->assertSame(['/users/5'], $wrapped->seen);
+        $this->assertSame(\Sodaho\Router\RouteMatch::FOUND, $wrapped->match(new ServerRequest('GET', '/users/5'))->status);
+        $this->assertSame('/users/5', $wrapped->url('users.show', ['id' => 5]));
+        $this->assertSame('https://example.org/users/5', $wrapped->absoluteUrl('users.show', ['id' => 5]));
+        // Floats and booleans go in as the router writes them
+        $this->assertSame('/price/1.5', $wrapped->url('price', ['p' => 1.5]));
+        $this->assertSame('/price/1', $wrapped->url('price', ['p' => true]));
+    }
+
+    public function testEveryClassButTheExceptionsIsFinal(): void
+    {
+        $open = [];
+        $finalExceptions = [];
+        foreach (new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator(dirname(__DIR__, 2) . '/src', \FilesystemIterator::SKIP_DOTS)) as $file) {
+            $name = 'Sodaho\\Router\\' . str_replace(['/', '.php'], ['\\', ''], substr($file->getPathname(), strlen(dirname(__DIR__, 2) . '/src/')));
+            $class = new \ReflectionClass($name);
+            if ($class->isInterface() || $class->isTrait()) {
+                continue;
+            }
+            if ($class->isSubclassOf(\Throwable::class)) {
+                // The exceptions stay open: an application may build its own on them
+                if ($class->isFinal()) {
+                    $finalExceptions[] = $name;
+                }
+            } elseif (!$class->isFinal()) {
+                $open[] = $name;
+            }
+        }
+
+        $this->assertSame([], $open);
+        $this->assertSame([], $finalExceptions);
+    }
+
     public function testHooksRegisteredAfterTheFirstRequestStillFire(): void
     {
         $this->createRoutesFile(

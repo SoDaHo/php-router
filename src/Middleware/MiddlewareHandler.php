@@ -14,7 +14,7 @@ use Psr\Http\Server\RequestHandlerInterface;
  *
  * Enables middleware chain execution.
  */
-class MiddlewareHandler implements RequestHandlerInterface
+final class MiddlewareHandler implements RequestHandlerInterface
 {
     /**
      * Create a new MiddlewareHandler instance.

@@ -210,20 +210,4 @@ class DispatcherTest extends TestCase
         $this->assertSame(['GET', 'POST'], $dispatcher->allowedMethods('/users'));
         $this->assertSame([], $dispatcher->allowedMethods('/nowhere'));
     }
-
-    /**
-     * allowedMethods() became public in 1.2. A subclass that already had a method of that
-     * name keeps it to itself: dispatch() does not start calling it.
-     */
-    public function testSubclassWithItsOwnAllowedMethodsDoesNotChangeDispatch(): void
-    {
-        $dispatcher = new class (['GET' => ['/users' => new Route(['GET'], '/users', 'h')]], []) extends Dispatcher {
-            public function allowedMethods(string $uri): array
-            {
-                return ['DELETE'];
-            }
-        };
-
-        $this->assertSame([Dispatcher::METHOD_NOT_ALLOWED, ['GET'], [], []], $dispatcher->dispatch('POST', '/users'));
-    }
 }

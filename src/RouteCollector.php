@@ -10,7 +10,7 @@ use Sodaho\Router\Exception\RouterException;
 /**
  * Collects route definitions and compiles them for the Dispatcher.
  */
-class RouteCollector
+final class RouteCollector
 {
     /** @var Route[] */
     private array $routes = [];

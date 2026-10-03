@@ -15,7 +15,7 @@ use Sodaho\Router\Exception\RouterException;
  *
  * IMPORTANT: Controller MUST return ResponseInterface (no array magic!).
  */
-class RouteHandler implements RequestHandlerInterface
+final class RouteHandler implements RequestHandlerInterface
 {
     /**
      * Create a new RouteHandler instance.

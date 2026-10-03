@@ -10,7 +10,7 @@ use Psr\Container\ContainerInterface;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Message\StreamInterface;
-use Psr\Http\Server\RequestHandlerInterface;
+use Sodaho\Router\Contract\RouterInterface;
 use Sodaho\Router\Exception\RouterException;
 use Sodaho\Router\Traits\HasHooks;
 
@@ -22,7 +22,7 @@ use Sodaho\Router\Traits\HasHooks;
  *     ->loadRoutes(__DIR__ . '/routes.php')
  *     ->run();
  */
-class Router implements RequestHandlerInterface
+final class Router implements RouterInterface
 {
     use HasHooks;
 
@@ -346,8 +346,7 @@ class Router implements RequestHandlerInterface
      * A router is cloned before its first use — a clone is then a router of its own. Once
      * it was used (a request, match(), url(): the route table built or tried), a clone
      * would share the table with the original (a hook added to the clone fired for the
-     * original) or run the routes file a second time (what it does to $this, twice). A
-     * subclass's own __clone() calls this one.
+     * original) or run the routes file a second time (what it does to $this, twice).
      *
      * @throws RouterException When the router was used already
      */
@@ -516,10 +515,13 @@ class Router implements RequestHandlerInterface
     /**
      * Generate relative URL for a named route.
      *
+     * What the routes file itself throws while it is loaded comes out as it is.
+     *
      * @param string $name Route name
-     * @param array<string, int|string> $params Route parameters
+     * @param array<string, string|int|float|bool> $params Route parameters
      *
      * @throws Exception\RouteNotFoundException If route name does not exist
+     * @throws RouterException If no routes are loaded, or the parameters do not lead back to the route
      *
      * @return string Generated URL
      */
@@ -531,13 +533,15 @@ class Router implements RequestHandlerInterface
     /**
      * Generate absolute URL for a named route.
      *
-     * Requires baseUrl: from the config, or APP_URL through fromEnv().
+     * Requires baseUrl: from the config, or APP_URL through fromEnv(). What
+     * the routes file itself throws while it is loaded comes out as it is.
      *
      * @param string $name Route name
-     * @param array<string, int|string> $params Route parameters
+     * @param array<string, string|int|float|bool> $params Route parameters
      *
      * @throws Exception\RouteNotFoundException If route name does not exist
-     * @throws Exception\RouterException If baseUrl is not configured
+     * @throws RouterException If baseUrl is not configured, no routes are loaded, or the
+     *                         parameters do not lead back to the route
      *
      * @return string Generated absolute URL
      */
@@ -581,13 +585,8 @@ class Router implements RequestHandlerInterface
 
         $withBody = $request->getMethod() !== 'HEAD';
 
-        try {
-            $response = $this->handle($request);
-        } catch (\Throwable $e) {
-            // handle() does not throw — but one of a subclass may
-            $this->report($e, $request);
-            $response = new \Nyholm\Psr7\Response(500, RouteDispatcher::PLAIN_HEADERS, 'Internal Server Error');
-        }
+        // handle() does not throw: what goes wrong is a 500 already
+        $response = $this->handle($request);
 
         // Once output has started, the response is not even looked at
         if (!$this->outputStarted()) {
@@ -695,7 +694,8 @@ class Router implements RequestHandlerInterface
      * not look it up a second time.
      *
      * The first call loads the routes, as the first handle() or url() does: base path and
-     * trailing slash mode are taken as they are at that moment.
+     * trailing slash mode are taken as they are at that moment. What the routes file itself
+     * throws while it is loaded comes out as it is.
      *
      * @throws RouterException If no routes are loaded or routes file is invalid
      */
@@ -901,8 +901,7 @@ class Router implements RequestHandlerInterface
     }
 
     /**
-     * What emit() does. run() calls it directly: a subclass with an emit() of its own had
-     * no say in run() while emit() was private, and still has none.
+     * What emit() does; run() calls it directly.
      */
     private function send(ResponseInterface $response, bool $withBody): void
     {

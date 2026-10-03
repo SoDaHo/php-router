@@ -20,7 +20,7 @@ use Sodaho\Router\Traits\HasHooks;
  * Looks the route up, runs the middleware for every request around the answer and
  * delegates route middleware and handlers to specialized classes.
  */
-class RouteDispatcher implements RequestHandlerInterface
+final class RouteDispatcher implements RequestHandlerInterface
 {
     use HasHooks;
 

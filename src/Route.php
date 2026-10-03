@@ -9,7 +9,7 @@ namespace Sodaho\Router;
  *
  * Partially mutable: middleware, name and attributes can be set via fluent setters.
  */
-class Route
+final class Route
 {
     /**
      * What the application wants to know about this route before its handler runs
