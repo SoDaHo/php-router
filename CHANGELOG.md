@@ -22,6 +22,11 @@ table; what is not listed works as in 1.2.
   `If-Range` gets the whole file. See README, "Serving a Web App".
 - `emitChunkSize` config option: how many bytes `run()`/`emit()` read from the response body
   at a time (default 8192 as before; 1024 to 16777216, anything else is refused).
+- `status` in the data of the `error` hook (as the last key): the status the router answers
+  with for what it reports — 400 for a request it cannot use (a parameter that cannot be
+  cast, a request the PSR-7 objects refuse in `run()`), 500 for everything else it answers
+  itself; for what already went out (sending fails in `run()`, type `emit`) the status PHP
+  has set. A hook that logs can tell a client's mistake from a failure. See README, "Hooks".
 
 ### Changed
 - **Loud instead of silently wrong.** What is wrong with a route, a pattern, a redirect or

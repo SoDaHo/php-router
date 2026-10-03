@@ -652,11 +652,26 @@ $router->on('methodNotAllowed', function (array $data) {
 
 // Log exceptions
 $router->on('error', function (array $data) {
-    // $data: method, path, exception — or type ('emit'), message, exception.
+    // $data: method, path, exception, status — or type ('emit'), message, exception, status.
     // method and path are '' where the request object itself could not say
     $logger->error("Error", $data);
 });
 ```
+
+`status` in the `error` hook (always the last key) is the status the router answers with
+for what it reports, as it stands when it reports it: 400 for a request it cannot use (a
+parameter that cannot be cast, a request the PSR-7 objects refuse in `run()`), 500 for
+everything else it answers itself (also a request `run()` cannot build for another reason).
+Each report has its own: a responder that fails at the 400 for a parameter is reported with
+500, because `Router::handle()` takes it as every failure (the error handler, else a 500) —
+the parameter's report keeps its 400. (A `RouteDispatcher` used on its own without
+`setErrorResponder()` lets that exception out, as every failure.) In `run()`, a responder
+that fails at the answer to a request it cannot read is reported with that answer's status,
+which then goes out as plain text. What an error handler (`setErrorHandler()`) answers
+instead is its own; the hook was called before it. Two cases are about what already went
+out, and report the status PHP has set for it: sending that fails in `run()` (a header, the
+body), and type `emit` (output had started before the router could send). Where PHP keeps no
+status (the CLI), that is the 200 it would send.
 
 **Note:** Hook exceptions are caught and never affect the response. Register `hookError` to
 get them; without it a line goes to stderr (`error_log()` where there is none). A
