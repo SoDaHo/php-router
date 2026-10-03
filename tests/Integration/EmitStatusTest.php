@@ -234,7 +234,7 @@ class EmitStatusTest extends TestCase
             ->loadRoutes($this->routesFile)
             ->on('error', function (array $data) use (&$reports): void {
                 $e = $data['exception'];
-                $reports[] = [$e::class, $e->getMessage(), $e->getPrevious() !== null ? $e->getPrevious()::class : null, $data['method'], $data['path']];
+                $reports[] = [$e::class, $e->getMessage(), $e->getPrevious() !== null ? $e->getPrevious()::class : null, $data['method'], $data['path'], $data['status']];
             })
             ->run();
         $sent = (string) ob_get_clean();
@@ -244,7 +244,7 @@ class EmitStatusTest extends TestCase
         // Reported with a message that does not repeat what the client sent; that is in
         // the exception behind it
         $this->assertSame(
-            [[\Sodaho\Router\Exception\RouterException::class, 'The request could not be read', \InvalidArgumentException::class, 'GET', '/plain']],
+            [[\Sodaho\Router\Exception\RouterException::class, 'The request could not be read', \InvalidArgumentException::class, 'GET', '/plain', 400]],
             $reports
         );
     }
@@ -281,14 +281,14 @@ class EmitStatusTest extends TestCase
         Router::create(['debug' => false])
             ->loadRoutes($this->routesFile)
             ->on('error', function (array $data) use (&$reports): void {
-                $reports[] = [$data['exception']::class, $data['method'], $data['path']];
+                $reports[] = [$data['exception']::class, $data['method'], $data['path'], $data['status']];
             })
             ->run();
         $sent = (string) ob_get_clean();
 
         $this->assertSame(500, http_response_code());
         $this->assertSame('{"success":false,"message":"Internal Server Error","error":{"message":"Internal Server Error","code":"SERVER_ERROR"}}', $sent);
-        $this->assertSame([[\TypeError::class, 'POST', '/plain']], $reports);
+        $this->assertSame([[\TypeError::class, 'POST', '/plain', 500]], $reports);
     }
 
     public function testBodyThatFailsWhileItIsSentIsReportedAndNothingMoreGoesOut(): void
@@ -368,13 +368,13 @@ class EmitStatusTest extends TestCase
 
         ob_start();
         $router->on('error', function (array $data) use (&$reports): void {
-            $reports[] = [$data['exception']->getMessage(), $data['method'], $data['path']];
+            $reports[] = [$data['exception']->getMessage(), $data['method'], $data['path'], $data['status']];
         })->run();
         $sent = (string) ob_get_clean();
 
         $this->assertSame('Internal Server Error', $sent);
         $this->assertSame(500, http_response_code());
-        $this->assertSame([['override failed', 'GET', '/plain']], $reports);
+        $this->assertSame([['override failed', 'GET', '/plain', 500]], $reports);
     }
 
     public function testGetterThatThrowsBeforeTheFirstByteGivesA500(): void
@@ -533,10 +533,8 @@ class EmitStatusTest extends TestCase
         $this->assertSame(400, http_response_code());
     }
 
-    public function testRequestThatCannotBeReadIsAnsweredWithoutTheResponderWhenThatFails(): void
+    private static function responderThatFails(): void
     {
-        $_SERVER['HTTP_HOST'] = 'x:99999999';
-
         \Sodaho\Router\Response::setResponder(new class () implements \Sodaho\Router\Contract\ResponderInterface {
             public function formatSuccess(mixed $data, ?string $message = null, ?array $meta = null): array
             {
@@ -558,6 +556,12 @@ class EmitStatusTest extends TestCase
                 return 'application/json';
             }
         });
+    }
+
+    public function testRequestThatCannotBeReadIsAnsweredWithoutTheResponderWhenThatFails(): void
+    {
+        $_SERVER['HTTP_HOST'] = 'x:99999999';
+        self::responderThatFails();
 
         $reports = [];
         $_SERVER['REQUEST_METHOD'] = 'GET';
@@ -567,13 +571,36 @@ class EmitStatusTest extends TestCase
         Router::create(['debug' => false])
             ->loadRoutes($this->routesFile)
             ->on('error', function (array $data) use (&$reports): void {
-                $reports[] = $data['exception']->getMessage();
+                $reports[] = [$data['exception']->getMessage(), $data['status']];
             })
             ->run();
 
         $this->assertSame('Bad Request', (string) ob_get_clean());
         $this->assertSame(400, http_response_code());
-        // Both are reported: what was wrong with the request, and the responder
-        $this->assertSame(['The request could not be read', 'responder failed'], $reports);
+        // Both are reported: what was wrong with the request, and the responder — the answer is a 400
+        $this->assertSame([['The request could not be read', 400], ['responder failed', 400]], $reports);
+    }
+    public function testRequestThatCannotBeBuiltForAnotherReasonStaysA500WhenTheResponderFails(): void
+    {
+        $_FILES = ['f' => ['name' => ['a.txt'], 'type' => 'text/plain', 'tmp_name' => __FILE__, 'error' => 0, 'size' => 3]];
+        self::responderThatFails();
+
+        $reports = [];
+        $_SERVER['REQUEST_METHOD'] = 'POST';
+        $_SERVER['REQUEST_URI'] = '/plain';
+
+        ob_start();
+        Router::create(['debug' => false])
+            ->loadRoutes($this->routesFile)
+            ->on('error', function (array $data) use (&$reports): void {
+                $reports[] = [$data['exception']::class, $data['status'], array_keys($data)];
+            })
+            ->run();
+
+        $this->assertSame('Internal Server Error', (string) ob_get_clean());
+        $this->assertSame(500, http_response_code());
+        // status comes last, after the keys these reports had before
+        $keys = ['exception', 'method', 'path', 'status'];
+        $this->assertSame([[\TypeError::class, 500, $keys], [\LogicException::class, 500, $keys]], $reports);
     }
 }

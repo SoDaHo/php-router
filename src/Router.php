@@ -619,13 +619,13 @@ class Router implements RequestHandlerInterface
             ? [400, 'Bad Request', 'BAD_REQUEST', new RouterException('The request could not be read', 0, $e, $e->getMessage())]
             : [500, 'Internal Server Error', 'SERVER_ERROR', $e];
 
-        $this->trigger('error', ['exception' => $report] + $about);
+        $this->trigger('error', ['exception' => $report] + $about + ['status' => $status]);
 
         try {
             return Response::error($text, $status, $code);
         } catch (\Throwable $failure) {
             // The application's responder (Response::setResponder()) failed
-            $this->trigger('error', ['exception' => $failure] + $about);
+            $this->trigger('error', ['exception' => $failure] + $about + ['status' => $status]);
 
             return new \Nyholm\Psr7\Response($status, RouteDispatcher::PLAIN_HEADERS, $text);
         }
@@ -745,10 +745,14 @@ class Router implements RequestHandlerInterface
         }
     }
 
-    private function report(\Throwable $e, ServerRequestInterface $request): void
+    /**
+     * @param int $status The status of the router's own answer to the request
+     */
+    private function report(\Throwable $e, ServerRequestInterface $request, int $status = 500): void
     {
-        $this->trigger('error', ['exception' => $e] + RouteDispatcher::describe($request));
+        $this->trigger('error', ['exception' => $e] + RouteDispatcher::describe($request) + ['status' => $status]);
     }
+
 
     // ==================== Internal ====================
 

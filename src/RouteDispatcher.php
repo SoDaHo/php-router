@@ -510,7 +510,10 @@ class RouteDispatcher implements RequestHandlerInterface
 
     private function report(\Throwable $e, ServerRequestInterface $request): void
     {
-        $this->trigger('error', ['exception' => $e] + self::describe($request));
+        // 500: through the router that is its answer (unless an error handler answers
+        // instead); a dispatcher on its own has no answer of its own, the 500 says the
+        // failure is not the client's
+        $this->trigger('error', ['exception' => $e] + self::describe($request) + ['status' => 500]);
     }
 
     /**
@@ -579,6 +582,7 @@ class RouteDispatcher implements RequestHandlerInterface
                 'method' => $method,
                 'path' => $uri,
                 'exception' => $e,
+                'status' => 400,
             ]);
             $message = $this->debug ? $e->getMessage() : 'Bad Request';
             return Response::error($message, 400, 'INVALID_PARAMETER');
