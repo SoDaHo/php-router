@@ -2,8 +2,10 @@
 
 ## [Unreleased]
 
-2.0.0, in progress on branch `2.x`. Every change that breaks something from 1.x is in the
-table; what is not listed works as in 1.2.
+## [2.0.0] - 2026-10-03
+
+Every change that breaks something from 1.x is in the table; what is not listed works as
+in 1.2.
 
 ### Added
 - **`Router::app()`** serves a folder with a built web app under a prefix — one line per
@@ -305,7 +307,8 @@ themselves (`handle()` plus their own emitter) are not affected.
 - **Configuration** via constructor array, environment variables, or fluent API.
 - **Strict parameter validation**: invalid types return 400 (not 500), controller TypeErrors bubble up as 500.
 
-[Unreleased]: https://github.com/sodaho/php-router/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/sodaho/php-router/compare/v2.0.0...HEAD
+[2.0.0]: https://github.com/sodaho/php-router/compare/v1.2.0...v2.0.0
 [1.2.0]: https://github.com/sodaho/php-router/compare/v1.1.1...v1.2.0
 [1.1.1]: https://github.com/sodaho/php-router/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/sodaho/php-router/compare/v1.0.0...v1.1.0
