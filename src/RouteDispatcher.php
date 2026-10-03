@@ -432,7 +432,8 @@ class RouteDispatcher implements RequestHandlerInterface
             $castedParams = $this->castParams($match->params, $match->casts);
         } catch (\TypeError $e) {
             // Casting errors (invalid int, float, bool) -> 400 Bad Request
-            // This is a client error (invalid parameter), not a server error
+            // This is a client error (invalid parameter), not a server error. The message
+            // names the parameter; the value is in the path the hook gets.
             $this->trigger('error', [
                 'method' => $method,
                 'path' => $uri,
@@ -505,15 +506,28 @@ class RouteDispatcher implements RequestHandlerInterface
 
             /** @var string $value */
             $value = $result[$key];
-            $result[$key] = match ($type) {
-                'int' => $this->castInt($value, $key),
-                'float' => $this->castFloat($value, $key),
-                'bool' => $this->castBool($value, $key),
-                default => $value,
-            };
+            $result[$key] = self::castValue($type, $value, $key);
         }
 
         return $result;
+    }
+
+    /**
+     * One value as the handler gets it. url() asks the same question before it writes an
+     * address: would this value arrive?
+     *
+     * @internal
+     *
+     * @throws \TypeError If the value is not one the type takes
+     */
+    public static function castValue(string $type, string $value, string $key): string|int|float|bool
+    {
+        return match ($type) {
+            'int' => self::castInt($value, $key),
+            'float' => self::castFloat($value, $key),
+            'bool' => self::castBool($value, $key),
+            default => $value,
+        };
     }
 
     /**
@@ -609,12 +623,12 @@ class RouteDispatcher implements RequestHandlerInterface
      *
      * @throws \TypeError If value is not a valid integer
      */
-    private function castInt(string $value, string $key): int
+    private static function castInt(string $value, string $key): int
     {
         // Accepts: 0, 5, -10. Rejects: 00, -0 (except literal 0), 01, 1e3, 5.0
         if (!preg_match('/^-?(?:0|[1-9]\d*)$/', $value)) {
             throw new \TypeError(
-                sprintf("Parameter '%s': expected integer, got '%s'", $key, $value)
+                sprintf("Parameter '%s': expected integer", $key)
             );
         }
 
@@ -633,12 +647,12 @@ class RouteDispatcher implements RequestHandlerInterface
     /**
      * @throws \TypeError If value is not a valid decimal
      */
-    private function castFloat(string $value, string $key): float
+    private static function castFloat(string $value, string $key): float
     {
         // Accepts: 5, 5.5, -3.14. Rejects: 1e3, 5.
         if (!preg_match('/^-?\d+(?:\.\d+)?$/', $value)) {
             throw new \TypeError(
-                sprintf("Parameter '%s': expected decimal, got '%s'", $key, $value)
+                sprintf("Parameter '%s': expected decimal", $key)
             );
         }
 
@@ -659,13 +673,13 @@ class RouteDispatcher implements RequestHandlerInterface
      *
      * @codeCoverageIgnore Dead code: regex pattern filters invalid bool values before this is called
      */
-    private function castBool(string $value, string $key): bool
+    private static function castBool(string $value, string $key): bool
     {
         return match (strtolower($value)) {
             'true', '1' => true,
             'false', '0' => false,
             default => throw new \TypeError(
-                sprintf("Parameter '%s': expected boolean (true/false/1/0), got '%s'", $key, $value)
+                sprintf("Parameter '%s': expected boolean (true/false/1/0)", $key)
             ),
         };
     }

@@ -16,6 +16,43 @@ use Sodaho\Router\RouteDispatcher;
  */
 class CastingTest extends TestCase
 {
+    // ==================== what the report says ====================
+
+    /**
+     * @return array<string, array{0: string, 1: string}>
+     */
+    public static function valuesThatCannotBeCast(): array
+    {
+        return [
+            'leading zero' => ['/int/01', "Parameter 'id': expected integer"],
+            'integer overflow' => ['/int/99999999999999999999', "Parameter 'id': integer overflow"],
+            'decimal without digits behind the point' => ['/float/5.', "Parameter 'value': expected decimal"],
+            'decimal overflow' => ['/float/' . str_repeat('9', 400), "Parameter 'value': decimal overflow"],
+        ];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('valuesThatCannotBeCast')]
+    public function testMessageNamesTheParameterAndNotTheValue(string $path, string $message): void
+    {
+        $collector = new RouteCollector();
+        $collector->addPattern('float', '[0-9.]+');
+        $collector->get('/int/{id:int}', fn ($req, int $id) => Response::success([]));
+        $collector->get('/float/{value:float}', fn ($req, float $value) => Response::success([]));
+
+        $reports = [];
+        $dispatcher = new RouteDispatcher($collector->getData(), null, '', 'strict', true);
+        $dispatcher->on('error', function (array $data) use (&$reports): void {
+            $reports[] = [$data['exception']->getMessage(), $data['path']];
+        });
+
+        $response = $dispatcher->handle(new ServerRequest('GET', $path));
+
+        $this->assertSame(400, $response->getStatusCode());
+        // The value came from the client; it is in the path the hook gets
+        $this->assertSame([[$message, $path]], $reports);
+        $this->assertSame($message, json_decode((string) $response->getBody(), true)['message']);
+    }
+
     // ==================== INT CASTING ====================
 
     public function testIntCastingValidValues(): void
