@@ -141,9 +141,37 @@ $r->addPattern('date', '\d{4}-\d{2}-\d{2}');
 $r->get('/events/{date:date}', $handler);  // 2024-12-06
 ```
 
-A pattern is a fragment that stands on its own: no look at the text around it
-(`(?=/tail)`), no reference to another placeholder. `url()` asks it alone whether a value
-with a slash fits.
+The name is made of ASCII letters, digits and underscores. The fragment becomes part of a
+regular expression delimited by `#`: write a literal `#` as `\#`. A pattern may be added
+after the routes that use it.
+
+### What a Route Pattern May Contain
+
+A route that is wrong as it is written is refused where it is written, with a
+`RouterException` — not found out by the first request:
+
+```php
+$r->get('/users/{id:\d+}', $handler);        // a regular expression goes into addPattern()
+$r->get('/users[/{id}]', $handler);          // no optional segments: define two routes
+$r->get('/a/{id}/b/{id}', $handler);         // the same placeholder twice
+$r->get('/caf%C3%A9', $handler);             // a pattern is written decoded: '/café'
+$r->get('/search?q={q}', $handler);          // a pattern is a path: no '?' or '#'
+$r->addPattern('hex', '[0-9a-f#]+');         // unescaped '#'
+$r->redirect('/old/{id}', '/new/{slug}');    // the target uses a placeholder its source does not have
+```
+
+A route pattern is compared with the request path after it was decoded, so it is written
+decoded (`/a b`, `/über`, `/100%`) — a percent-encoded character in a pattern (`%20`) is
+refused, and so are a backslash, a control character, `?`, `#` and a `.`/`..` segment: no
+request a client sends looks like that. (The same rule holds for `basePath`.) Curly braces
+are placeholders and nothing else — `{`, `}` cannot be literal text. A placeholder is
+`{name}` or `{name:type}`; the name begins with an ASCII letter or an underscore, has at most 32
+characters (more is refused by older PCRE versions), and is not `_route_params`. Square
+brackets cannot be part of a route pattern at all. Two things show only when the
+route table is built (at the first request, `match()` or `url()`), because patterns may
+still be added until then: a type nobody defined (`{id:integer}`) and a pattern of your own
+with which the route does not compile. Through `handle()` that is a 500 for every request,
+reported to the `error` hook — the application does not come up half-working.
 
 ### Accessing Parameters
 
@@ -162,6 +190,10 @@ public function show(ServerRequestInterface $request, int $id): ResponseInterfac
     $id === $request->getAttribute('id');   // same value
 }
 ```
+
+The first parameter of a handler receives the request, whatever it is called. A
+placeholder must not have that name (`/x/{request}` with `fn ($request) => ...`): the
+request ends in a 500, and the `RouterException` behind it names the placeholder.
 
 ## Route Groups
 
@@ -291,9 +323,17 @@ returns. Its response passes through the middleware for every request like any o
 handler that throws itself counts as `null` (and is reported through the `error` hook,
 unless it only hands the exception back). What a middleware for every request throws goes
 to the same error handler as the last resort — with the request as far as it came; that
-response no longer passes through the middleware. (What still leaves `handle()`, as
-before: a responder set with `Response::setResponder()` that throws while the router's own
-500 is built.)
+response no longer passes through the middleware.
+
+**`handle()` never throws.** Where the error handler gives no response, the router's own
+500 is built by the responder (`Response::setResponder()`); when that one throws as well,
+the answer is a plain-text `500 Internal Server Error` that depends on nothing the
+application can replace. The error handler is asked before that plain answer, and never
+about its own answer — a server that wants its own last answer builds it there, without
+the responder. Every exception on the way goes to the `error` hook, each once: the one
+that started it, what the error handler threw, what the responder threw. (The same holds
+for the odd ends: a response object that refuses to lose its body for a HEAD request, a
+request object whose getters throw.)
 
 From the outside in: middleware for every request → error handler → 404/405, or route
 middleware → handler.
@@ -342,15 +382,27 @@ $url = $router->absoluteUrl('user.show', ['id' => 5]);
 // → https://example.com/users/5
 ```
 
-Values are encoded (`rawurlencode()`, see `urlEncoding`). With URL encoding on, `url()`
-makes from the values you pass no encoded separator — the router refuses those —, no `.`
-or `..` segment, and no path that begins with `//` below the base path; and the address as
-a whole begins with a single `/` and contains no backslash or control character, whatever
-route pattern and base path are made of:
+Values are encoded (`rawurlencode()`, see `urlEncoding`), and so is the literal text of
+route pattern and base path (`/my app/{x}` goes out as `/my%20app/…`; what a path may
+contain as it is — `:`, `@`, `!$&'()*+,;=` — stays). With URL encoding on, `url()`
+returns an address only when it leads back to its route with exactly the values you
+passed — the path as the router would see it has to match the route's pattern, each
+placeholder taking its value, and each value has to pass the cast of its type. A value
+that does not fit throws (`12a` or `01` for `{id:int}`, an empty value, a slash where one
+segment is expected), and so do values that the pattern would split differently — in the
+trailing slash mode `ignore` also a value that ends in a slash, which the router drops
+before it looks the route up. What `url()` does not look at: whether another route,
+registered before this one, takes the same path (`/users/me` in front of `/users/{id}`
+with `id => 'me'`). A slash that the placeholder takes
+(`{path:any}`) stays a slash, each segment encoded on its own — the router refuses `%2F`.
+`null` is no value. And the address as a whole has no `.` or `..` segment, no path that
+begins with `//` below the base path, begins with a single `/` and contains no backslash,
+whatever route pattern and base path are made of:
 
 ```php
 $router->url('files', ['path' => 'my dir/a b.txt']);   // /files/{path:any} → /files/my%20dir/a%20b.txt
 $router->url('user.show', ['id' => 'a/b']);            // RouterException: the placeholder is one segment
+$router->url('post.show', ['id' => '12a']);            // /posts/{id:int} → RouterException: the address would end in 404
 $router->url('files', ['path' => '../secret']);        // RouterException: a client would resolve the '..'
 $router->url('export', ['name' => '..']);              // /export/{name}.json → /export/...json: no segment of its own, fine
 $router->url('files', ['path' => 'a\\b']);             // RouterException: no route accepts a backslash
@@ -364,6 +416,9 @@ $r->redirect('/old-url', '/new-url');           // 302 Temporary
 $r->redirect('/old-url', '/new-url', 301);      // 301 Permanent
 $r->redirect('/users/{id}/profile', '/profile/{id}');  // With parameters
 ```
+
+A placeholder in the target is `{name}` — nothing else in braces — and has to exist in the
+source (the prefix of its groups included).
 
 ## Response Helpers
 
@@ -529,8 +584,10 @@ ROUTER_URL_ENCODING=true
 A key in the array you pass wins whatever its value — `null`, `false` and `''` included
 (`null` then means the default) — and its variable is not looked at. `APP_DEBUG` and
 `ROUTER_URL_ENCODING` have to be boolean-like (`true`/`false`, `1`/`0`, `on`/`off`,
-`yes`/`no`) or empty; anything else makes `fromEnv()` throw a `RouterException` that names
-the variable. `APP_ENV` means nothing to the router.
+`yes`/`no`) or empty, `ROUTER_TRAILING_SLASH` has to be `strict`, `ignore` or empty (empty
+means the default), `ROUTER_BASE_PATH` written decoded (see [Options](#options)); anything
+else makes `fromEnv()` throw a `RouterException` that names the variable. `APP_ENV` means
+nothing to the router.
 
 What a web server hands over with each request — nginx's `fastcgi_param`, Apache's
 `SetEnv` — is not the environment of the process: under PHP-FPM it reaches `fromEnv()` only
@@ -550,14 +607,18 @@ $router = Router::create()
 $router->isDebug();   // what the router decided
 ```
 
+`setDebug()`, `setBasePath()` and `loadRoutes()` belong in front of the first request,
+`match()` or `url()`: the route table is built from them. Called later they throw a
+`RouterException` instead of being accepted without effect.
+
 ### Options
 
 | Config Key | Variable read by `fromEnv()` | Default | Description |
 |------------|--------------|---------|-------------|
 | `debug` | `APP_DEBUG` | `false` | Enable debug mode (detailed errors). Boolean or boolean-like (`'true'`, `'0'`, ...). `null` means the default; `''` and `0` count as off; anything else is refused |
-| `basePath` | `ROUTER_BASE_PATH` | `''` | URL prefix for all routes (`/api`, `/api/` and `api` mean the same) |
+| `basePath` | `ROUTER_BASE_PATH` | `''` | URL prefix for all routes (`/api`, `/api/` and `api` mean the same). Written decoded, like a route pattern (`/my app`, not `/my%20app`): a percent-encoded character, a backslash, a control character, `?`, `#` or a `.`/`..` segment is refused |
 | `baseUrl` | `APP_URL` | `null` | Base URL for `absoluteUrl()` |
-| `trailingSlash` | `ROUTER_TRAILING_SLASH` | `'strict'` | `'strict'` or `'ignore'` |
+| `trailingSlash` | `ROUTER_TRAILING_SLASH` | `'strict'` | `'strict'` or `'ignore'`; `null` and `''` mean the default, anything else is refused |
 | `urlEncoding` | `ROUTER_URL_ENCODING` | `true` | `rawurlencode()` parameter values in `url()`/`absoluteUrl()`; `false` inserts them as given. Boolean or boolean-like, as `debug` |
 | `routesFile` | - | `null` | Routes file, as `loadRoutes()` sets it |
 | `implicitHead` | - | `true` | Answer `HEAD` through the `GET` route (see [HTTP Methods](#http-methods)) |
@@ -591,14 +652,16 @@ $router->on('methodNotAllowed', function (array $data) {
 
 // Log exceptions
 $router->on('error', function (array $data) {
-    // $data: method, path, exception — or type ('emit'), message, exception
+    // $data: method, path, exception — or type ('emit'), message, exception.
+    // method and path are '' where the request object itself could not say
     $logger->error("Error", $data);
 });
 ```
 
 **Note:** Hook exceptions are caught and never affect the response. Register `hookError` to
 get them; without it a line goes to stderr (`error_log()` where there is none). A
-`hookError` callback that fails itself gets that line too.
+`hookError` callback that fails itself gets that line too. Where not even the line can
+be written (`STDERR` closed), it is dropped — a failing hook never interrupts the request.
 
 ```php
 $router->on('hookError', function (array $data) {
@@ -675,12 +738,34 @@ try {
 }
 ```
 
-Whatever is thrown while a request is handled — by a handler, a middleware or the router
-itself — never leaves `handle()`: it becomes a 500 response and is passed to the `error`
-hook. That includes `NotFoundException` and `MethodNotAllowedException` thrown by your own
-code; return `Response::notFound()` instead. The one thing that does leave `handle()`: what
-a responder set with `Response::setResponder()` throws while that 500 is built. `run()` adds one case of its own: a response
-whose body was closed before it could be sent raises `RouterException`.
+Whatever is thrown while a request is handled — by a handler, a middleware, the routes
+file, the error handler, the responder or the router itself — never leaves `handle()`: it
+becomes a 500 response and is passed to the `error` hook (see
+[Error Handler](#error-handler)). That includes `NotFoundException` and
+`MethodNotAllowedException` thrown by your own code; return `Response::notFound()`
+instead. `run()` adds two cases of its own. A request the PSR-7 objects do not accept — a
+`Host` header with a port that is none (`Host: x:99999999`), a header value with a control
+character — is answered with `400 Bad Request` before anything of the application runs,
+and reported to the `error` hook as a `RouterException` "The request could not be read"
+(what the PSR-7 objects said is in `getPrevious()`; anything else that fails while the
+request is built from PHP's globals: 500, reported as it is). `run()` reads everything it
+needs from the response before it sends the first byte: a body that was closed or
+detached, a getter that throws, is a plain-text 500, reported as well — `emit()`, given
+such a response directly, throws. A body that fails while it is sent is reported too;
+after the headers are out, nothing can be answered any more.
+
+A router loads its routes file once for each `loadRoutes()`. When the route table cannot
+be built — the file threw, a route was refused — every request is a 500 through the
+`error` hook, and the file is not `require`d again. Another router, or another
+`loadRoutes()`, requires it again, as 1.x did: a routes file that declares a function or a
+class can be used by one router per process — in a worker that builds a router per
+request, keep declarations out of it. Its closure sees the router as `$this`, as in 1.x. A
+router is cloned before its first use only (a clone made then is a router of its own);
+once it was used — a request, `match()`, `url()` — `clone` throws.
+
+The message of a `RouterException` names what is wrong, not the value: a file path, the
+address `url()` would have written, the route pattern are in `getDebugMessage()`. Log both
+where the log is yours alone; show neither to a client.
 
 | Exception | When |
 |-----------|------|
@@ -988,8 +1073,9 @@ protected function tearDown(): void
 
 | Feature | Reason |
 |---------|--------|
-| Optional segments `[/suffix]` | Complexity vs. benefit. Define two routes instead. |
-| Regex in route patterns | Use predefined patterns or `addPattern()`. |
+| Optional segments `[/suffix]` | Complexity vs. benefit. Define two routes instead. Refused when the route is registered — and with them every `[` or `]` in a route pattern. |
+| Regex in route patterns | Use predefined patterns or `addPattern()`. Refused when the route is registered. |
+| Literal `{`, `}`, `?`, `#`, `%XX` in a route pattern | A pattern is a path, written decoded; braces are placeholders. Refused when the route is registered. |
 | Route priority/ordering | Routes match in definition order. Define specific routes first. |
 | Async/Swoole out-of-box | Use `handle()` method, not `run()`. Emit response yourself. |
 | >500 dynamic routes efficiently | O(n) matching. Consider splitting into microservices. |
