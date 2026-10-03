@@ -74,10 +74,16 @@ trait HasHooks
                 $e->getLine()
             );
 
-            if ($this->hasStderr()) {
-                fwrite(STDERR, $message);
-            } else {
-                error_log($message);
+            try {
+                if ($this->hasStderr()) {
+                    fwrite(STDERR, $message);
+                } else {
+                    error_log($message);
+                }
+            } catch (\Throwable) {
+                // Nowhere left to say it (stderr was closed, or a handler turns the
+                // warning of a failed write into an exception): a failing hook still
+                // never interrupts the request
             }
         };
 

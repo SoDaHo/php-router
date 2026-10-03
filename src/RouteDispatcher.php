@@ -26,6 +26,13 @@ class RouteDispatcher implements RequestHandlerInterface
 
     private Dispatcher $dispatcher;
     private string $basePath;
+    /**
+     * The headers of an answer that depends on nothing the application can replace
+     *
+     * @internal
+     */
+    public const PLAIN_HEADERS = ['Content-Type' => 'text/plain; charset=utf-8', 'X-Content-Type-Options' => 'nosniff'];
+
     private string $trailingSlash;
     private bool $debug;
     private bool $implicitHead = true;
@@ -33,8 +40,11 @@ class RouteDispatcher implements RequestHandlerInterface
     /** @var array<int, string|object> Middleware for every request, outermost first */
     private array $middleware = [];
 
-    /** @var (\Closure(\Throwable, ServerRequestInterface): ResponseInterface)|null */
+    /** @var (\Closure(\Throwable, ServerRequestInterface, \WeakMap<\Throwable, true>): ResponseInterface)|(\Closure(\Throwable, ServerRequestInterface): ResponseInterface)|null */
     private ?\Closure $errorResponder = null;
+
+    /** Whether the error responder takes the call's record (setErrorResponderWithRecord()) */
+    private bool $responderTakesRecord = false;
 
     /** @var list<AppFolder> Web app folders, the longest prefix first */
     private array $apps = [];
@@ -128,6 +138,23 @@ class RouteDispatcher implements RequestHandlerInterface
     public function setErrorResponder(?\Closure $responder): static
     {
         $this->errorResponder = $responder;
+        $this->responderTakesRecord = false;
+        return $this;
+    }
+
+    /**
+     * The router's own responder: it gets the call's record of reported exceptions as a
+     * third argument, marks there what it reports ($known[$e] = true), and the dispatcher
+     * does not report that again.
+     *
+     * @internal
+     *
+     * @param \Closure(\Throwable, ServerRequestInterface, \WeakMap<\Throwable, true>): ResponseInterface $responder
+     */
+    public function setErrorResponderWithRecord(\Closure $responder): static
+    {
+        $this->errorResponder = $responder;
+        $this->responderTakesRecord = true;
         return $this;
     }
 
@@ -346,6 +373,14 @@ class RouteDispatcher implements RequestHandlerInterface
         /** @var \WeakMap<\Throwable, true> $unanswerable */
         $unanswerable = new \WeakMap();
 
+        // The answers the error responder gave during this call — nothing asks it about
+        // one of them — and the exceptions reported during it, here or by the responder:
+        // none is reported a second time
+        /** @var \WeakMap<ResponseInterface, true> $answered */
+        $answered = new \WeakMap();
+        /** @var \WeakMap<\Throwable, true> $known */
+        $known = new \WeakMap();
+
         $enter = function (ServerRequestInterface $request) use (&$current, &$head): ServerRequestInterface {
             $current = $this->attachMatch($request);
             $head = $head || $current->getMethod() === 'HEAD';
@@ -353,7 +388,7 @@ class RouteDispatcher implements RequestHandlerInterface
             return $current;
         };
 
-        $handler = new Middleware\CallableHandler(function (ServerRequestInterface $request) use ($enter, $startTime, $unanswerable): ResponseInterface {
+        $handler = new Middleware\CallableHandler(function (ServerRequestInterface $request) use ($enter, $startTime, $unanswerable, $answered, $known): ResponseInterface {
             $request = $enter($request);
             $match = $request->getAttribute(RouteMatch::class);
             assert($match instanceof RouteMatch);
@@ -367,7 +402,10 @@ class RouteDispatcher implements RequestHandlerInterface
             }
 
             try {
-                return ($this->errorResponder)($e, $request);
+                $answer = $this->askResponder($e, $request, $known);
+                $answered[$answer] = true;
+
+                return $answer;
             } catch (\Throwable $failure) {
                 $unanswerable[$failure] = true;
 
@@ -392,7 +430,22 @@ class RouteDispatcher implements RequestHandlerInterface
             // Last resort: a middleware for every request threw or could not be built. The
             // responder gets the request as far as it came, with its RouteMatch; its answer
             // does not pass through the middleware any more.
-            $response = ($this->errorResponder)($e, $enter($current));
+            $failure = null;
+
+            try {
+                $current = $enter($current);
+            } catch (\Throwable $failure) {
+                // The request object itself fails: the responder gets it as it is
+                $head = $head || self::describe($current)['method'] === 'HEAD';
+            }
+
+            $response = $this->askResponder($e, $current, $known);
+            $answered[$response] = true;
+
+            // … and what it failed with is reported behind the exception it interrupted
+            if ($failure !== null) {
+                $this->reportOnce($failure, $current, $known);
+            }
         }
 
         // With implicitHead on, no answer to a HEAD request carries a body — whoever made it:
@@ -402,10 +455,98 @@ class RouteDispatcher implements RequestHandlerInterface
         // is a request that was HEAD at any step on its way in — also in a delegation whose
         // answer a middleware threw away to delegate again.
         if ($this->implicitHead && $head) {
-            $response = $response->withBody(\Nyholm\Psr7\Stream::create(''));
+            try {
+                $response = $response->withBody(\Nyholm\Psr7\Stream::create(''));
+            } catch (\Throwable $e) {
+                // A response object that does not take another body
+                if ($this->errorResponder === null) {
+                    throw $e;
+                }
+
+                $response = $this->withoutBody($e, $current, isset($answered[$response]), $known);
+            }
         }
 
         return $response;
+    }
+
+    /**
+     * The answer to HEAD when the response at hand refuses to lose its body. The error
+     * responder is asked — unless that response is one of its own answers: what goes
+     * wrong while its answer is finished is reported, and answered without it.
+     *
+     * @param \WeakMap<\Throwable, true> $known Exceptions reported during this call
+     */
+    private function withoutBody(\Throwable $e, ServerRequestInterface $request, bool $itsOwn, \WeakMap $known): ResponseInterface
+    {
+        if (!$itsOwn && $this->errorResponder !== null) {
+            $response = $this->askResponder($e, $request, $known);
+
+            try {
+                return $response->withBody(\Nyholm\Psr7\Stream::create(''));
+            } catch (\Throwable $failure) {
+                // Its answer refuses as well
+                $this->reportOnce($failure, $request, $known);
+
+                return new \Nyholm\Psr7\Response(500, self::PLAIN_HEADERS);
+            }
+        }
+
+        $this->reportOnce($e, $request, $known);
+
+        return new \Nyholm\Psr7\Response(500, self::PLAIN_HEADERS);
+    }
+
+    /**
+     * @param \WeakMap<\Throwable, true> $known
+     */
+    private function reportOnce(\Throwable $e, ServerRequestInterface $request, \WeakMap $known): void
+    {
+        if (!isset($known[$e])) {
+            $known[$e] = true;
+            $this->report($e, $request);
+        }
+    }
+
+    private function report(\Throwable $e, ServerRequestInterface $request): void
+    {
+        $this->trigger('error', ['exception' => $e] + self::describe($request));
+    }
+
+    /**
+     * @param \WeakMap<\Throwable, true> $known
+     */
+    private function askResponder(\Throwable $e, ServerRequestInterface $request, \WeakMap $known): ResponseInterface
+    {
+        assert($this->errorResponder !== null);
+
+        return $this->responderTakesRecord
+            ? ($this->errorResponder)($e, $request, $known)
+            : ($this->errorResponder)($e, $request);
+    }
+
+    /**
+     * Method and path for the error hook. What a request object fails to say stays empty —
+     * the report goes out all the same.
+     *
+     * @internal
+     *
+     * @return array{method: string, path: string}
+     */
+    public static function describe(ServerRequestInterface $request): array
+    {
+        $read = static function (\Closure $get): string {
+            try {
+                return $get();
+            } catch (\Throwable) {
+                return '';
+            }
+        };
+
+        return [
+            'method' => $read(static fn (): string => $request->getMethod()),
+            'path' => $read(static fn (): string => $request->getUri()->getPath()),
+        ];
     }
 
     /**

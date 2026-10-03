@@ -8,6 +8,7 @@ use PHPUnit\Framework\Attributes\RunInSeparateProcess;
 use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 use PHPUnit\Framework\TestCase;
 use Sodaho\Router\Exception\RouterException;
+use Sodaho\Router\Response;
 use Sodaho\Router\Router;
 
 /**
@@ -279,20 +280,27 @@ class StreamedDownloadTest extends TestCase
                 PHP
         );
 
-        // The exception escapes mid-emit, so the output buffer opened by serve() has to be
-        // cleaned up here — otherwise PHPUnit (rightly) flags the test as risky.
+        // run() looks before anything is sent and answers with a 500 (EmitStatusTest);
+        // emit() has no request to report it for, and throws
+        $response = Response::text('gone');
+        $response->getBody()->close();
+
         $level = ob_get_level();
+        ob_start();
 
         try {
-            $this->serve('/closed');
+            Router::create()->emit($response);
             $this->fail('emit() must refuse a body that was closed before it ran');
         } catch (RouterException $e) {
-            $this->assertStringContainsString('not readable', $e->getMessage());
+            $this->assertSame('Response body is not readable (closed or detached before emit)', $e->getMessage());
         } finally {
             while (ob_get_level() > $level) {
                 ob_end_clean();
             }
         }
+
+        $this->assertSame('Internal Server Error', $this->serve('/closed'));
+        $this->assertSame(500, http_response_code());
     }
 
     #[RunInSeparateProcess]

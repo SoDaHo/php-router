@@ -162,6 +162,61 @@ class HasHooksTest extends TestCase
         $this->assertTrue(true);
     }
 
+    public function testHookThatFailsWhereNothingCanBeWrittenStillDoesNotInterrupt(): void
+    {
+        // stderr closed, or a handler that turns the warning of a failed write into an exception
+        $obj = new class () {
+            use HasHooks;
+
+            public bool $asked = false;
+
+            protected function hasStderr(): bool
+            {
+                $this->asked = true;
+
+                throw new \ErrorException('fwrite(): Write of 60 bytes failed with errno=32 Broken pipe');
+            }
+
+            public function fireEvent(): string
+            {
+                $this->trigger('test', []);
+
+                return 'went on';
+            }
+        };
+
+        $obj->on('test', function (): void {
+            throw new \Exception('hook failed');
+        });
+
+        $this->assertSame('went on', $obj->fireEvent());
+        $this->assertTrue($obj->asked);
+    }
+
+    #[\PHPUnit\Framework\Attributes\RunInSeparateProcess]
+    public function testHookThatFailsWithStderrClosedDoesNotInterrupt(): void
+    {
+        $obj = new class () {
+            use HasHooks;
+
+            public function fireEvent(): string
+            {
+                $this->trigger('test', []);
+
+                return 'went on';
+            }
+        };
+
+        $obj->on('test', function (): void {
+            throw new \Exception('hook failed');
+        });
+
+        // 1.x: TypeError "fwrite(): Argument #1 ($stream) must be an open stream resource"
+        fclose(STDERR);
+
+        $this->assertSame('went on', $obj->fireEvent());
+    }
+
     public function testHasStderrReturnsTrue(): void
     {
         $obj = new class () {

@@ -198,4 +198,382 @@ class EmitStatusTest extends TestCase
         $this->assertSame('xx', $sent);
         $this->assertSame([$expected, $expected], $asked);
     }
+
+    // ==================== a request that cannot be read ====================
+
+    /**
+     * @return array<string, array{0: array<string, string>}>
+     */
+    public static function requestsThePsr7ObjectsDoNotAccept(): array
+    {
+        return [
+            // Sent by a client as it stands: curl -H 'Host: x:99999999'
+            'Host with a port that is none' => [['HTTP_HOST' => 'x:99999999']],
+            'header value with a control character' => [['HTTP_X_TEST' => "a\x0Bb"]],
+            'header without a name' => [['HTTP_' => 'x']],
+        ];
+    }
+
+    /**
+     * 1.x let the exception leave run(): a 500 from PHP itself, with the stack trace on
+     * the page where display_errors is on.
+     *
+     * @param array<string, string> $server
+     */
+    #[DataProvider('requestsThePsr7ObjectsDoNotAccept')]
+    public function testRequestThatCannotBeReadIsAnsweredWith400(array $server): void
+    {
+        $_SERVER = $server + $_SERVER;
+        $reports = [];
+
+        $_SERVER['REQUEST_METHOD'] = 'GET';
+        $_SERVER['REQUEST_URI'] = '/plain?x=1';
+
+        ob_start();
+        Router::create(['debug' => false])
+            ->loadRoutes($this->routesFile)
+            ->on('error', function (array $data) use (&$reports): void {
+                $e = $data['exception'];
+                $reports[] = [$e::class, $e->getMessage(), $e->getPrevious() !== null ? $e->getPrevious()::class : null, $data['method'], $data['path']];
+            })
+            ->run();
+        $sent = (string) ob_get_clean();
+
+        $this->assertSame(400, http_response_code());
+        $this->assertSame('{"success":false,"message":"Bad Request","error":{"message":"Bad Request","code":"BAD_REQUEST"}}', $sent);
+        // Reported with a message that does not repeat what the client sent; that is in
+        // the exception behind it
+        $this->assertSame(
+            [[\Sodaho\Router\Exception\RouterException::class, 'The request could not be read', \InvalidArgumentException::class, 'GET', '/plain']],
+            $reports
+        );
+    }
+
+    public function testRequestThatCannotBeReadIsReportedEvenWithoutMethodAndAddress(): void
+    {
+        $_SERVER['HTTP_HOST'] = 'x:99999999';
+        // As in a script that is not run by a web server
+        unset($_SERVER['REQUEST_METHOD'], $_SERVER['REQUEST_URI']);
+        $reports = [];
+
+        ob_start();
+        Router::create(['debug' => false])
+            ->on('error', function (array $data) use (&$reports): void {
+                $reports[] = [$data['method'], $data['path']];
+            })
+            ->run();
+        ob_end_clean();
+
+        $this->assertSame(400, http_response_code());
+        $this->assertSame([['', '']], $reports);
+    }
+
+    public function testRequestThatCannotBeBuiltForAnotherReasonIsA500(): void
+    {
+        // Not what PHP makes of an upload — but an application can rewrite $_FILES, and the
+        // PSR-17 factory answers this shape with a TypeError
+        $_FILES = ['f' => ['name' => ['a.txt'], 'type' => 'text/plain', 'tmp_name' => __FILE__, 'error' => 0, 'size' => 3]];
+        $_SERVER['REQUEST_METHOD'] = 'POST';
+        $_SERVER['REQUEST_URI'] = '/plain';
+        $reports = [];
+
+        ob_start();
+        Router::create(['debug' => false])
+            ->loadRoutes($this->routesFile)
+            ->on('error', function (array $data) use (&$reports): void {
+                $reports[] = [$data['exception']::class, $data['method'], $data['path']];
+            })
+            ->run();
+        $sent = (string) ob_get_clean();
+
+        $this->assertSame(500, http_response_code());
+        $this->assertSame('{"success":false,"message":"Internal Server Error","error":{"message":"Internal Server Error","code":"SERVER_ERROR"}}', $sent);
+        $this->assertSame([[\TypeError::class, 'POST', '/plain']], $reports);
+    }
+
+    public function testBodyThatFailsWhileItIsSentIsReportedAndNothingMoreGoesOut(): void
+    {
+        $body = $this->createStub(\Psr\Http\Message\StreamInterface::class);
+        $body->method('isReadable')->willReturn(true);
+        $body->method('isSeekable')->willReturn(false);
+        $body->method('eof')->willReturn(false);
+        $body->method('read')->willReturnCallback(function (): string {
+            static $calls = 0;
+
+            return ++$calls === 1 ? 'partial-' : throw new \RuntimeException('read failed');
+        });
+        $GLOBALS['emit_status_body'] = $body;
+
+        $routes = sys_get_temp_dir() . '/router_emit_mid_' . uniqid() . '.php';
+        file_put_contents($routes, '<?php return function ($r) {
+            $r->get("/mid", fn () => (new Nyholm\Psr7\Response(200))->withBody($GLOBALS["emit_status_body"]));
+        };');
+        $_SERVER['REQUEST_METHOD'] = 'GET';
+        $_SERVER['REQUEST_URI'] = '/mid';
+        $reports = [];
+
+        ob_start();
+
+        try {
+            // 1.x let the exception out: with display_errors on, the stack trace followed the partial body
+            Router::create(['debug' => false])
+                ->loadRoutes($routes)
+                ->on('error', function (array $data) use (&$reports): void {
+                    $reports[] = [$data['exception']->getMessage(), $data['method'], $data['path']];
+                })
+                ->run();
+        } finally {
+            $sent = (string) ob_get_clean();
+            unlink($routes);
+            unset($GLOBALS['emit_status_body']);
+        }
+
+        $this->assertSame('partial-', $sent);
+        $this->assertSame([['read failed', 'GET', '/mid']], $reports);
+    }
+
+    public function testRouterExceptionInTheMiddleOfTheBodyIsOnlyReported(): void
+    {
+        // What fails after the first byte is reported — whatever its class — and nothing
+        // is appended: no "Internal Server Error" behind the part that went out
+        $body = $this->createStub(\Psr\Http\Message\StreamInterface::class);
+        $body->method('isReadable')->willReturn(true);
+        $body->method('isSeekable')->willReturn(false);
+        $body->method('eof')->willReturn(false);
+        $body->method('read')->willReturnCallback(function (): string {
+            static $calls = 0;
+
+            return ++$calls === 1 ? 'A' : throw new \Sodaho\Router\Exception\RouterException('router exception mid-body');
+        });
+
+        [$sent, $reports] = $this->runWith(fn () => (new \Nyholm\Psr7\Response(200))->withBody($body));
+
+        $this->assertSame('A', $sent);
+        $this->assertSame(200, http_response_code());
+        $this->assertSame(['router exception mid-body'], $reports);
+    }
+
+    public function testHandleOfASubclassThatThrowsGivesA500(): void
+    {
+        // Router::handle() does not throw; one of a subclass may (Router is not final yet)
+        $router = new class (['debug' => false]) extends Router {
+            public function handle(\Psr\Http\Message\ServerRequestInterface $request): \Psr\Http\Message\ResponseInterface
+            {
+                throw new \RuntimeException('override failed');
+            }
+        };
+        $_SERVER['REQUEST_METHOD'] = 'GET';
+        $_SERVER['REQUEST_URI'] = '/plain';
+        $reports = [];
+
+        ob_start();
+        $router->on('error', function (array $data) use (&$reports): void {
+            $reports[] = [$data['exception']->getMessage(), $data['method'], $data['path']];
+        })->run();
+        $sent = (string) ob_get_clean();
+
+        $this->assertSame('Internal Server Error', $sent);
+        $this->assertSame(500, http_response_code());
+        $this->assertSame([['override failed', 'GET', '/plain']], $reports);
+    }
+
+    public function testGetterThatThrowsBeforeTheFirstByteGivesA500(): void
+    {
+        $response = new class () extends \Nyholm\Psr7\Response {
+            public function getProtocolVersion(): string
+            {
+                throw new \RuntimeException('protocol failed');
+            }
+        };
+
+        [$sent, $reports] = $this->runWith(fn () => $response);
+
+        $this->assertSame('Internal Server Error', $sent);
+        $this->assertSame(500, http_response_code());
+        $this->assertSame(['protocol failed'], $reports);
+    }
+
+    /**
+     * run() for one route that answers with what $respond returns.
+     *
+     * @return array{0: string, 1: list<string>} What was sent, and what the error hook heard
+     */
+    private function runWith(\Closure $respond): array
+    {
+        $GLOBALS['emit_status_respond'] = $respond;
+        $routes = sys_get_temp_dir() . '/router_emit_with_' . uniqid() . '.php';
+        file_put_contents($routes, '<?php return function ($r) { $r->get("/with", fn () => ($GLOBALS["emit_status_respond"])()); };');
+        $_SERVER['REQUEST_METHOD'] = 'GET';
+        $_SERVER['REQUEST_URI'] = '/with';
+        $reports = [];
+
+        ob_start();
+
+        try {
+            Router::create(['debug' => false])
+                ->loadRoutes($routes)
+                ->on('error', function (array $data) use (&$reports): void {
+                    $reports[] = $data['exception']->getMessage();
+                })
+                ->run();
+        } finally {
+            $sent = (string) ob_get_clean();
+            unlink($routes);
+            unset($GLOBALS['emit_status_respond']);
+        }
+
+        return [$sent, $reports];
+    }
+
+    public function testBodyWhoseReadabilityCannotBeAskedIsAnsweredWith500(): void
+    {
+        $body = $this->createStub(\Psr\Http\Message\StreamInterface::class);
+        $body->method('isReadable')->willThrowException(new \LogicException('isReadable failed'));
+        $GLOBALS['emit_status_body'] = $body;
+
+        $routes = sys_get_temp_dir() . '/router_emit_ask_' . uniqid() . '.php';
+        file_put_contents($routes, '<?php return function ($r) {
+            $r->get("/ask", fn () => (new Nyholm\Psr7\Response(200))->withBody($GLOBALS["emit_status_body"]));
+        };');
+        $_SERVER['REQUEST_METHOD'] = 'GET';
+        $_SERVER['REQUEST_URI'] = '/ask';
+        $reports = [];
+
+        ob_start();
+
+        try {
+            Router::create(['debug' => false])
+                ->loadRoutes($routes)
+                ->on('error', function (array $data) use (&$reports): void {
+                    $reports[] = [$data['exception']->getMessage(), $data['exception']->getPrevious()?->getMessage()];
+                })
+                ->run();
+        } finally {
+            $sent = (string) ob_get_clean();
+            unlink($routes);
+            unset($GLOBALS['emit_status_body']);
+        }
+
+        $this->assertSame('Internal Server Error', $sent);
+        $this->assertSame(500, http_response_code());
+        $this->assertSame([['Response body is not readable (closed or detached before emit)', 'isReadable failed']], $reports);
+    }
+
+    public function testRequestThatCannotBeReadIsNotEchoedInDebugModeEither(): void
+    {
+        $_SERVER['HTTP_HOST'] = 'x:99999999';
+        $debug = [];
+
+        $_SERVER['REQUEST_METHOD'] = 'GET';
+        $_SERVER['REQUEST_URI'] = '/plain';
+
+        ob_start();
+        Router::create(['debug' => true])
+            ->loadRoutes($this->routesFile)
+            ->on('error', function (array $data) use (&$debug): void {
+                $debug[] = $data['exception']->getDebugMessage();
+            })
+            ->run();
+        $sent = (string) ob_get_clean();
+
+        $this->assertSame(400, http_response_code());
+        $this->assertSame('{"success":false,"message":"Bad Request","error":{"message":"Bad Request","code":"BAD_REQUEST"}}', $sent);
+        // The reason is where the application reads it
+        $this->assertCount(1, $debug);
+        $this->assertStringStartsWith('Invalid port: 99999999.', (string) $debug[0]);
+    }
+
+    public function testResponseWhoseBodyWasClosedIsAnsweredWith500(): void
+    {
+        $routes = sys_get_temp_dir() . '/router_emit_closed_' . uniqid() . '.php';
+        file_put_contents($routes, '<?php return function ($r) {
+            $r->get("/closed", function () {
+                $response = Sodaho\Router\Response::text("gone");
+                $response->getBody()->close();
+
+                return $response;
+            });
+        };');
+        $reports = [];
+
+        try {
+            // HEAD: the answer loses its body before run() looks at it — there is nothing
+            // left that could not be read
+            foreach (['GET' => [500, 'Internal Server Error'], 'HEAD' => [200, '']] as $method => [$status, $body]) {
+                $_SERVER['REQUEST_METHOD'] = $method;
+                $_SERVER['REQUEST_URI'] = '/closed';
+
+                ob_start();
+                // 1.x let the exception out of run(): PHP's own answer, no report
+                Router::create(['debug' => false])
+                    ->loadRoutes($routes)
+                    ->on('error', function (array $data) use (&$reports): void {
+                        $reports[] = [$data['exception']->getMessage(), $data['method'], $data['path']];
+                    })
+                    ->run();
+
+                $this->assertSame($body, (string) ob_get_clean());
+                $this->assertSame($status, http_response_code());
+            }
+        } finally {
+            unlink($routes);
+        }
+
+        $this->assertSame(
+            [['Response body is not readable (closed or detached before emit)', 'GET', '/closed']],
+            $reports
+        );
+    }
+
+    public function testRequestThatCannotBeReadGetsNoBodyForHead(): void
+    {
+        $_SERVER['HTTP_HOST'] = 'x:99999999';
+
+        $this->assertSame('', $this->serve('HEAD', '/plain'));
+        $this->assertSame(400, http_response_code());
+    }
+
+    public function testRequestThatCannotBeReadIsAnsweredWithoutTheResponderWhenThatFails(): void
+    {
+        $_SERVER['HTTP_HOST'] = 'x:99999999';
+
+        \Sodaho\Router\Response::setResponder(new class () implements \Sodaho\Router\Contract\ResponderInterface {
+            public function formatSuccess(mixed $data, ?string $message = null, ?array $meta = null): array
+            {
+                return ['data' => $data];
+            }
+
+            public function formatError(string $message, ?string $code = null, ?array $details = null): array
+            {
+                throw new \LogicException('responder failed');
+            }
+
+            public function getContentType(): string
+            {
+                return 'application/json';
+            }
+
+            public function getSuccessContentType(): string
+            {
+                return 'application/json';
+            }
+        });
+
+        $reports = [];
+        $_SERVER['REQUEST_METHOD'] = 'GET';
+        $_SERVER['REQUEST_URI'] = '/plain';
+
+        ob_start();
+        Router::create(['debug' => false])
+            ->loadRoutes($this->routesFile)
+            ->on('error', function (array $data) use (&$reports): void {
+                $reports[] = $data['exception']->getMessage();
+            })
+            ->run();
+
+        $this->assertSame('Bad Request', (string) ob_get_clean());
+        $this->assertSame(400, http_response_code());
+        // Both are reported: what was wrong with the request, and the responder
+        $this->assertSame(['The request could not be read', 'responder failed'], $reports);
+    }
 }

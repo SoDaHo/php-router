@@ -9,6 +9,7 @@ use Nyholm\Psr7Server\ServerRequestCreator;
 use Psr\Container\ContainerInterface;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
+use Psr\Http\Message\StreamInterface;
 use Psr\Http\Server\RequestHandlerInterface;
 use Sodaho\Router\Exception\RouterException;
 use Sodaho\Router\Traits\HasHooks;
@@ -83,6 +84,17 @@ class Router implements RequestHandlerInterface
     private ?RouteDispatcher $dispatcher = null;
     private ?RouteCollector $collector = null;
     private ?UrlGenerator $urlGenerator = null;
+
+    /**
+     * What the routes file gave when this router loaded it: its callable, or what it
+     * threw. Loaded once for each loadRoutes() — a file that declares a function or a
+     * class cannot be required a second time. Another router, or another loadRoutes(),
+     * requires it again, as in 1.x.
+     */
+    private \Closure|\Throwable|null $routes = null;
+
+    /** Whether the router was used (see getDispatcher()) — set once, never reset */
+    private bool $used = false;
 
     /** Config key => environment variable, for fromEnv() */
     private const ENV_VARIABLES = [
@@ -316,6 +328,24 @@ class Router implements RequestHandlerInterface
         $router->run();
     }
 
+    /**
+     * A router is cloned before its first use — a clone is then a router of its own. Once
+     * it was used (a request, match(), url(): the route table built or tried), a clone
+     * would share the table with the original (a hook added to the clone fired for the
+     * original) or run the routes file a second time (what it does to $this, twice). A
+     * subclass's own __clone() calls this one.
+     *
+     * @throws RouterException When the router was used already
+     */
+    public function __clone()
+    {
+        if ($this->used) {
+            throw new RouterException(
+                'A router can be cloned before its first use only: it was already used (a request, match() or url())'
+            );
+        }
+    }
+
     // ==================== Configuration ====================
 
     /**
@@ -412,8 +442,8 @@ class Router implements RequestHandlerInterface
      * with middleware() — and, as the last resort, for what that middleware throws itself;
      * that response is returned as it is. Return null to get the router's own 500; throwing
      * counts as null. The error hook fires in either case. handle() does not throw for any
-     * of this. (What still leaves it, as before: a responder set with
-     * Response::setResponder() that throws while the 500 is built.)
+     * of this — nor for a responder set with Response::setResponder() that throws while
+     * the router's own 500 is built: that is answered with a plain-text 500.
      *
      * @param callable(\Throwable, ServerRequestInterface): ?ResponseInterface $handler
      */
@@ -463,6 +493,7 @@ class Router implements RequestHandlerInterface
     {
         $this->assertNotInUse('loadRoutes');
         $this->config['routesFile'] = $file;
+        $this->routes = null;
         return $this;
     }
 
@@ -506,17 +537,98 @@ class Router implements RequestHandlerInterface
     /**
      * Convenience method: create request from globals, handle, and emit response.
      *
-     * Whatever goes wrong while the request is handled becomes a 500 response (see handle()) —
-     * unless a responder set with Response::setResponder() throws while that 500 is built.
-     *
-     * @throws RouterException If the response body cannot be read (closed or detached)
+     * Whatever goes wrong while the request is handled becomes a 500 response (see handle()).
+     * A request the PSR-7 objects do not accept — a Host header with a port that is none, a
+     * header name or value outside RFC 7230 — is the client's doing and answered with 400
+     * before anything of the application runs; the error hook hears of it. Whatever else
+     * fails while the request is built is answered with 500, and reported as well. So is a
+     * response whose body was closed or detached before it could be sent (emit() throws
+     * for that one).
      */
     public function run(): void
     {
         $psr17 = new Psr17Factory();
         $creator = new ServerRequestCreator($psr17, $psr17, $psr17, $psr17);
-        $request = $creator->fromGlobals();
-        $this->send($this->handle($request), $request->getMethod() !== 'HEAD');
+
+        try {
+            $request = $creator->fromGlobals();
+        } catch (\Throwable $e) {
+            $method = $_SERVER['REQUEST_METHOD'] ?? null;
+            $uri = $_SERVER['REQUEST_URI'] ?? null;
+
+            $about = [
+                'method' => is_string($method) ? $method : '',
+                'path' => is_string($uri) ? explode('?', $uri, 2)[0] : '',
+            ];
+            $this->send($this->unreadableRequest($e, $about), $method !== 'HEAD');
+
+            return;
+        }
+
+        $withBody = $request->getMethod() !== 'HEAD';
+
+        try {
+            $response = $this->handle($request);
+        } catch (\Throwable $e) {
+            // handle() does not throw — but one of a subclass may
+            $this->report($e, $request);
+            $response = new \Nyholm\Psr7\Response(500, RouteDispatcher::PLAIN_HEADERS, 'Internal Server Error');
+        }
+
+        // Once output has started, the response is not even looked at
+        if (!$this->outputStarted()) {
+            $this->deliver($response, $request, $withBody);
+        }
+    }
+
+    /**
+     * What run() sends: everything is read from the response before the first byte goes
+     * out; what fails then is answered with a 500, what fails afterwards only reported.
+     */
+    private function deliver(ResponseInterface $response, ServerRequestInterface $request, bool $withBody): void
+    {
+        try {
+            $prepared = $this->prepare($response, $withBody);
+        } catch (\Throwable $e) {
+            // Nothing was sent: the response cannot be read (its body closed, a getter
+            // that throws). A 500 can go out, and the error hook hears why.
+            $this->report($e, $request);
+            $prepared = $this->prepare(new \Nyholm\Psr7\Response(500, RouteDispatcher::PLAIN_HEADERS, 'Internal Server Error'), $withBody);
+        }
+
+        try {
+            $this->transmit($prepared, $withBody);
+        } catch (\Throwable $e) {
+            // The body failed while it was sent: nothing can be answered any more, but
+            // the error hook hears of it, and no stack trace goes out
+            $this->report($e, $request);
+        }
+    }
+
+    /**
+     * The answer to a request that could not be built. What the PSR-7 objects refuse
+     * (InvalidArgumentException) is the client's doing: 400, reported as a RouterException
+     * whose message does not repeat what the client sent (that is in getPrevious()).
+     * Anything else is not known to be the client's: 500, reported as it is.
+     *
+     * @param array{method: string, path: string} $about
+     */
+    private function unreadableRequest(\Throwable $e, array $about): ResponseInterface
+    {
+        [$status, $text, $code, $report] = $e instanceof \InvalidArgumentException
+            ? [400, 'Bad Request', 'BAD_REQUEST', new RouterException('The request could not be read', 0, $e, $e->getMessage())]
+            : [500, 'Internal Server Error', 'SERVER_ERROR', $e];
+
+        $this->trigger('error', ['exception' => $report] + $about);
+
+        try {
+            return Response::error($text, $status, $code);
+        } catch (\Throwable $failure) {
+            // The application's responder (Response::setResponder()) failed
+            $this->trigger('error', ['exception' => $failure] + $about);
+
+            return new \Nyholm\Psr7\Response($status, RouteDispatcher::PLAIN_HEADERS, $text);
+        }
     }
 
     /**
@@ -524,29 +636,39 @@ class Router implements RequestHandlerInterface
      *
      * @param ServerRequestInterface $request PSR-7 request
      *
+     * Never throws. What a handler, a middleware, the routes file, the error handler
+     * (setErrorHandler()), the application's responder (Response::setResponder()) or the
+     * request and response objects themselves throw becomes a 500 response, and the error
+     * hook gets every one of those exceptions.
+     *
      * @return ResponseInterface PSR-7 response
      */
     public function handle(ServerRequestInterface $request): ResponseInterface
     {
         try {
-            $dispatcher = $this->getDispatcher();
+            // Everything a request runs into in there is answered in there, through
+            // errorResponse() (see getDispatcher())
+            return $this->getDispatcher()->handle($request);
         } catch (\Throwable $e) {
-            // The routes could not be loaded
-            $response = $this->errorResponse($e, $request);
+            // What is left: the routes could not be loaded
+            /** @var \WeakMap<\Throwable, true> $known */
+            $known = new \WeakMap();
+            $response = $this->errorResponse($e, $request, $known);
 
             // No answer to HEAD carries a body with implicitHead on — this one included
-            if ($this->config['implicitHead'] && $request->getMethod() === 'HEAD') {
-                $response = $response->withBody(\Nyholm\Psr7\Stream::create(''));
+            if (!$this->config['implicitHead'] || RouteDispatcher::describe($request)['method'] !== 'HEAD') {
+                return $response;
             }
 
-            return $response;
-        }
+            try {
+                return $response->withBody(\Nyholm\Psr7\Stream::create(''));
+            } catch (\Throwable $failure) {
+                // The error handler's response does not take another body
+                $this->reportOnce($failure, $request, $known);
 
-        // Everything a request runs into from here on is answered in the dispatcher, through
-        // errorResponse() (see getDispatcher()). What still comes out is what errorResponse()
-        // could not answer itself: a responder that threw while the 500 was built. That
-        // leaves handle(), as it did before 1.2.
-        return $dispatcher->handle($request);
+                return new \Nyholm\Psr7\Response(500, RouteDispatcher::PLAIN_HEADERS);
+            }
+        }
     }
 
     /**
@@ -567,15 +689,20 @@ class Router implements RequestHandlerInterface
     }
 
     /**
-     * The response for an exception: the application's (setErrorHandler()) or a 500.
+     * The response for an exception: the application's (setErrorHandler()), the router's
+     * 500 in the format of the responder, or — when that responder fails too — a 500 that
+     * depends on nothing the application can replace. Never throws; the error hook gets the
+     * exception, and every further one that comes up on the way.
+     *
+     * @param \WeakMap<\Throwable, true> $known The call's record of reported exceptions (see
+     *                                          RouteDispatcher::setErrorResponderWithRecord()): the same exception
+     *                                          object is not reported twice — an error handler that only
+     *                                          hands the exception back, a responder that throws what the
+     *                                          error handler threw, have nothing new to say
      */
-    private function errorResponse(\Throwable $e, ServerRequestInterface $request): ResponseInterface
+    private function errorResponse(\Throwable $e, ServerRequestInterface $request, \WeakMap $known): ResponseInterface
     {
-        $this->trigger('error', [
-            'exception' => $e,
-            'method' => $request->getMethod(),
-            'path' => $request->getUri()->getPath(),
-        ]);
+        $this->reportOnce($e, $request, $known);
 
         if ($this->errorHandler !== null) {
             try {
@@ -584,32 +711,43 @@ class Router implements RequestHandlerInterface
                     return $response;
                 }
             } catch (\Throwable $failure) {
-                // The error handler failed itself: report that too, answer for the original.
-                // One that only hands the exception back has nothing new to report.
-                if ($failure !== $e) {
-                    $this->reportFailure($failure, $request);
-                }
+                // The error handler failed itself: report that too, answer for the original
+                $this->reportOnce($failure, $request, $known);
             }
         }
 
-        return Response::serverError(
-            $this->config['debug'] ? $e->getMessage() : 'Internal Server Error',
-            $this->config['debug'] ? [
-                'exception' => get_class($e),
-                'file' => $e->getFile(),
-                'line' => $e->getLine(),
-                'trace' => explode("\n", $e->getTraceAsString()),
-            ] : null
-        );
+        try {
+            return Response::serverError(
+                $this->config['debug'] ? $e->getMessage() : 'Internal Server Error',
+                $this->config['debug'] ? [
+                    'exception' => get_class($e),
+                    'file' => $e->getFile(),
+                    'line' => $e->getLine(),
+                    'trace' => explode("\n", $e->getTraceAsString()),
+                ] : null
+            );
+        } catch (\Throwable $failure) {
+            // The application's responder (Response::setResponder()) failed
+            $this->reportOnce($failure, $request, $known);
+
+            return new \Nyholm\Psr7\Response(500, RouteDispatcher::PLAIN_HEADERS, 'Internal Server Error');
+        }
     }
 
-    private function reportFailure(\Throwable $failure, ServerRequestInterface $request): void
+    /**
+     * @param \WeakMap<\Throwable, true> $known What was reported during this call
+     */
+    private function reportOnce(\Throwable $e, ServerRequestInterface $request, \WeakMap $known): void
     {
-        $this->trigger('error', [
-            'exception' => $failure,
-            'method' => $request->getMethod(),
-            'path' => $request->getUri()->getPath(),
-        ]);
+        if (!isset($known[$e])) {
+            $known[$e] = true;
+            $this->report($e, $request);
+        }
+    }
+
+    private function report(\Throwable $e, ServerRequestInterface $request): void
+    {
+        $this->trigger('error', ['exception' => $e] + RouteDispatcher::describe($request));
     }
 
     // ==================== Internal ====================
@@ -623,9 +761,10 @@ class Router implements RequestHandlerInterface
             return $this->dispatcher;
         }
 
-        if (!$this->config['routesFile'] || !file_exists($this->config['routesFile'])) {
-            throw new RouterException('No routes loaded. Use loadRoutes() first.');
-        }
+        // From here on the router is in use, whether the table can be built or not
+        $this->used = true;
+
+        $routes = $this->loadRoutesFile();
 
         $this->collector = new RouteCollector();
 
@@ -634,15 +773,7 @@ class Router implements RequestHandlerInterface
             $this->collector->setPreserveTrailingSlash(true);
         }
 
-        $callback = require $this->config['routesFile'];
-
-        if (!is_callable($callback)) {
-            throw new RouterException(
-                'Route file must return callable: return function(RouteCollector $r) { ... };'
-            );
-        }
-
-        $callback($this->collector);
+        $routes($this->collector);
 
         $this->dispatcher = new RouteDispatcher(
             $this->collector->getData(),
@@ -655,7 +786,7 @@ class Router implements RequestHandlerInterface
             ->setImplicitHead($this->config['implicitHead'])
             ->setMiddleware($this->middleware)
             ->setApps($this->apps)
-            ->setErrorResponder($this->errorResponse(...));
+            ->setErrorResponderWithRecord($this->errorResponse(...));
 
         // Forward hooks from Router to Dispatcher
         foreach ($this->hooks as $event => $callbacks) {
@@ -665,6 +796,52 @@ class Router implements RequestHandlerInterface
         }
 
         return $this->dispatcher;
+    }
+
+    /**
+     * The callable of the routes file. What it threw while it was loaded is thrown again,
+     * and when the table could not be built from its callable (a route was refused), the
+     * next call tries the callable again — the file is not required a second time.
+     *
+     * @throws RouterException If no routes file is set or it does not exist
+     */
+    private function loadRoutesFile(): \Closure
+    {
+        // Whether the file is there is asked until it was loaded — not afterwards, where
+        // the working directory may have changed
+        if ($this->routes === null) {
+            $file = $this->config['routesFile'];
+
+            if ($file === null || $file === '' || !file_exists($file)) {
+                throw new RouterException('No routes loaded. Use loadRoutes() first.');
+            }
+
+            // Required in here: the closure of the file sees this router as $this, as in 1.x
+            $this->routes = $this->requireRoutes($file);
+        }
+
+        if ($this->routes instanceof \Throwable) {
+            throw $this->routes;
+        }
+
+        return $this->routes;
+    }
+
+    private function requireRoutes(string $file): \Closure|\Throwable
+    {
+        try {
+            $callback = require $file;
+        } catch (\Throwable $e) {
+            return $e;
+        }
+
+        if ($callback instanceof \Closure) {
+            return $callback;
+        }
+
+        return is_callable($callback)
+            ? $callback(...)
+            : new RouterException('Route file must return callable: return function(RouteCollector $r) { ... };');
     }
 
     private function getUrlGenerator(): UrlGenerator
@@ -699,29 +876,61 @@ class Router implements RequestHandlerInterface
      */
     private function send(ResponseInterface $response, bool $withBody): void
     {
+        // Once output has started, the response is not even looked at
+        if (!$this->outputStarted()) {
+            $this->transmit($this->prepare($response, $withBody), $withBody);
+        }
+    }
+
+    /**
+     * Whether something was printed before the router could send (a stray echo, a
+     * displayed warning). Status and headers can no longer be sent, so nothing is — but
+     * not silently: the error hook gets type 'emit'.
+     */
+    private function outputStarted(): bool
+    {
         // @codeCoverageIgnoreStart
         // headers_sent() is always false in CLI/PHPUnit; EmitOverHttpTest covers it over HTTP
         if (headers_sent($file, $line)) {
-            // Something printed before the router did (a stray echo, a displayed warning).
-            // Status and headers can no longer be sent, so nothing is — but not silently.
             // PHP only knows the place when the output came from a script line, not after flush()
-            $message = 'Response not sent: output had already started'
-                . ($file !== '' ? sprintf(' at %s:%d', $file, $line) : '');
+            $message = 'Response not sent: output had already started';
             $this->trigger('error', [
                 'type' => 'emit',
                 'message' => $message,
-                'exception' => new RouterException($message),
+                'exception' => new RouterException($message, debugMessage: $file !== '' ? sprintf('%s:%d', $file, $line) : null),
             ]);
 
-            return;
+            return true;
         }
         // @codeCoverageIgnoreEnd
 
+        return false;
+    }
+
+    /**
+     * Everything that can be read from the response before anything is sent: status line,
+     * headers, the body ready to be read. What fails here fails before the first byte, and
+     * run() can still answer with a 500.
+     *
+     *
+     * @throws RouterException If the response body cannot be read (closed or detached)
+     *
+     * @return array{status: string, headers: array<int|string, array<string>>, body: StreamInterface}
+     */
+    private function prepare(ResponseInterface $response, bool $withBody): array
+    {
         // Readability BEFORE anything is sent: a detached/closed body used to blow up loudly
         // inside __toString(). Throwing after the headers went out would leave a half-sent
         // response; throwing here lets the error handler still produce a proper 500.
-        if (!$response->getBody()->isReadable()) {
-            throw new RouterException('Response body is not readable (closed or detached before emit)');
+        try {
+            $body = $response->getBody();
+            $readable = $body->isReadable();
+        } catch (\Throwable $e) {
+            $readable = false;
+        }
+
+        if (!$readable || !isset($body)) {
+            throw new RouterException('Response body is not readable (closed or detached before emit)', 0, $e ?? null);
         }
 
         $statusLine = sprintf(
@@ -731,12 +940,34 @@ class Router implements RequestHandlerInterface
             $response->getReasonPhrase()
         );
 
+        // For string bodies the emitted bytes are identical to the previous `echo
+        // $response->getBody()`: Nyholm's __toString() rewound the stream and returned
+        // everything, which is exactly what transmit() does piecewise.
+        if ($withBody && $body->isSeekable()) {
+            $body->rewind();
+        }
+
+        return ['status' => $statusLine, 'headers' => $response->getHeaders(), 'body' => $body];
+    }
+
+    /**
+     * @param array{status: string, headers: array<int|string, array<string>>, body: StreamInterface} $prepared
+     */
+    private function transmit(array $prepared, bool $withBody): void
+    {
+        // Asked again: reading the response may have printed something (a getter that
+        // echoes, a displayed warning)
+        // @codeCoverageIgnoreStart
+        if ($this->outputStarted()) {
+            return;
+        }
+        // @codeCoverageIgnoreEnd
 
         // Headers. A field that exists once per message replaces what the host already set
         // under that name — two Content-Type or Location lines are not a valid response. All
         // other fields are lists: the response's lines are added to the host's, so a
         // "Vary: Cookie" or a session's "Cache-Control: no-store" set before run() stays.
-        foreach ($response->getHeaders() as $name => $values) {
+        foreach ($prepared['headers'] as $name => $values) {
             $replace = isset(self::SINGLETON_HEADERS[strtolower((string) $name)]);
             foreach ($values as $value) {
                 header("$name: $value", $replace);
@@ -748,7 +979,7 @@ class Router implements RequestHandlerInterface
         // forces 401 and Location forces 302 (unless 201/3xx). Sent first, a 403 with a
         // challenge would arrive as 401 and a 202 with a Location as 302 — and a 200 with a
         // Location, which 1.x still left to PHP, as a redirect nobody asked for.
-        header($statusLine);
+        header($prepared['status']);
 
         // HEAD: PHP discards the output anyway, so do not read the body at all — for a
         // Response::file() that would be the whole file.
@@ -757,14 +988,8 @@ class Router implements RequestHandlerInterface
         }
 
         // Body — pulled in chunks so large payloads (file downloads via Response::file())
-        // never sit in memory as a whole. For string bodies the emitted bytes are identical
-        // to the previous `echo $response->getBody()`: Nyholm's __toString() rewound the
-        // stream and returned everything, which is exactly what this loop does piecewise.
-        $body = $response->getBody();
-
-        if ($body->isSeekable()) {
-            $body->rewind();
-        }
+        // never sit in memory as a whole.
+        $body = $prepared['body'];
 
         // An empty read does not mean "done" — pump/append streams return '' transiently
         // while eof() is still false, and breaking on the first one would truncate the body

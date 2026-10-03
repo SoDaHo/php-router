@@ -627,11 +627,11 @@ class PipelineTest extends TestCase
 
     /**
      * The router's own 500 is formatted by the responder — which an application can replace
-     * (Response::setResponder()). One that throws there has always made handle() throw; an
-     * application may catch exactly that around handle(). It stays that way until 2.0:
-     * reported once, answered by nobody, not handed to the error handler a second time.
+     * (Response::setResponder()). One that throws there made handle() throw in 1.x. Now it
+     * is reported, and the answer is a 500 that needs no responder; the error handler is
+     * not asked a second time.
      */
-    public function testFailingResponderLeavesHandleAsItAlwaysDid(): void
+    public function testFailingResponderGetsAnAnswerThatNeedsNoResponder(): void
     {
         $responder = new class () implements \Sodaho\Router\Contract\ResponderInterface {
             public function formatSuccess(mixed $data, ?string $message = null, ?array $meta = null): array
@@ -676,24 +676,28 @@ class PipelineTest extends TestCase
             Response::setResponder($responder);
 
             try {
-                $router->handle(new ServerRequest('GET', '/boom'));
-                $this->fail("{$label}: handle() answered");
-            } catch (\LogicException $e) {
-                $this->assertSame('responder failed', $e->getMessage(), $label);
+                $response = $router->handle(new ServerRequest('GET', '/boom'));
             } finally {
                 Response::reset();
             }
 
+            $this->assertSame(500, $response->getStatusCode(), $label);
+            $this->assertSame('text/plain; charset=utf-8', $response->getHeaderLine('Content-Type'), $label);
+            $this->assertSame('nosniff', $response->getHeaderLine('X-Content-Type-Options'), $label);
+            $this->assertSame('Internal Server Error', (string) $response->getBody(), $label);
+
             // ... and the router is not stuck in that state
-            $this->assertSame(500, $router->handle(new ServerRequest('GET', '/boom'))->getStatusCode(), $label);
+            $response = $router->handle(new ServerRequest('GET', '/boom'));
+            $this->assertSame(500, $response->getStatusCode(), $label);
+            $this->assertStringContainsString('"code":"SERVER_ERROR"', (string) $response->getBody(), $label);
         }
 
         $this->assertSame(
             [
-                'handler throws' => ['handler failed', 'handler failed'],
-                'inside the middleware for every request' => ['handler failed', 'handler failed'],
-                'with an error handler that declines' => ['handler failed', 'handler failed'],
-                'last resort' => ['No routes loaded. Use loadRoutes() first.', 'No routes loaded. Use loadRoutes() first.'],
+                'handler throws' => ['handler failed', 'responder failed', 'handler failed'],
+                'inside the middleware for every request' => ['handler failed', 'responder failed', 'handler failed'],
+                'with an error handler that declines' => ['handler failed', 'responder failed', 'handler failed'],
+                'last resort' => ['No routes loaded. Use loadRoutes() first.', 'responder failed', 'No routes loaded. Use loadRoutes() first.'],
             ],
             $hook
         );
@@ -702,8 +706,8 @@ class PipelineTest extends TestCase
 
     /**
      * A responder that keeps throwing the very same exception object (it remembers why it
-     * could not be set up). Each request reports it anew — what could not be answered in
-     * one request does not silence the error hook in the next.
+     * could not be set up). Each request reports it anew — once: a responder that fails
+     * with the very exception it is asked to format has nothing new to report.
      */
     public function testFailingResponderIsReportedInEveryRequest(): void
     {
@@ -753,17 +757,17 @@ class PipelineTest extends TestCase
             try {
                 // 404: the responder throws its remembered exception straight from the route table's answer
                 foreach (['/nowhere', '/nowhere', '/boom', '/nowhere'] as $path) {
-                    try {
-                        $router->handle(new ServerRequest('GET', $path));
-                    } catch (\LogicException) {
-                    }
+                    $response = $router->handle(new ServerRequest('GET', $path));
+
+                    $this->assertSame(500, $response->getStatusCode(), $label);
+                    $this->assertSame('Internal Server Error', (string) $response->getBody(), $label);
                 }
             } finally {
                 Response::reset();
             }
 
             $this->assertSame(
-                ['responder not configured', 'responder not configured', 'handler failed', 'responder not configured'],
+                ['responder not configured', 'responder not configured', 'handler failed', 'responder not configured', 'responder not configured'],
                 $hook,
                 $label
             );
@@ -821,8 +825,8 @@ class PipelineTest extends TestCase
     }
 
     /**
-     * handle() called from inside a handler, each with a responder that fails: every call
-     * settles its own failure. Same outcome and same reports as before 1.2.
+     * handle() called from inside a handler, with a responder that fails: the inner call
+     * settles its own failure, and the outer handler gets a response like any other.
      */
     public function testFailingResponderInNestedCallsIsSettledByEachCallItself(): void
     {
@@ -866,18 +870,15 @@ class PipelineTest extends TestCase
             Response::setResponder($responder);
 
             try {
-                $router->handle((new ServerRequest('GET', '/outer'))->withAttribute('router', $router));
-                $this->fail('handle() answered');
-            } catch (\LogicException $e) {
-                // The inner call's failure became the outer handler's exception, and the
-                // outer call failed on that in turn
-                $this->assertSame('responder failed, call 2', $e->getMessage());
+                $response = $router->handle((new ServerRequest('GET', '/outer'))->withAttribute('router', $router));
             } finally {
                 Response::reset();
             }
 
+            $this->assertSame(500, $response->getStatusCode());
+            $this->assertSame('Internal Server Error', (string) $response->getBody());
             $this->assertSame(['inner handler failed', 'responder failed, call 1'], $hook);
-            $this->assertSame(2, $responder->calls);
+            $this->assertSame(1, $responder->calls);
         } finally {
             unlink($routes);
         }
@@ -925,10 +926,7 @@ class PipelineTest extends TestCase
         Response::setResponder($responder);
 
         try {
-            $router->handle(new ServerRequest('GET', '/boom'));
-            $this->fail('handle() answered');
-        } catch (\LogicException $e) {
-            $this->assertSame($shared, $e);
+            $this->assertSame('Internal Server Error', (string) $router->handle(new ServerRequest('GET', '/boom'))->getBody());
         } finally {
             Response::reset();
         }
@@ -947,7 +945,116 @@ class PipelineTest extends TestCase
         $response = $router->middleware($throwsShared)->handle(new ServerRequest('GET', '/ok'));
 
         $this->assertSame(500, $response->getStatusCode());
-        $this->assertSame(['handler failed', 'shared failure'], $hook);
+        $this->assertStringContainsString('"code":"SERVER_ERROR"', (string) $response->getBody());
+        $this->assertSame(['handler failed', 'shared failure', 'shared failure'], $hook);
+    }
+
+    public function testDispatcherWithoutAnErrorResponderLetsAResponseOutThatDoesNotTakeAnotherBody(): void
+    {
+        $stubborn = $this->createStub(ResponseInterface::class);
+        $stubborn->method('withBody')->willThrowException(new \RuntimeException('withBody failed'));
+
+        $collector = new RouteCollector();
+        $collector->get('/x', fn () => $stubborn);
+        $dispatcher = (new RouteDispatcher($collector->getData()))->setImplicitHead(true);
+
+        $this->assertSame($stubborn, $dispatcher->handle(new ServerRequest('GET', '/x')));
+
+        // Without a responder exceptions leave handle(), as before
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('withBody failed');
+        $dispatcher->handle(new ServerRequest('HEAD', '/x'));
+    }
+
+    public function testErrorResponderIsCalledWithTwoArgumentsAsIn1x(): void
+    {
+        $collector = new RouteCollector();
+        $collector->get('/x', fn () => throw new \RuntimeException('handler failed'));
+
+        $calls = [];
+        $responders = [
+            'two parameters' => function (\Throwable $e, ServerRequestInterface $request) use (&$calls): ResponseInterface {
+                $calls['two parameters'] = func_get_args();
+
+                return Response::text('two', 500);
+            },
+            'variadic' => function (...$arguments) use (&$calls): ResponseInterface {
+                $calls['variadic'] = $arguments;
+
+                return Response::text('variadic', 500);
+            },
+            'optional third of another type' => function (\Throwable $e, ServerRequestInterface $request, ?string $legacy = 'legacy') use (&$calls): ResponseInterface {
+                $calls['optional third of another type'] = func_get_args();
+
+                return Response::text((string) $legacy, 500);
+            },
+            'optional third typed WeakMap' => function (\Throwable $e, ServerRequestInterface $request, ?\WeakMap $known = null) use (&$calls): ResponseInterface {
+                $calls['optional third typed WeakMap'] = func_get_args();
+
+                return Response::text('weakmap', 500);
+            },
+        ];
+
+        foreach ($responders as $responder) {
+            (new RouteDispatcher($collector->getData()))->setErrorResponder($responder)->handle(new ServerRequest('GET', '/x'));
+        }
+
+        $this->assertSame(
+            ['two parameters' => 2, 'variadic' => 2, 'optional third of another type' => 2, 'optional third typed WeakMap' => 2],
+            array_map('count', $calls)
+        );
+
+        // The router's own responder gets the call's record as a third argument
+        $record = null;
+        $dispatcher = (new RouteDispatcher($collector->getData()))->setErrorResponderWithRecord(
+            function (\Throwable $e, ServerRequestInterface $request, \WeakMap $known) use (&$record): ResponseInterface {
+                $record = $known;
+
+                return Response::text('router', 500);
+            }
+        );
+        $dispatcher->handle(new ServerRequest('GET', '/x'));
+        $this->assertInstanceOf(\WeakMap::class, $record);
+
+        // … and a responder set afterwards is called with two again
+        $calls = [];
+        $dispatcher->setErrorResponder($responders['variadic'])->handle(new ServerRequest('GET', '/x'));
+        $this->assertCount(2, $calls['variadic']);
+
+        // … and a responder set back to null is no responder: the exception leaves handle()
+        $dispatcher->setErrorResponder(null);
+        $this->expectException(\RuntimeException::class);
+        $dispatcher->handle(new ServerRequest('GET', '/x'));
+    }
+
+    public function testDispatcherOnItsOwnReportsThroughItsOwnErrorHook(): void
+    {
+        // Without a router there is no reporter: what the dispatcher settles itself goes to
+        // its own error hook
+        $refuses = function (string $message): ResponseInterface {
+            $stubborn = $this->createStub(ResponseInterface::class);
+            $stubborn->method('withBody')->willThrowException(new \RuntimeException($message));
+
+            return $stubborn;
+        };
+
+        $collector = new RouteCollector();
+        $collector->get('/x', fn () => $refuses('route answer refuses'));
+
+        $reports = [];
+        $dispatcher = (new RouteDispatcher($collector->getData()))
+            ->setImplicitHead(true)
+            ->setErrorResponder(fn (\Throwable $e) => $refuses('responder answer refuses'));
+        $dispatcher->on('error', function (array $data) use (&$reports): void {
+            $reports[] = [$data['exception']->getMessage(), $data['method'], $data['path']];
+        });
+
+        $response = $dispatcher->handle(new ServerRequest('HEAD', '/x'));
+
+        $this->assertSame([500, ''], [$response->getStatusCode(), (string) $response->getBody()]);
+        // The route's exception went to the responder (its business to report); what its
+        // answer threw is the dispatcher's
+        $this->assertSame([['responder answer refuses', 'HEAD', '/x']], $reports);
     }
 
     public function testErrorResponderOfTheDispatcherThatThrowsIsCalledOnce(): void

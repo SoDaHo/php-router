@@ -56,6 +56,9 @@ class EmitOverHttpTest extends TestCase
                         ->withAddedHeader('Set-Cookie', 'b=2'));
                     \$r->match(['GET', 'HEAD'], '/page', fn() => Response::text('BODY')->withHeader('Content-Length', '4'));
                     \$r->get('/early', fn() => Response::text('never sent')->withHeader('X-Late', '1'));
+                    \$r->get('/early-broken', fn() => new class extends \\Nyholm\\Psr7\\Response {
+                        public function getProtocolVersion(): string { throw new \\RuntimeException('protocol failed'); }
+                    });
                 };
                 PHP
         );
@@ -83,15 +86,30 @@ class EmitOverHttpTest extends TestCase
                     header('Set-Cookie: sess=1');
                 }
 
-                if (\$path === '/early') {
+                if (\$path === '/early' || \$path === '/early-broken' || \$path === '/early-emit') {
                     echo 'early output';
                     flush();
+                }
+
+                if (\$path === '/early-emit') {
+                    // emit() with a response it cannot read: once output has started, it is not read at all
+                    Sodaho\Router\Router::create()
+                        ->on('error', function (array \$data): void {
+                            file_put_contents(__DIR__ . '/error.log', (\$data['type'] ?? '-') . '|' . \$data['exception']->getMessage() . "\n", FILE_APPEND);
+                        })
+                        ->emit(new class extends \\Nyholm\\Psr7\\Response {
+                            public function getProtocolVersion(): string { throw new \\RuntimeException('protocol failed'); }
+                        });
+
+                    return;
                 }
 
                 Sodaho\Router\Router::create(['debug' => false, 'basePath' => ''])
                     ->loadRoutes(__DIR__ . '/routes.php')
                     ->on('error', function (array \$data): void {
-                        file_put_contents(__DIR__ . '/error.log', (\$data['type'] ?? '-') . '|' . \$data['message'] . "\n", FILE_APPEND);
+                        // Any exception, not only the router's own: what has no debug message logs ''
+                        \$debug = \$data['exception'] instanceof Sodaho\Router\Exception\RouterException ? \$data['exception']->getDebugMessage() : '';
+                        file_put_contents(__DIR__ . '/error.log', (\$data['type'] ?? '-') . '|' . \$data['exception']->getMessage() . '|' . \$debug . "\n", FILE_APPEND);
                     })
                     ->run();
                 PHP
@@ -329,10 +347,29 @@ class EmitOverHttpTest extends TestCase
 
         // Up to 1.1.0 that was all — the response vanished without a trace
         $log = (string) file_get_contents(self::$docroot . '/error.log');
-        // Whether PHP can name the place depends on output_buffering in the server's php.ini
+        // The message does not name the place; where PHP knows it (that depends on
+        // output_buffering in the server's php.ini) it is in the debug message
         $this->assertMatchesRegularExpression(
-            '#^emit\|Response not sent: output had already started( at .+index\.php:\d+)?\n$#',
+            '#^emit\|Response not sent: output had already started\|(.+index\.php:\d+)?\n$#',
             $log
         );
+    }
+
+    /**
+     * Output had started, and the response cannot even be read: it is not read at all —
+     * one report of type 'emit', no exception from emit() and no second report from run()
+     * (a response that was read anyway let a throwing getter out of emit()).
+     */
+    public function testResponseIsNotReadOnceOutputHasStarted(): void
+    {
+        foreach (['/early-broken', '/early-emit'] as $path) {
+            @unlink(self::$docroot . '/error.log');
+
+            $response = $this->request('GET', $path);
+
+            $this->assertSame('early output', $response['body'], $path);
+            $log = (string) file_get_contents(self::$docroot . '/error.log');
+            $this->assertMatchesRegularExpression('#^emit\|Response not sent: output had already started(\|.*)?\n$#', $log, $path);
+        }
     }
 }
