@@ -221,10 +221,14 @@ class RouteCollectorTest extends TestCase
     {
         $this->collector->get('/users', 'handler1');
 
-        $this->expectException(DuplicateRouteException::class);
-        $this->expectExceptionMessage('GET /users is already registered');
-
-        $this->collector->get('/users', 'handler2');
+        try {
+            $this->collector->get('/users', 'handler2');
+            $this->fail('The route was registered twice');
+        } catch (DuplicateRouteException $e) {
+            // Which route: in the debug message, like every pattern
+            $this->assertSame('Route is already registered for this method', $e->getMessage());
+            $this->assertSame('GET /users', $e->getDebugMessage());
+        }
     }
 
     public function testDuplicateRouteWithDifferentMethodsIsAllowed(): void

@@ -47,7 +47,6 @@ class EncodedSeparatorTest extends TestCase
                     $r->get('/name{suffix}', fn ($req, string $suffix) => Response::text('suffix: ' . $suffix))->name('suffix');
                     $r->get('/end/{a}.', fn ($req, string $a) => Response::text('end: ' . $a))->name('end');
                     $r->get('/docs/{id:int}', fn ($req, int $id) => Response::text('doc: ' . $id))->name('doc');
-                    $r->get('/odd/{x:nope}', fn ($req, string $x) => Response::text('odd: ' . $x))->name('odd');
                     $r->get('/a/b', fn () => Response::text('static'))->name('static');
                     $r->post('/tags/{tag}', fn ($req, string $tag) => Response::text('posted'));
                 };
@@ -245,7 +244,6 @@ class EncodedSeparatorTest extends TestCase
         return [
             'slash in a one-segment placeholder' => ['tag', ['tag' => 'a/b'], sprintf($slash, 'tag')],
             'slash in a typed one-segment placeholder' => ['doc', ['id' => '1/2'], sprintf($slash, 'id')],
-            'slash where the pattern type is unknown' => ['odd', ['x' => 'a/b'], sprintf($slash, 'x')],
             'slash that the own pattern does not take' => ['pair', ['pair' => 'a/b'], sprintf($slash, 'pair')],
             'value that only starts like the own pattern' => ['pair', ['pair' => "1/2\n"], sprintf($slash, 'pair')],
             'value that only ends like the own pattern' => ['pair', ['pair' => 'x/1/2'], sprintf($slash, 'pair')],

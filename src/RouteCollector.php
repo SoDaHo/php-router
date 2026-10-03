@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Sodaho\Router;
 
 use Sodaho\Router\Exception\DuplicateRouteException;
+use Sodaho\Router\Exception\RouterException;
 
 /**
  * Collects route definitions and compiles them for the Dispatcher.
@@ -30,11 +31,31 @@ class RouteCollector
     private bool $preserveTrailingSlash = false;
 
     /**
-     * Regex shortcuts for route parameters.
+     * What a route pattern and a base path must not contain. Both are compared with the
+     * request path after it was decoded, so they are written decoded — and they are
+     * paths: '?' and '#' end one, a client resolves dot segments before it asks, and no
+     * request with a backslash has a route.
      *
-     * @var array<string, string>
+     * @internal
      */
-    private array $patterns = [
+    public const NOT_A_PLAIN_PATH = '~\\\\|[\x00-\x1F\x7F]|%[0-9a-f]{2}|[?#]|(?:^|/)\.\.?(?:/|$)~i';
+
+    /** The characters NOT_A_PLAIN_PATH is about, for a cheap first look (the dot of a dot segment aside) */
+    private const PLAIN_PATH_SUSPECTS = "\\%?#\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0A\x0B\x0C\x0D\x0E\x0F\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1A\x1B\x1C\x1D\x1E\x1F\x7F";
+
+    /** @internal */
+    public const PLAIN_PATH_RULE = 'must be a plain path, written decoded: no backslash, control character, percent-encoded character (%20), "?", "#" or dot segment';
+
+    /**
+     * How a pattern is read, for parts() and compile() alike: anything in braces, and what
+     * a placeholder looks like. Spelled out instead of \w, which takes bytes beyond ASCII
+     * for letters under some locales.
+     */
+    private const SPLIT = '/(\{[^}]+\})/';
+    private const PLACEHOLDER = '/^\{([A-Za-z0-9_]+)(?::([A-Za-z0-9_]+))?\}$/';
+
+    /** Regex shortcuts for route parameters */
+    private const BUILT_IN = [
         'int'      => '-?\d+',                   // Integers (including negative)
         'float'    => '-?\d+(?:\.\d+)?',         // Decimals (including negative)
         'bool'     => '(?:[tT][rR][uU][eE]|[fF][aA][lL][sS][eE]|0|1)', // Booleans (case-insensitive)
@@ -46,6 +67,9 @@ class RouteCollector
         'any'      => '.*',
     ];
 
+    /** @var array<string, string> The built-in shortcuts and those added with addPattern() */
+    private array $patterns = self::BUILT_IN;
+
     /**
      * Add a custom pattern shortcut.
      *
@@ -54,6 +78,19 @@ class RouteCollector
      */
     public function addPattern(string $name, string $regex): self
     {
+        // {id:name} takes word characters as a name; any other name could never be used
+        if (preg_match('/^[A-Za-z0-9_]+$/D', $name) !== 1) {
+            throw new RouterException('Pattern name must consist of ASCII letters, digits and underscores', debugMessage: $name);
+        }
+
+        // '#' is the delimiter the route table is compiled with. Unescaped it would end the
+        // expression there — for every route that uses the pattern, with a warning per
+        // request and no match, ever. (Whether the fragment compiles shows when the table
+        // is built: it may refer to another placeholder of its route.)
+        if (preg_match('/(?<!\\\\)(?:\\\\\\\\)*#/', $regex) === 1) {
+            throw new RouterException("Pattern fragment must not contain an unescaped '#' (write \\#)", debugMessage: $name);
+        }
+
         $this->patterns[$name] = $regex;
         return $this;
     }
@@ -299,6 +336,26 @@ class RouteCollector
      */
     public function redirect(string $from, string $to, int $status = 302): Route
     {
+        // A placeholder in the target that the source (with the prefix of its groups) does
+        // not have would go out as it stands. Said before the route is registered.
+        $known = array_column(self::parts($this->currentPrefix . '/' . $from), 'name');
+        preg_match_all('/\{([A-Za-z0-9_]+)\}/', $to, $wanted);
+
+        // … and so would one with a type: the target takes {name}, nothing else in braces
+        if (strpbrk((string) preg_replace('/\{[A-Za-z0-9_]+\}/', '', $to), '{}') !== false) {
+            throw new RouterException(
+                'Redirect target has a placeholder that is not of the form {name}',
+                debugMessage: $to,
+            );
+        }
+        $unknown = array_diff($wanted[1], $known);
+        if ($unknown !== []) {
+            throw new RouterException(
+                'Redirect target has a placeholder that its source pattern does not have',
+                debugMessage: sprintf('{%s} in %s', implode('}, {', $unknown), $to),
+            );
+        }
+
         return $this->addRoute(
             ['GET', 'HEAD'],
             $from,
@@ -322,7 +379,15 @@ class RouteCollector
         if ($this->preserveTrailingSlash) {
             // Strict mode: preserve trailing slash, only normalize leading
             $prefix = rtrim($this->currentPrefix, '/');
-            $normalizedPattern = '/' . ltrim(trim($pattern), '/');
+            $trimmed = trim($pattern);
+
+            // Blanks at the edges are trimmed in this mode. A line break or tab is no
+            // blank that may vanish unseen by the checks below.
+            if ($trimmed !== $pattern && preg_match('/[\x00-\x1F\x7F]/', $pattern) === 1) {
+                throw new RouterException('Route pattern ' . self::PLAIN_PATH_RULE, debugMessage: $pattern);
+            }
+
+            $normalizedPattern = '/' . ltrim($trimmed, '/');
             $path = $prefix . $normalizedPattern;
             $path = '/' . ltrim($path, '/');
         } else {
@@ -330,12 +395,15 @@ class RouteCollector
             $path = '/' . trim($this->currentPrefix . '/' . trim($pattern, '/'), '/');
         }
 
+        self::assertPattern($path);
+
         // Check for duplicate routes
         foreach ($methods as $method) {
             $key = $method . ':' . $path;
             if (isset($this->registeredRoutes[$key])) {
                 throw new DuplicateRouteException(
-                    sprintf('Route %s %s is already registered', $method, $path)
+                    'Route is already registered for this method',
+                    debugMessage: sprintf('%s %s', $method, $path),
                 );
             }
             $this->registeredRoutes[$key] = true;
@@ -349,6 +417,90 @@ class RouteCollector
 
         $this->routes[] = $route;
         return $route;
+    }
+
+    /**
+     * What can be said about a route pattern as soon as it is written — before a request
+     * finds out the hard way. Cheap: this runs for every route of every request, the
+     * table is built anew each time.
+     *
+     * @throws RouterException When no request could match the pattern, or when it would match by accident
+     */
+    private static function assertPattern(string $pattern): void
+    {
+        // One look for everything the checks below are about. Most patterns have none of
+        // it and are done — a static route has nothing else to be checked for.
+        if (strpbrk($pattern, '{}[]' . self::PLAIN_PATH_SUSPECTS) === false) {
+            if (str_contains($pattern, '/.') || $pattern[0] === '.') {
+                self::assertPlain($pattern);
+            }
+
+            return;
+        }
+
+        if (strpbrk($pattern, '{}[]') === false) {
+            self::assertPlain($pattern);
+
+            return;
+        }
+
+        // Every brace belongs to a placeholder {name} or {name:type} — or one of them is
+        // something else, most often a regular expression written into the placeholder
+        // ('{id:\d+}', '{id:[0-9]+}'), which would be read as literal text
+        $placeholders = preg_match_all('/\{([A-Za-z0-9_]+)(?::[A-Za-z0-9_]+)?\}/', $pattern, $found);
+
+        if ($placeholders !== substr_count($pattern, '{') || $placeholders !== substr_count($pattern, '}')) {
+            throw new RouterException(
+                'Route pattern has a placeholder that is not of the form {name} or {name:type}. A regular expression of your own goes into addPattern().',
+                debugMessage: $pattern,
+            );
+        }
+
+        // Optional segments [/suffix] are not supported: such a pattern would be read as literal text
+        if (strpbrk($pattern, '[]') !== false) {
+            throw new RouterException(
+                'Optional segments [] are not supported in a route pattern. Define separate routes instead.',
+                debugMessage: $pattern,
+            );
+        }
+
+        self::assertPlain($pattern);
+
+        $names = [];
+        foreach ($found[1] as $name) {
+            // A name the regular expression can carry — older PCRE versions refuse more
+            // than 32 characters (10.36 does, 10.44 does not) — and a handler parameter
+            // can have
+            if (strlen($name) > 32 || ($name[0] >= '0' && $name[0] <= '9') || $name === '_route_params') {
+                throw new RouterException(
+                    'Placeholder name must begin with an ASCII letter or underscore, have at most 32 characters and not be _route_params',
+                    debugMessage: sprintf('{%s} in %s', $name, $pattern),
+                );
+            }
+
+            if (isset($names[$name])) {
+                throw new RouterException(
+                    sprintf('Placeholder "%s" is used twice in one route pattern', $name),
+                    debugMessage: $pattern,
+                );
+            }
+            $names[$name] = true;
+        }
+    }
+
+    /**
+     * @throws RouterException When the pattern is not a plain path (see NOT_A_PLAIN_PATH)
+     */
+    private static function assertPlain(string $pattern): void
+    {
+        // Most patterns have none of the characters the rule is about: one cheap look
+        if (strpbrk($pattern, self::PLAIN_PATH_SUSPECTS) === false && !str_contains($pattern, '/.') && $pattern[0] !== '.') {
+            return;
+        }
+
+        if (preg_match(self::NOT_A_PLAIN_PATH, $pattern) === 1) {
+            throw new RouterException('Route pattern ' . self::PLAIN_PATH_RULE, debugMessage: $pattern);
+        }
     }
 
     /**
@@ -390,41 +542,20 @@ class RouteCollector
                 }
 
                 // DYNAMIC COMPILATION: Routes with parameters
-                $casts = [];
+                [$regex, $casts, $own] = self::compile($route->pattern, $this->patterns);
 
-                // Split pattern into placeholder and literal parts
-                // This ensures literal segments are properly escaped (e.g., dots in /v1.0/)
-                $parts = preg_split('/(\{[^}]+\})/', $route->pattern, -1, PREG_SPLIT_DELIM_CAPTURE | PREG_SPLIT_NO_EMPTY);
-                $regexParts = [];
-
-                foreach ($parts ?: [] as $part) {
-                    if (preg_match('/^\{(\w+)(?::(\w+))?\}$/', $part, $matches)) {
-                        // Placeholder - convert to regex capture group
-                        $name = $matches[1];
-                        $type = $matches[2] ?? null;
-                        $segmentPattern = '[^/]+'; // Default
-
-                        if ($type !== null && isset($this->patterns[$type])) {
-                            $segmentPattern = $this->patterns[$type];
-
-                            // Register cast for int, float, bool
-                            if (in_array($type, ['int', 'float', 'bool'], true)) {
-                                $casts[$name] = $type;
-                            }
-                        }
-
-                        $regexParts[] = "(?P<{$name}>{$segmentPattern})";
-                    } else {
-                        // Literal segment - escape regex special chars
-                        $regexParts[] = preg_quote($part, '#');
-                    }
+                // The built-in patterns compile; only a route with a pattern of its own is
+                // tried out. (A handler that turns the warning into an exception gets
+                // there first — loud either way.)
+                if ($own && @preg_match($regex, '') === false) {
+                    throw new RouterException(
+                        'Route pattern does not compile with its own pattern types',
+                        debugMessage: sprintf('%s: %s', $route->pattern, preg_last_error_msg()),
+                    );
                 }
 
-                $regex = implode('', $regexParts);
-
                 $dynamicRoutes[$method][] = [
-                    // \z, not $: $ also matches before a trailing newline, so '/users/5%0A' would hit '/users/{id:int}'
-                    'regex' => '#^' . $regex . '\z#',
+                    'regex' => $regex,
                     'route' => $route,
                     'casts' => $casts,
                 ];
@@ -432,5 +563,87 @@ class RouteCollector
         }
 
         return [$staticRoutes, $dynamicRoutes];
+    }
+
+    /**
+     * A route pattern taken apart: literal text and placeholders, in the order in which
+     * they stand. One place for the table and for url(), so that both read a pattern alike.
+     *
+     * @internal
+     *
+     * @return list<array{literal: string, name: string|null, type: string|null}> A placeholder has a name
+     *                                                                            (and '' as literal), literal text has none
+     */
+    public static function parts(string $pattern): array
+    {
+        $parts = [];
+
+        // Split pattern into placeholder and literal parts
+        foreach (preg_split(self::SPLIT, $pattern, -1, PREG_SPLIT_DELIM_CAPTURE | PREG_SPLIT_NO_EMPTY) ?: [] as $part) {
+            $parts[] = preg_match(self::PLACEHOLDER, $part, $matches) === 1
+                ? ['literal' => '', 'name' => $matches[1], 'type' => $matches[2] ?? null]
+                : ['literal' => $part, 'name' => null, 'type' => null];
+        }
+
+        return $parts;
+    }
+
+    /**
+     * The regular expression a pattern with placeholders is matched with, the casts of its
+     * placeholders, and whether it uses a pattern type that is not one of the built-in ones.
+     *
+     * @internal
+     *
+     * @param array<string, string> $patterns Pattern shortcut => regular expression fragment
+     *
+     * @throws RouterException When the pattern uses a type that is not defined
+     *
+     * @return array{0: string, 1: array<string, string>, 2: bool}
+     */
+    public static function compile(string $pattern, array $patterns): array
+    {
+        $casts = [];
+        $regex = '';
+        $own = false;
+
+        // The same split as parts(), without the array in between: this runs for every
+        // dynamic route of every request
+        foreach (preg_split(self::SPLIT, $pattern, -1, PREG_SPLIT_DELIM_CAPTURE | PREG_SPLIT_NO_EMPTY) ?: [] as $part) {
+            if ($part[0] !== '{' || preg_match(self::PLACEHOLDER, $part, $matches) !== 1) {
+                // Literal text — escaped, so that the dot of /v1.0/ is a dot
+                $regex .= preg_quote($part, '#');
+
+                continue;
+            }
+
+            $name = $matches[1];
+            $type = $matches[2] ?? null;
+
+            if ($type === null) {
+                $regex .= '(?P<' . $name . '>[^/]+)';
+
+                continue;
+            }
+
+            // {id:integer} would silently be "one segment". Said here and not where the
+            // route is written: patterns may be added after the routes that use them.
+            if (!isset($patterns[$type])) {
+                throw new RouterException(
+                    'Route pattern uses a pattern type that is not defined. Built in: ' . implode(', ', array_keys(self::BUILT_IN)),
+                    debugMessage: sprintf('{%s:%s} in %s', $name, $type, $pattern),
+                );
+            }
+
+            // Register cast for int, float, bool
+            if ($type === 'int' || $type === 'float' || $type === 'bool') {
+                $casts[$name] = $type;
+            }
+
+            $own = $own || $patterns[$type] !== (self::BUILT_IN[$type] ?? null);
+            $regex .= '(?P<' . $name . '>' . $patterns[$type] . ')';
+        }
+
+        // \z, not $: $ also matches before a trailing newline, so '/users/5%0A' would hit '/users/{id:int}'
+        return ['#^' . $regex . '\z#', $casts, $own];
     }
 }
