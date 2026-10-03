@@ -87,6 +87,10 @@ class EmitOverHttpTest extends TestCase
                 }
 
                 if (\$path === '/early' || \$path === '/early-broken' || \$path === '/early-emit') {
+                    // A status the host set before it printed — what went out with the output
+                    if (\$path === '/early-emit') {
+                        http_response_code(418);
+                    }
                     echo 'early output';
                     flush();
                 }
@@ -95,7 +99,7 @@ class EmitOverHttpTest extends TestCase
                     // emit() with a response it cannot read: once output has started, it is not read at all
                     Sodaho\Router\Router::create()
                         ->on('error', function (array \$data): void {
-                            file_put_contents(__DIR__ . '/error.log', (\$data['type'] ?? '-') . '|' . \$data['exception']->getMessage() . "\n", FILE_APPEND);
+                            file_put_contents(__DIR__ . '/error.log', (\$data['type'] ?? '-') . '|' . \$data['exception']->getMessage() . '|' . \$data['status'] . "\n", FILE_APPEND);
                         })
                         ->emit(new class extends \\Nyholm\\Psr7\\Response {
                             public function getProtocolVersion(): string { throw new \\RuntimeException('protocol failed'); }
@@ -109,7 +113,10 @@ class EmitOverHttpTest extends TestCase
                     ->on('error', function (array \$data): void {
                         // Any exception, not only the router's own: what has no debug message logs ''
                         \$debug = \$data['exception'] instanceof Sodaho\Router\Exception\RouterException ? \$data['exception']->getDebugMessage() : '';
-                        file_put_contents(__DIR__ . '/error.log', (\$data['type'] ?? '-') . '|' . \$data['exception']->getMessage() . '|' . \$debug . "\n", FILE_APPEND);
+                        file_put_contents(__DIR__ . '/error.log', (\$data['type'] ?? '-') . '|' . \$data['exception']->getMessage() . '|' . \$debug . '|' . \$data['status'] . "\n", FILE_APPEND);
+                        if (isset(\$data['type'])) {
+                            file_put_contents(__DIR__ . '/keys.log', implode(',', array_keys(\$data)));
+                        }
                     })
                     ->run();
                 PHP
@@ -175,7 +182,7 @@ class EmitOverHttpTest extends TestCase
     {
         self::stopServer();
 
-        foreach (['/routes.php', '/index.php', '/error.log'] as $file) {
+        foreach (['/routes.php', '/index.php', '/error.log', '/keys.log'] as $file) {
             @unlink(self::$docroot . $file);
         }
         @rmdir(self::$docroot);
@@ -338,6 +345,7 @@ class EmitOverHttpTest extends TestCase
     public function testResponseThatCanNoLongerBeSentIsReported(): void
     {
         @unlink(self::$docroot . '/error.log');
+        @unlink(self::$docroot . '/keys.log');
 
         $response = $this->request('GET', '/early');
 
@@ -350,9 +358,11 @@ class EmitOverHttpTest extends TestCase
         // The message does not name the place; where PHP knows it (that depends on
         // output_buffering in the server's php.ini) it is in the debug message
         $this->assertMatchesRegularExpression(
-            '#^emit\|Response not sent: output had already started\|(.+index\.php:\d+)?\n$#',
+            '#^emit\|Response not sent: output had already started\|(.+index\.php:\d+)?\|200\n$#',
             $log
         );
+        // status came last, after the keys an emit report had before
+        $this->assertSame('type,message,exception,status', (string) file_get_contents(self::$docroot . '/keys.log'));
     }
 
     /**
@@ -362,14 +372,16 @@ class EmitOverHttpTest extends TestCase
      */
     public function testResponseIsNotReadOnceOutputHasStarted(): void
     {
-        foreach (['/early-broken', '/early-emit'] as $path) {
+        // The status of the report is what went out with the earlier output
+        foreach (['/early-broken' => 200, '/early-emit' => 418] as $path => $status) {
             @unlink(self::$docroot . '/error.log');
 
             $response = $this->request('GET', $path);
 
             $this->assertSame('early output', $response['body'], $path);
+            $this->assertMatchesRegularExpression('#^HTTP/1\.[01] ' . $status . ' #', $response['status'], $path);
             $log = (string) file_get_contents(self::$docroot . '/error.log');
-            $this->assertMatchesRegularExpression('#^emit\|Response not sent: output had already started(\|.*)?\n$#', $log, $path);
+            $this->assertMatchesRegularExpression('#^emit\|Response not sent: output had already started(\|[^|\n]*)?\|' . $status . '\n$#', $log, $path);
         }
     }
 }

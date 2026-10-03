@@ -346,11 +346,12 @@ class EmitStatusTest extends TestCase
             return ++$calls === 1 ? 'A' : throw new \Sodaho\Router\Exception\RouterException('router exception mid-body');
         });
 
-        [$sent, $reports] = $this->runWith(fn () => (new \Nyholm\Psr7\Response(200))->withBody($body));
+        [$sent, $reports] = $this->runWith(fn () => (new \Nyholm\Psr7\Response(503))->withBody($body));
 
         $this->assertSame('A', $sent);
-        $this->assertSame(200, http_response_code());
-        $this->assertSame(['router exception mid-body'], $reports);
+        $this->assertSame(503, http_response_code());
+        // The status that went out with the headers
+        $this->assertSame(['router exception mid-body | 503'], $reports);
     }
 
     public function testHandleOfASubclassThatThrowsGivesA500(): void
@@ -377,6 +378,59 @@ class EmitStatusTest extends TestCase
         $this->assertSame([['override failed', 'GET', '/plain', 500]], $reports);
     }
 
+    public function testHeaderThatFailsBeforeTheStatusLineReportsTheStatusPhpSet(): void
+    {
+        // A header PHP refuses (a line break in the value; the PSR-7 object of an
+        // application may not check), after a Location that made PHP's status a 302
+        $response = new class (200) extends \Nyholm\Psr7\Response {
+            public function getHeaders(): array
+            {
+                return ['Location' => ['/there'], 'X-Broken' => ["a\nb"]];
+            }
+        };
+
+        set_error_handler(static function (int $severity, string $message): bool {
+            throw new \ErrorException($message, 0, $severity);
+        });
+
+        try {
+            [$sent, $reports] = $this->runWith(fn () => $response);
+        } finally {
+            restore_error_handler();
+        }
+
+        $this->assertSame('', $sent);
+        $this->assertSame(302, http_response_code());
+        $this->assertCount(1, $reports);
+        $this->assertStringEndsWith(' | 302', $reports[0]);
+    }
+
+    public function testFirstHeaderThatFailsUnderTheCliReportsThe200PhpWouldSend(): void
+    {
+        $response = new class (503) extends \Nyholm\Psr7\Response {
+            public function getHeaders(): array
+            {
+                return ['X-Broken' => ["a\nb"]];
+            }
+        };
+
+        set_error_handler(static function (int $severity, string $message): bool {
+            throw new \ErrorException($message, 0, $severity);
+        });
+
+        try {
+            [$sent, $reports] = $this->runWith(fn () => $response);
+        } finally {
+            restore_error_handler();
+        }
+
+        // Nothing set a status yet: the CLI keeps none, a server would send its 200
+        $this->assertSame('', $sent);
+        $this->assertFalse(http_response_code());
+        $this->assertCount(1, $reports);
+        $this->assertStringEndsWith(' | 200', $reports[0]);
+    }
+
     public function testGetterThatThrowsBeforeTheFirstByteGivesA500(): void
     {
         $response = new class () extends \Nyholm\Psr7\Response {
@@ -390,7 +444,7 @@ class EmitStatusTest extends TestCase
 
         $this->assertSame('Internal Server Error', $sent);
         $this->assertSame(500, http_response_code());
-        $this->assertSame(['protocol failed'], $reports);
+        $this->assertSame(['protocol failed | 500'], $reports);
     }
 
     /**
@@ -413,7 +467,7 @@ class EmitStatusTest extends TestCase
             Router::create(['debug' => false])
                 ->loadRoutes($routes)
                 ->on('error', function (array $data) use (&$reports): void {
-                    $reports[] = $data['exception']->getMessage();
+                    $reports[] = $data['exception']->getMessage() . ' | ' . $data['status'];
                 })
                 ->run();
         } finally {
@@ -580,6 +634,7 @@ class EmitStatusTest extends TestCase
         // Both are reported: what was wrong with the request, and the responder — the answer is a 400
         $this->assertSame([['The request could not be read', 400], ['responder failed', 400]], $reports);
     }
+
     public function testRequestThatCannotBeBuiltForAnotherReasonStaysA500WhenTheResponderFails(): void
     {
         $_FILES = ['f' => ['name' => ['a.txt'], 'type' => 'text/plain', 'tmp_name' => __FILE__, 'error' => 0, 'size' => 3]];

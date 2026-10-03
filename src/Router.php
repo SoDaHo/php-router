@@ -599,9 +599,11 @@ class Router implements RequestHandlerInterface
         try {
             $this->transmit($prepared, $withBody);
         } catch (\Throwable $e) {
-            // The body failed while it was sent: nothing can be answered any more, but
-            // the error hook hears of it, and no stack trace goes out
-            $this->report($e, $request);
+            // Sending failed (a header, the body): nothing can be answered any more, but
+            // the error hook hears of it, and no stack trace goes out. Its status is the
+            // one that goes out — not the response's when a header failed before the
+            // status line (a Location before it made PHP's a 302)
+            $this->report($e, $request, $this->sentStatus());
         }
     }
 
@@ -753,6 +755,16 @@ class Router implements RequestHandlerInterface
         $this->trigger('error', ['exception' => $e] + RouteDispatcher::describe($request) + ['status' => $status]);
     }
 
+    /**
+     * The status PHP has set for this response so far; where it keeps none (the CLI), the
+     * 200 it would send.
+     */
+    private function sentStatus(): int
+    {
+        $status = http_response_code();
+
+        return is_int($status) ? $status : 200;
+    }
 
     // ==================== Internal ====================
 
@@ -902,6 +914,8 @@ class Router implements RequestHandlerInterface
                 'type' => 'emit',
                 'message' => $message,
                 'exception' => new RouterException($message, debugMessage: $file !== '' ? sprintf('%s:%d', $file, $line) : null),
+                // What went out with the output before: the router's answer did not
+                'status' => $this->sentStatus(),
             ]);
 
             return true;
