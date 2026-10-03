@@ -96,6 +96,9 @@ class Router implements RequestHandlerInterface
     /** Whether the router was used (see getDispatcher()) — set once, never reset */
     private bool $used = false;
 
+    /** What the config array may contain. Anything else is a mistake and is refused. */
+    private const CONFIG_KEYS = ['debug', 'basePath', 'baseUrl', 'trailingSlash', 'routesFile', 'urlEncoding', 'implicitHead', 'emitChunkSize'];
+
     /** Config key => environment variable, for fromEnv() */
     private const ENV_VARIABLES = [
         'debug' => 'APP_DEBUG',
@@ -113,13 +116,24 @@ class Router implements RequestHandlerInterface
      *
      * @param array{debug?: bool|int|string|null, basePath?: string|null, baseUrl?: string|null, trailingSlash?: string|null, routesFile?: string|null, urlEncoding?: bool|int|string|null, implicitHead?: bool|int|string|null, emitChunkSize?: int|string|null} $config
      *
-     * @throws RouterException If 'debug', 'urlEncoding' or 'implicitHead' is neither a boolean
-     *                         nor boolean-like nor empty ('' and 0 count as off; null is
-     *                         the default), or 'emitChunkSize' is not an integer (or a
+     * @throws RouterException If $config has a key the router does not know, if 'debug',
+     *                         'urlEncoding' or 'implicitHead' is neither a boolean nor
+     *                         boolean-like nor empty ('' and 0 count as off; null is the
+     *                         default), or if 'emitChunkSize' is not an integer (or a
      *                         string of digits) from 1024 to 16777216
      */
     public function __construct(array $config = [])
     {
+        $unknown = array_diff(array_keys($config), self::CONFIG_KEYS);
+        if ($unknown !== []) {
+            // A typo ('basepath') or a key of 1.x ('cacheFile') would otherwise be ignored
+            // silently. The message names what is allowed; the keys given are in the debug message.
+            throw new RouterException(
+                'Unknown config key. Known keys: ' . implode(', ', self::CONFIG_KEYS),
+                debugMessage: 'Unknown: ' . implode(', ', array_map(strval(...), $unknown)),
+            );
+        }
+
         $this->config = [
             'debug' => self::flag('debug', $config['debug'] ?? false),
             'basePath' => self::normalizeBasePath((string) ($config['basePath'] ?? '')),

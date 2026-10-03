@@ -269,12 +269,11 @@ class RouterConfigTest extends TestCase
     // ==================== what is left of the cache ====================
 
     /**
-     * 1.x applications pass 'cacheFile' => '' to keep the cache off against ROUTER_CACHE_*,
-     * and some still carry a real cache configuration. None of it may stop the router from
-     * starting, and none of it has an effect. (Config keys the router does not know are
-     * ignored as in 1.x; a later 2.0 beta will refuse them.)
+     * 1.x read ROUTER_CACHE_FILE and ROUTER_CACHE_KEY. Set, they have no effect now. (The
+     * config keys of the cache are refused like every key the router does not know, see
+     * testUnknownConfigKeyIsRefused.)
      */
-    public function testKeysAndVariablesOfTheRemovedCacheHaveNoEffect(): void
+    public function testVariablesOfTheRemovedCacheHaveNoEffect(): void
     {
         $cacheFile = sys_get_temp_dir() . '/router_no_cache_' . uniqid() . '.php';
         $_ENV['ROUTER_CACHE_FILE'] = $cacheFile;
@@ -282,11 +281,11 @@ class RouterConfigTest extends TestCase
         putenv('ROUTER_CACHE_FILE=' . $cacheFile);
         putenv('ROUTER_CACHE_KEY=key-from-env');
 
+        // The config keys of the cache are refused (testUnknownConfigKeyIsRefused); the
+        // variables are not read
         $routers = [
-            'the 1.x way to keep the cache off' => $this->router(['debug' => false, 'cacheFile' => '', 'cacheSignature' => '']),
-            'a cache configuration' => $this->router(['debug' => false, 'cacheFile' => $cacheFile, 'cacheSignature' => 'key']),
-            'the variables alone' => $this->routerFromEnv(['debug' => false]),
-            'other keys the router does not know' => $this->router(['debug' => false, 0 => 'stray', 'DEBUG' => true, 'basepath' => '/typo']),
+            'the variables, create()' => $this->router(['debug' => false]),
+            'the variables, fromEnv()' => $this->routerFromEnv(['debug' => false]),
         ];
 
         foreach ($routers as $label => $router) {
@@ -296,6 +295,51 @@ class RouterConfigTest extends TestCase
         }
 
         $this->assertFileDoesNotExist($cacheFile);
+    }
+
+    // ==================== unknown keys ====================
+
+    /**
+     * @return array<string, array{0: array<int|string, mixed>, 1: string}>
+     */
+    public static function configsWithKeysTheRouterDoesNotKnow(): array
+    {
+        return [
+            'a key of the removed cache' => [['cacheFile' => '/var/cache/routes.php', 'debug' => false], 'Unknown: cacheFile'],
+            'a typo' => [['basepath' => '/api'], 'Unknown: basepath'],
+            'several' => [['cacheFile' => '', 'cacheSignature' => 'secret-key'], 'Unknown: cacheFile, cacheSignature'],
+            'a list instead of a map' => [['/api'], 'Unknown: 0'],
+        ];
+    }
+
+    /**
+     * @param array<int|string, mixed> $config
+     */
+    #[DataProvider('configsWithKeysTheRouterDoesNotKnow')]
+    public function testUnknownConfigKeyIsRefused(array $config, string $debugMessage): void
+    {
+        foreach (['create', 'fromEnv'] as $factory) {
+            try {
+                /** @phpstan-ignore argument.type */
+                Router::$factory($config);
+                $this->fail("{$factory}() accepted it");
+            } catch (RouterException $e) {
+                // The message names what is allowed — never a value, and the keys only in the debug message
+                $this->assertSame('Unknown config key. Known keys: debug, basePath, baseUrl, trailingSlash, routesFile, urlEncoding, implicitHead, emitChunkSize', $e->getMessage());
+                $this->assertSame($debugMessage, $e->getDebugMessage());
+                $this->assertStringNotContainsString('secret-key', $e->getMessage() . $e->getDebugMessage());
+            }
+        }
+    }
+
+    public function testEveryKnownKeyIsTaken(): void
+    {
+        $router = Router::create([
+            'debug' => false, 'basePath' => '/api', 'baseUrl' => 'https://example.org', 'trailingSlash' => 'ignore',
+            'routesFile' => null, 'urlEncoding' => true, 'implicitHead' => true, 'emitChunkSize' => 4096,
+        ]);
+
+        $this->assertFalse($router->isDebug());
     }
 
     // ==================== debug ====================
