@@ -654,6 +654,194 @@ class RouterConfigTest extends TestCase
         $status('maybe');
     }
 
+    // ==================== trailingSlash ====================
+
+    /**
+     * @return array<string, array{0: mixed}>
+     */
+    public static function trailingSlashValuesThatAreRefused(): array
+    {
+        return [
+            // 1.x took any other value: routes were registered as in 'ignore', requests
+            // compared as in 'strict' — /users/ was a 404 in both spellings
+            'capital letter' => ['Strict'],
+            'another word' => ['redirect'],
+            'true' => [true],
+            'a number' => [1],
+            'blank behind it' => ['ignore '],
+        ];
+    }
+
+    #[DataProvider('trailingSlashValuesThatAreRefused')]
+    public function testTrailingSlashModeHasToBeOneOfTheTwo(mixed $value): void
+    {
+        $this->expectException(RouterException::class);
+        $this->expectExceptionMessage("Config 'trailingSlash' must be 'strict' or 'ignore'");
+
+        /** @phpstan-ignore argument.type */
+        Router::create(['trailingSlash' => $value]);
+    }
+
+    public function testTrailingSlashModeFromTheEnvironmentIsCheckedAsWell(): void
+    {
+        foreach (['loose', 'Strict', ' ', 'ignore '] as $value) {
+            $_ENV['ROUTER_TRAILING_SLASH'] = $value;
+
+            try {
+                Router::fromEnv();
+                $this->fail('The router was created');
+            } catch (RouterException $e) {
+                // Names the variable — the config key would send the reader to the wrong place
+                $this->assertSame("Environment variable ROUTER_TRAILING_SLASH must be 'strict', 'ignore' or empty", $e->getMessage());
+            }
+        }
+    }
+
+    public function testEmptyTrailingSlashVariableMeansTheDefault(): void
+    {
+        // A line 'ROUTER_TRAILING_SLASH=' in a .env file: the default, as for the boolean variables
+        $_ENV['ROUTER_TRAILING_SLASH'] = '';
+
+        $router = Router::fromEnv()->loadRoutes($this->routesFile);
+
+        $this->assertSame(200, $router->handle(new ServerRequest('GET', '/users'))->getStatusCode());
+        $this->assertSame(404, $router->handle(new ServerRequest('GET', '/users/'))->getStatusCode());
+
+        // … and so does an empty value in the config array, like null
+        foreach ([Router::fromEnv(['trailingSlash' => '']), Router::create(['trailingSlash' => ''])] as $router) {
+            $router->loadRoutes($this->routesFile);
+
+            $this->assertSame(200, $router->handle(new ServerRequest('GET', '/users'))->getStatusCode());
+            $this->assertSame(404, $router->handle(new ServerRequest('GET', '/users/'))->getStatusCode());
+        }
+    }
+
+    public function testTrailingSlashVariableIsNotLookedAtWhenTheKeyIsPassed(): void
+    {
+        $_ENV['ROUTER_TRAILING_SLASH'] = 'loose';
+        $_ENV['ROUTER_BASE_PATH'] = '/a/../b';
+
+        $router = Router::fromEnv(['trailingSlash' => 'ignore', 'basePath' => '/api'])->loadRoutes($this->routesFile);
+
+        $this->assertSame(200, $router->handle(new ServerRequest('GET', '/api/users/'))->getStatusCode());
+    }
+
+    public function testTrailingSlashModesThatAreAllowed(): void
+    {
+        $this->assertSame(404, $this->router(['trailingSlash' => null])->handle(new ServerRequest('GET', '/users/'))->getStatusCode());
+        $this->assertSame(404, $this->router(['trailingSlash' => 'strict'])->handle(new ServerRequest('GET', '/users/'))->getStatusCode());
+        $this->assertSame(200, $this->router(['trailingSlash' => 'ignore'])->handle(new ServerRequest('GET', '/users/'))->getStatusCode());
+    }
+
+    // ==================== basePath ====================
+
+    /**
+     * @return array<string, array{0: string}>
+     */
+    public static function basePathsThatAreRefused(): array
+    {
+        return [
+            // The router has no route for such a request path, a client resolves or cuts
+            // it — and url() would write an address that leaves the site
+            'backslash' => ['\\evil.example'],
+            'backslash inside' => ['/api\\v1'],
+            'tab' => ["\t"],
+            'line break' => ["/api\n"],
+            'NUL' => ["/a\0b"],
+            'DEL' => ["/a\x7Fb"],
+            'encoded slash' => ['/a%2Fb'],
+            'encoded backslash' => ['/a%5cb'],
+            'query' => ['/api?x=1'],
+            'fragment' => ['/api#top'],
+            'parent segment' => ['/api/../admin'],
+            'parent segment alone' => ['..'],
+            'current segment' => ['/api/./v1'],
+            'current segment at the end' => ['/api/.'],
+            // Compared with the decoded path, '/my%20app' would wait for the request '/my%2520app'
+            'percent-encoded blank' => ['/my%20app'],
+            'percent-encoded letter, lower case' => ['/caf%c3%a9'],
+        ];
+    }
+
+    #[DataProvider('basePathsThatAreRefused')]
+    public function testBasePathHasToBeAPlainPath(string $basePath): void
+    {
+        $rule = ' must be a plain path, written decoded: no backslash, control character, percent-encoded character (%20), "?", "#" or dot segment';
+        $message = "Config 'basePath'" . $rule;
+
+        foreach ([fn () => Router::create(['basePath' => $basePath]), fn () => Router::create()->setBasePath($basePath)] as $configure) {
+            try {
+                $configure();
+                $this->fail('The base path was accepted');
+            } catch (RouterException $e) {
+                // The message does not repeat the value
+                $this->assertSame($message, $e->getMessage());
+            }
+        }
+
+        // From the environment the message names the variable
+        $_ENV['ROUTER_BASE_PATH'] = $basePath;
+        $this->expectException(RouterException::class);
+        $this->expectExceptionMessage('Environment variable ROUTER_BASE_PATH' . $rule);
+        Router::fromEnv();
+    }
+
+    public function testBasePathsThatStayAllowed(): void
+    {
+        foreach (['' => '/users', '/' => '/users', '/api/' => '/api/users', 'api' => '/api/users', '/my app' => '/my app/users', '/über' => '/über/users', '/v1.2' => '/v1.2/users', '/a..b/.well-known' => '/a..b/.well-known/users', '/100%' => '/100%/users', '/5%2' => '/5%2/users', '//' => '/users', '//api//' => '/api/users', '/api//v1' => '/api//v1/users'] as $basePath => $path) {
+            $router = Router::create(['basePath' => (string) $basePath])->loadRoutes($this->routesFile);
+
+            $this->assertSame(200, $router->handle(new ServerRequest('GET', str_replace(['%', ' '], ['%25', '%20'], $path)))->getStatusCode(), (string) $basePath);
+        }
+    }
+
+    // ==================== what cannot be changed once the table is built ====================
+
+    /**
+     * @return array<string, array{0: string, 1: \Closure(Router): mixed}>
+     */
+    public static function waysToUseTheRouter(): array
+    {
+        return [
+            'a request' => ['handle', fn (Router $router) => $router->handle(new ServerRequest('GET', '/users'))],
+            'a lookup' => ['match', fn (Router $router) => $router->match(new ServerRequest('GET', '/users'))],
+            'an address' => ['url', fn (Router $router) => $router->url('users.show', ['id' => 5])],
+        ];
+    }
+
+    #[DataProvider('waysToUseTheRouter')]
+    public function testSettingsOfTheTableAreRefusedAfterTheFirstUse(string $how, \Closure $use): void
+    {
+        $router = $this->router();
+        // Before the first use everything can still be set
+        $router->setDebug(false)->setBasePath('')->loadRoutes($this->routesFile);
+        $use($router);
+
+        $late = [
+            'setBasePath' => fn () => $router->setBasePath('/api'),
+            'setDebug' => fn () => $router->setDebug(true),
+            'loadRoutes' => fn () => $router->loadRoutes($this->routesFile),
+        ];
+
+        foreach ($late as $method => $call) {
+            try {
+                // 1.x accepted the call: no effect at all, or half of one
+                $call();
+                $this->fail($method . '() was accepted after ' . $how);
+            } catch (RouterException $e) {
+                $this->assertSame(
+                    $method . '() has to be called before the first request, match() or url(): the routing table is already built',
+                    $e->getMessage()
+                );
+            }
+        }
+
+        // … and nothing changed
+        $this->assertFalse($router->isDebug());
+        $this->assertSame(200, $router->handle(new ServerRequest('GET', '/users'))->getStatusCode());
+        $this->assertSame(404, $router->handle(new ServerRequest('GET', '/api/users'))->getStatusCode());
+    }
+
     // ==================== emitChunkSize ====================
 
     /**

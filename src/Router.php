@@ -112,7 +112,7 @@ class Router implements RequestHandlerInterface
             'debug' => self::flag('debug', $config['debug'] ?? false),
             'basePath' => self::normalizeBasePath((string) ($config['basePath'] ?? '')),
             'baseUrl' => $config['baseUrl'] ?? null,
-            'trailingSlash' => (string) ($config['trailingSlash'] ?? 'strict'),
+            'trailingSlash' => self::trailingSlash($config['trailingSlash'] ?? 'strict'),
             'routesFile' => $config['routesFile'] ?? null,
             'urlEncoding' => self::flag('urlEncoding', $config['urlEncoding'] ?? true),
             'implicitHead' => self::flag('implicitHead', $config['implicitHead'] ?? true),
@@ -195,11 +195,51 @@ class Router implements RequestHandlerInterface
     /**
      * '/api', '/api/' and 'api' all mean the same prefix; the dispatcher compares against '/api'.
      */
-    private static function normalizeBasePath(string $basePath): string
+    private static function normalizeBasePath(string $basePath, string $what = "Config 'basePath'"): string
     {
         $trimmed = trim($basePath, '/');
 
+        // The same rule as for a route pattern: compared with the decoded request path,
+        // so written decoded — and a path
+        if (preg_match(RouteCollector::NOT_A_PLAIN_PATH, $trimmed) === 1) {
+            throw new RouterException($what . ' ' . RouteCollector::PLAIN_PATH_RULE);
+        }
+
         return $trimmed === '' ? '' : '/' . $trimmed;
+    }
+
+    /**
+     * @throws RouterException If the value is not one of the two modes — any other value
+     *                         left the router half in one mode and half in the other
+     */
+    private static function trailingSlash(mixed $value): string
+    {
+        // Empty means the default, as null does: 'ROUTER_TRAILING_SLASH=' in a .env file
+        if ($value === '') {
+            return 'strict';
+        }
+
+        if ($value !== 'strict' && $value !== 'ignore') {
+            throw new RouterException("Config 'trailingSlash' must be 'strict' or 'ignore'");
+        }
+
+        return $value;
+    }
+
+    /**
+     * What goes into the routing table when it is built cannot be changed afterwards — the
+     * call would be accepted and have no effect, or half an effect.
+     *
+     * @throws RouterException When the table is already built
+     */
+    private function assertNotInUse(string $method): void
+    {
+        if ($this->dispatcher !== null) {
+            throw new RouterException(sprintf(
+                '%s() has to be called before the first request, match() or url(): the routing table is already built',
+                $method
+            ));
+        }
     }
 
     /**
@@ -249,6 +289,14 @@ class Router implements RequestHandlerInterface
                 ));
             }
 
+            if ($key === 'trailingSlash' && !in_array($value, ['strict', 'ignore', ''], true)) {
+                throw new RouterException(sprintf("Environment variable %s must be 'strict', 'ignore' or empty", $variable));
+            }
+
+            if ($key === 'basePath') {
+                self::normalizeBasePath($value, 'Environment variable ' . $variable);
+            }
+
             $fromEnvironment[$key] = $value;
         }
 
@@ -292,6 +340,7 @@ class Router implements RequestHandlerInterface
      */
     public function setDebug(bool $debug): self
     {
+        $this->assertNotInUse('setDebug');
         $this->config['debug'] = $debug;
         return $this;
     }
@@ -381,6 +430,7 @@ class Router implements RequestHandlerInterface
      */
     public function setBasePath(string $basePath): self
     {
+        $this->assertNotInUse('setBasePath');
         $this->config['basePath'] = self::normalizeBasePath($basePath);
         return $this;
     }
@@ -411,6 +461,7 @@ class Router implements RequestHandlerInterface
      */
     public function loadRoutes(string $file): self
     {
+        $this->assertNotInUse('loadRoutes');
         $this->config['routesFile'] = $file;
         return $this;
     }

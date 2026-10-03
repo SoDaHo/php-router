@@ -290,12 +290,13 @@ class EncodedSeparatorTest extends TestCase
         // The router puts a slash in front of what it is given: '\evil.example' becomes
         // '/\evil.example' — which a client reads as '//evil.example'
         // … and a tab alone becomes '/<tab>', which a client drops: '/<tab>/a/b' is '//a/b'
+        // Refused where it is configured, before an address is asked for
         foreach (['\\evil.example', "\t", "\n"] as $basePath) {
             try {
-                $this->router(['basePath' => $basePath])->url('static');
-                $this->fail('An address was generated');
+                $this->router(['basePath' => $basePath]);
+                $this->fail('The router was created');
             } catch (RouterException $e) {
-                $this->assertStringStartsWith('The address would not be a path on this site', $e->getMessage());
+                $this->assertStringStartsWith("Config 'basePath' must be a plain path", $e->getMessage());
             }
         }
     }
