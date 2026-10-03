@@ -21,8 +21,9 @@ use Sodaho\Router\Exception\RouterException;
  * What it never serves, whatever the folder contains: anything outside the folder (the
  * resolved file has to lie under the resolved folder, links included), hidden files and
  * folders (a leading dot), files that cannot be read, file types that are not on the list
- * (PHP sources cannot be put on it), and paths with a NUL byte, a backslash, an encoded
- * separator or a segment that ends in a dot or a space.
+ * (PHP sources cannot be put on it), and paths with a control character (a NUL byte, a
+ * line break), a backslash, an encoded separator or a segment that ends in a dot or a
+ * space. Such a path gets no start page either.
  */
 final class AppFolder
 {
@@ -388,10 +389,11 @@ final class AppFolder
      */
     private function relativePath(string $rawPath, string $path): ?string
     {
-        // The dispatcher has no route for a path with an encoded separator and asks no app.
-        // This class keeps its own word all the same, for whoever calls it directly.
-        // Backslash and NUL are refused segment by segment below.
-        if (preg_match('/%2f|%5c/i', $rawPath) === 1) {
+        // The dispatcher has no route for a path with a hidden separator or a control
+        // character and asks no app. This class keeps its own word all the same, for
+        // whoever calls it directly, by the same rule: the raw path counts, not what the
+        // caller decoded it to. (The decoded path is checked segment by segment below.)
+        if (RouteDispatcher::hasNoRoute($rawPath)) {
             return null;
         }
 
@@ -479,14 +481,15 @@ final class AppFolder
 
     /**
      * A path segment that names something visible, and names the same thing on every file
-     * system: not empty, no leading dot ('.', '..', hidden names), no separator, no NUL, no
-     * dot or space at its end (Windows drops both).
+     * system: not empty, no leading dot ('.', '..', hidden names), no separator, no control
+     * character, no dot or space at its end (Windows drops both).
      */
     private static function isPlainSegment(string $segment): bool
     {
         return $segment !== ''
             && $segment[0] !== '.'
-            && strpbrk($segment, "/\\\0") === false
+            && strpbrk($segment, '/\\') === false
+            && preg_match('/[\x00-\x1f\x7f]/', $segment) !== 1
             && !str_ends_with($segment, '.')
             && !str_ends_with($segment, ' ');
     }

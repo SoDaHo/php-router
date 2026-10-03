@@ -705,7 +705,6 @@ class UrlGeneratorTest extends TestCase
             'an empty value' => ['/tags/{tag}', ['tag' => ''], '/tags/'],
             'an empty value between others' => ['/p/{a}/{b}/{c}', ['a' => 'x', 'b' => '', 'c' => 'z'], '/p/x//z'],
             'a slash for one segment' => ['/tags/{tag}', ['tag' => 'a/b'], '/tags/a/b'],
-            'a line break at the end' => ['/docs/{id:int}', ['id' => "5\n"], "/docs/5\n"],
             'true for an integer is fine, a word is not' => ['/flag/{on:bool}', ['on' => 'yes'], '/flag/yes'],
             // The route would hand over other values than these
             'two placeholders that take slashes, split otherwise' => ['/{a:any}/{b:any}', ['a' => 'x', 'b' => 'y/z'], '/x/y/z'],
@@ -735,6 +734,24 @@ class UrlGeneratorTest extends TestCase
         $generator->setEncodeParams(false);
         /** @phpstan-ignore argument.type */
         $this->assertSame($candidate, $generator->url('r', $params));
+    }
+
+    public function testLineBreakAtTheEndIsNoNumber(): void
+    {
+        // What "$" instead of "\z" would let through. A control character is refused before
+        // the pattern is asked: encoded it would be a path without a route.
+        $generator = new UrlGenerator([new Route(['GET'], '/docs/{id:int}', 'handler', [], 'r')]);
+
+        try {
+            $generator->url('r', ['id' => "5\n"]);
+            $this->fail('An address was generated');
+        } catch (RouterException $e) {
+            $this->assertSame('Parameter "id" contains a control character, which no route accepts', $e->getMessage());
+            $this->assertSame("5\n", $e->getDebugMessage());
+        }
+
+        $generator->setEncodeParams(false);
+        $this->assertSame("/docs/5\n", $generator->url('r', ['id' => "5\n"]));
     }
 
     public function testNullIsNoValue(): void

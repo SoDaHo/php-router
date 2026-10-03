@@ -119,6 +119,104 @@ class EncodedSeparatorTest extends TestCase
         $this->assertSame($method, $reported[0]['method']);
     }
 
+    /**
+     * @return array<string, array{0: string, 1?: string}>
+     */
+    public static function pathsWithAControlCharacter(): array
+    {
+        return [
+            'line break at the end of a one-segment parameter' => ['/tags/a%0A'],
+            'line break inside, lower case' => ['/tags/a%0ab'],
+            'carriage return' => ['/tags/a%0Db'],
+            'NUL' => ['/tags/a%00'],
+            'tab' => ['/tags/a%09b'],
+            'unit separator' => ['/tags/a%1F'],
+            'DEL' => ['/tags/a%7Fb'],
+            'DEL, lower case' => ['/tags/a%7fb'],
+            'where the placeholder takes slashes' => ['/files/a/b%0A.txt'],
+            'behind a static route' => ['/a/b%0A'],
+            'HEAD' => ['/tags/a%0A', 'HEAD'],
+            // Not a 405: the table is not asked at all
+            'method the path has a route for' => ['/tags/a%0A', 'POST'],
+            'method the path has no route for' => ['/tags/a%0A', 'DELETE'],
+        ];
+    }
+
+    #[DataProvider('pathsWithAControlCharacter')]
+    public function testPathWithAControlCharacterHasNoRoute(string $path, string $method = 'GET'): void
+    {
+        $router = $this->router();
+        $reported = [];
+        $router->on('notFound', function (array $data) use (&$reported): void {
+            $reported[] = $data['path'];
+        });
+
+        $response = $router->handle(new ServerRequest($method, $path));
+
+        $this->assertSame(404, $response->getStatusCode());
+        $this->assertFalse($response->hasHeader('Allow'));
+        if ($method !== 'HEAD') {
+            $this->assertStringContainsString('"code":"NOT_FOUND"', $this->body($response));
+        }
+        $this->assertSame([$path], $reported);
+    }
+
+    public function testWhatIsNoControlCharacterStaysAllowed(): void
+    {
+        $router = $this->router();
+
+        // %20 is a space, %7E a tilde, %80 and above are bytes of UTF-8: none is a control character
+        $this->assertSame('tag: a b~ä', $this->body($router->handle(new ServerRequest('GET', '/tags/a%20b%7E%C3%A4'))));
+        // A literal '%0A' in a value is spelled %250A
+        $this->assertSame('tag: a%0A', $this->body($router->handle(new ServerRequest('GET', '/tags/a%250A'))));
+    }
+
+    /**
+     * @return array<string, array{0: string}>
+     */
+    public static function controlCharactersAsTheyStand(): array
+    {
+        return [
+            'line break' => ["\n"],
+            'carriage return' => ["\r"],
+            'tab' => ["\t"],
+            'NUL' => ["\0"],
+            'unit separator' => ["\x1F"],
+            'DEL' => ["\x7F"],
+        ];
+    }
+
+    /**
+     * A URI class encodes them; a request object of another make may hand them over as
+     * they are
+     */
+    #[DataProvider('controlCharactersAsTheyStand')]
+    public function testControlCharacterThatArrivesUnencodedHasNoRouteEither(string $character): void
+    {
+        $uri = $this->createMock(UriInterface::class);
+        $uri->method('getPath')->willReturn("/tags/a{$character}b");
+
+        $response = $this->router()->handle((new ServerRequest('GET', '/tags/x'))->withUri($uri));
+
+        $this->assertSame(404, $response->getStatusCode());
+    }
+
+    public function testPathIsReadOnceForTheCheckAndTheLookup(): void
+    {
+        // Not what a PSR-7 URI does (it does not change) — but what was checked is what is
+        // looked up, whatever a request object of another make answers the second time
+        $calls = 0;
+        $uri = $this->createMock(UriInterface::class);
+        $uri->method('getPath')->willReturnCallback(static function () use (&$calls): string {
+            return $calls++ === 0 ? '/tags/safe' : '/tags/a%0Ab';
+        });
+
+        $match = $this->router()->match((new ServerRequest('GET', '/tags/x'))->withUri($uri));
+
+        $this->assertSame(RouteMatch::FOUND, $match->status);
+        $this->assertSame(['tag' => 'safe'], $match->params);
+    }
+
     public function testBackslashThatArrivesUnencodedHasNoRouteEither(): void
     {
         // A URI class encodes it; a request object of another make may hand it over as it is
@@ -239,13 +337,20 @@ class EncodedSeparatorTest extends TestCase
     {
         $fit = 'The parameters do not fit the pattern of route "%s": the address would not lead back to it';
         $backslash = 'Parameter "%s" contains a backslash, which no route accepts';
+        $control = 'Parameter "%s" contains a control character, which no route accepts';
         $dots = 'The address would contain a "." or ".." path segment, which a client resolves before it asks';
 
         return [
             'slash in a one-segment placeholder' => ['tag', ['tag' => 'a/b'], sprintf($fit, 'tag'), '/tags/a/b'],
             'slash in a typed one-segment placeholder' => ['doc', ['id' => '1/2'], sprintf($fit, 'doc'), '/docs/1/2'],
             'slash that the own pattern does not take' => ['pair', ['pair' => 'a/b'], sprintf($fit, 'pair'), '/pairs/a/b'],
-            'value that only starts like the own pattern' => ['pair', ['pair' => "1/2\n"], sprintf($fit, 'pair'), "/pairs/1/2\n"],
+            'value that only starts like the own pattern' => ['pair', ['pair' => '1/2x'], sprintf($fit, 'pair'), '/pairs/1/2x'],
+            // What "$" instead of "\z" would let through — and a path the router answers with 404
+            'line break at the end of a value' => ['pair', ['pair' => "1/2\n"], sprintf($control, 'pair')],
+            'line break inside a value' => ['tag', ['tag' => "a\nb"], sprintf($control, 'tag')],
+            'NUL where slashes are taken' => ['files', ['path' => "a/\0b"], sprintf($control, 'path')],
+            'tab' => ['tag', ['tag' => "a\tb"], sprintf($control, 'tag')],
+            'DEL' => ['tag', ['tag' => "a\x7Fb"], sprintf($control, 'tag')],
             'value that only ends like the own pattern' => ['pair', ['pair' => 'x/1/2'], sprintf($fit, 'pair'), '/pairs/x/1/2'],
             'value that only starts like an alternative of the own pattern' => ['side', ['side' => 'left/in/deep'], sprintf($fit, 'side'), '/sides/left/in/deep'],
             'value that only ends like an alternative of the own pattern' => ['side', ['side' => 'far/right/out'], sprintf($fit, 'side'), '/sides/far/right/out'],

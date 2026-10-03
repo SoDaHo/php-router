@@ -245,7 +245,12 @@ class SecurityTest extends TestCase
     public function testParametersCannotInjectHeaders(): void
     {
         $collector = new RouteCollector();
-        $collector->get('/search/{query}', fn ($req, $query) => Response::success(['query' => $query]));
+        $reached = false;
+        $collector->get('/search/{query}', function ($req, $query) use (&$reached) {
+            $reached = true;
+
+            return Response::success(['query' => $query]);
+        });
 
         $dispatcher = new RouteDispatcher($collector->getData());
 
@@ -255,11 +260,10 @@ class SecurityTest extends TestCase
 
         $response = $dispatcher->handle(new ServerRequest('GET', "/search/{$encoded}"));
 
-        // CRLF should be in the body as literal text, not create new headers
-        $body = json_decode((string) $response->getBody(), true);
-        $this->assertStringContainsString("\r\n", $body['data']['query']);
-
-        // Response should not have injected header
+        // A path with a control character has no route (up to 2.0 the CRLF reached the
+        // handler as a parameter)
+        $this->assertSame(404, $response->getStatusCode());
+        $this->assertFalse($reached);
         $this->assertFalse($response->hasHeader('X-Injected'));
     }
 }

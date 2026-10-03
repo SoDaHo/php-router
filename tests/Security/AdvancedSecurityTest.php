@@ -50,7 +50,12 @@ class AdvancedSecurityTest extends TestCase
     public function testDeepNullByteInjection(): void
     {
         $collector = new RouteCollector();
-        $collector->get('/download/{file}', fn ($req, $file) => Response::success(['file' => $file]));
+        $reached = false;
+        $collector->get('/download/{file}', function ($req, $file) use (&$reached) {
+            $reached = true;
+
+            return Response::success(['file' => $file]);
+        });
 
         $dispatcher = new RouteDispatcher($collector->getData());
 
@@ -58,11 +63,11 @@ class AdvancedSecurityTest extends TestCase
         $path = '/download/safe_file.txt%00.exe';
 
         $response = $dispatcher->handle(new ServerRequest('GET', $path));
-        $body = json_decode((string)$response->getBody(), true);
 
-        // It matches, and the null byte is still there (not truncated)
-        $this->assertSame(200, $response->getStatusCode());
-        $this->assertSame("safe_file.txt\0.exe", $body['data']['file'], 'Null byte was silently stripped or truncated string!');
+        // A path with a NUL byte has no route: the handler never sees it (up to 2.0 it got
+        // the value with the NUL byte in it, untruncated)
+        $this->assertSame(404, $response->getStatusCode());
+        $this->assertFalse($reached);
     }
 
     /**

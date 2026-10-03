@@ -847,6 +847,10 @@ class AppFolderTest extends TestCase
             'file that has a backslash in its name' => ['/login/back\\slash.js'],
             'file that has a backslash in its name, encoded' => ['/login/back%5Cslash.js'],
             'NUL, encoded' => ['/login/index.html%00.js'],
+            // No file, and no start page either: a path with a control character has no route
+            'line break in a path of the app' => ['/login/page%0Aevil'],
+            'line break behind a file' => ['/login/assets/style.css%0A'],
+            'DEL in a path of the app' => ['/login/page%7F'],
             'hidden file' => ['/login/.env'],
             'hidden folder' => ['/login/.hidden/inside.js'],
             'link to a hidden file' => ['/login/link-to-hidden.js'],
@@ -939,6 +943,37 @@ class AppFolderTest extends TestCase
         $honest = $folder->serve(new ServerRequest('GET', '/login/assets/style.css'), '/login/assets/style.css');
         $this->assertNotNull($honest);
         $this->assertSame('p{}', (string) $honest->getBody());
+    }
+
+    public function testFolderRefusesControlCharactersWhenAskedDirectly(): void
+    {
+        $folder = new AppFolder('/login', $this->app);
+
+        // Encoded in the raw path: no file and no start page
+        foreach (['/login/page%0Aevil', '/login/page%0aevil', '/login/page%09', '/login/page%7F', '/login/assets/style.css%00'] as $raw) {
+            $this->assertNull($folder->serve(new ServerRequest('GET', $raw), rawurldecode($raw)), $raw);
+        }
+
+        // In the raw path alone: it counts, not what a caller decoded it to
+        foreach (['/login/page%0Aevil', '/login/page%1f', '/login/page%7F', '/login/page%7f'] as $raw) {
+            $this->assertNull($folder->serve(new ServerRequest('GET', $raw), '/login/page'), $raw);
+        }
+
+        // As they stand in the raw path (a request object of another make), the decoded
+        // path clean: the same rule as the dispatcher's
+        foreach (["/login/page\n", "/login/page\x7F", '/login/page\\x'] as $raw) {
+            $uri = $this->createMock(\Psr\Http\Message\UriInterface::class);
+            $uri->method('getPath')->willReturn($raw);
+            $this->assertNull($folder->serve((new ServerRequest('GET', '/login/page'))->withUri($uri), '/login/page'), json_encode($raw, JSON_THROW_ON_ERROR));
+        }
+
+        // In the decoded path a caller hands over, whatever the raw one says
+        foreach (["/login/page\nevil", "/login/page\t", "/login/page\x7F"] as $path) {
+            $this->assertNull($folder->serve(new ServerRequest('GET', '/login/page'), $path), json_encode($path, JSON_THROW_ON_ERROR));
+        }
+
+        // The start page for an honest path of the app
+        $this->assertNotNull($folder->serve(new ServerRequest('GET', '/login/page'), '/login/page'));
     }
 
     public function testRawNulAndBackslashInThePathAreRefusedAsWell(): void

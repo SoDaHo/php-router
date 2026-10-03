@@ -206,13 +206,14 @@ class RouteDispatcher implements RequestHandlerInterface
         $method = $request->getMethod();
         $requestPath = $request->getUri()->getPath();
 
-        if (self::hidesSeparator($requestPath)) {
+        if (self::hasNoRoute($requestPath)) {
             // The table is not asked. The path stays as it came — decoded it would read
             // like the path of a route that exists.
             return $this->issue(new RouteMatch(RouteMatch::NOT_FOUND, $method, $requestPath), $requestPath);
         }
 
-        $path = $this->normalizePath($request);
+        // The path read once: what was checked is what is looked up
+        $path = $this->normalizePath($requestPath);
 
         if ($path === null) {
             // Outside the base path. The path stays as requested (decoded), as the notFound hook reports it.
@@ -308,23 +309,30 @@ class RouteDispatcher implements RequestHandlerInterface
     }
 
     /**
-     * Whether a request path carries a separator that is none in the address: an encoded
-     * slash (%2F), an encoded backslash (%5C) or a backslash. Decoded, '/files/a%2Fb'
-     * would be two segments here and one for whatever stands in front (proxy, access
-     * rules of the web server) — such a path has no route, as with Apache's default.
+     * Whether a request path is the address of no route, whatever the table holds:
+     *
+     * - It carries a separator that is none in the address: an encoded slash (%2F), an
+     *   encoded backslash (%5C) or a backslash. Decoded, '/files/a%2Fb' would be two
+     *   segments here and one for whatever stands in front (proxy, access rules of the
+     *   web server), as with Apache's default.
+     * - It carries a control character (%00 to %1F, %7F), encoded or not. No route pattern
+     *   and no base path may contain one, so only a placeholder could take it — and hand a
+     *   line break in an id to the handler.
+     *
+     * @internal Also asked by AppFolder, which keeps the rule for a caller of its own
      */
-    private static function hidesSeparator(string $requestPath): bool
+    public static function hasNoRoute(string $requestPath): bool
     {
-        return preg_match('/%2f|%5c|\\\\/i', $requestPath) === 1;
+        return preg_match('/%2f|%5c|\\\\|%[01][0-9a-f]|%7f|[\x00-\x1f\x7f]/i', $requestPath) === 1;
     }
 
     /**
      * The path the route table is asked with: decoded, base path removed, trailing slash
      * as configured. Null when the request lies outside the base path.
      */
-    private function normalizePath(ServerRequestInterface $request): ?string
+    private function normalizePath(string $requestPath): ?string
     {
-        $uri = rawurldecode($request->getUri()->getPath());
+        $uri = rawurldecode($requestPath);
 
         // BasePath handling: requests MUST start with basePath
         if ($this->basePath !== '') {
@@ -681,13 +689,15 @@ class RouteDispatcher implements RequestHandlerInterface
      */
     private function serveApp(ServerRequestInterface $request): ?ResponseInterface
     {
-        // A path with a hidden separator has no route — and no file of an app either
-        if ($this->apps === [] || self::hidesSeparator($request->getUri()->getPath())) {
+        // A path that is the address of no route (hidden separator, control character) is
+        // no file of an app either, and gets no start page
+        $requestPath = $request->getUri()->getPath();
+        if ($this->apps === [] || self::hasNoRoute($requestPath)) {
             return null;
         }
 
         // Prefixes are relative to the base path, like routes; outside it there is no app
-        $path = $this->normalizePath($request);
+        $path = $this->normalizePath($requestPath);
         if ($path === null) {
             return null;
         }

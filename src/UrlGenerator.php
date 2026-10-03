@@ -218,6 +218,7 @@ final class UrlGenerator
             }
 
             $value = $params[$parameter];
+
             $values[$parameter] = is_bool($value) ? ($value ? '1' : '0') : (string) $value;
         }
 
@@ -233,6 +234,14 @@ final class UrlGenerator
             if (str_contains($value, '\\')) {
                 throw new RouterException(
                     sprintf('Parameter "%s" contains a backslash, which no route accepts', $parameter),
+                    debugMessage: $value,
+                );
+            }
+
+            // Encoded it would be %0A and the like — a path the router answers with 404
+            if (preg_match('/[\x00-\x1f\x7f]/', $value) === 1) {
+                throw new RouterException(
+                    sprintf('Parameter "%s" contains a control character, which no route accepts', $parameter),
                     debugMessage: $value,
                 );
             }
