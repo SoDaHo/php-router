@@ -134,6 +134,12 @@ is meant literally still works: `/tags/a%252Fb` reaches the handler as `a%2Fb`. 
 middleware that decodes the path itself before it passes the request on opens the door
 again — the rule looks at the path of the request it is given.
 
+**A control character has no route either:** a path with `%00` to `%1F` or `%7F` (a line
+break, a tab, a NUL byte) is answered with 404 in the same way, before the route table and
+before an app folder. No route pattern and no base path may contain one, so only a
+placeholder could take it — and hand a line break in an id to the handler. With URL
+encoding on, `url()` refuses a value with a control character for the same reason.
+
 ### Custom Patterns
 
 ```php
@@ -349,7 +355,8 @@ $match->params;            // ['id' => '5'] — as in the path, not cast yet
 $match->allowedMethods();  // every method the path is registered with
 $match->path;              // the path the table was asked with (decoded, without basePath);
                            // as requested where the table was not asked: outside the
-                           // base path (decoded), with a hidden separator (as it came)
+                           // base path (decoded), with a hidden separator or a control
+                           // character (as it came)
 ```
 
 `match()` needs no container, so it works before the application is booted;
@@ -377,7 +384,7 @@ $r->get('/users/{id}', [UserController::class, 'show'])
 $url = $router->url('user.show', ['id' => 5]);
 // → /users/5
 
-// Absolute URL (needs 'baseUrl' in the config, or APP_URL with Router::fromEnv())
+// Absolute URL (needs 'baseUrl' in the config, setBaseUrl(), or APP_URL with Router::fromEnv())
 $url = $router->absoluteUrl('user.show', ['id' => 5]);
 // → https://example.com/users/5
 ```
@@ -560,7 +567,9 @@ $router = Router::create([
 ```
 
 Only what you pass counts: `Router::create()` and `new Router()` do not look at the
-environment.
+environment. A key the router does not know is refused with a `RouterException` that
+names the known ones (see [Options](#options)), so that a typo like `basepath` does not go
+unnoticed.
 
 ### Via Environment Variables
 
@@ -602,14 +611,17 @@ value in the config array.
 ```php
 $router = Router::create()
     ->setDebug(true)
-    ->setBasePath('/api');
+    ->setBasePath('/api')
+    ->setBaseUrl($env['APP_URL'] ?? null);   // known only once the .env is read
 
 $router->isDebug();   // what the router decided
 ```
 
-`setDebug()`, `setBasePath()` and `loadRoutes()` belong in front of the first request,
-`match()` or `url()`: the route table is built from them. Called later they throw a
-`RouterException` instead of being accepted without effect.
+`setDebug()`, `setBasePath()`, `setBaseUrl()` and `loadRoutes()` belong in front of the
+first request, `match()`, `url()` or `absoluteUrl()`: those build the route table. Once it
+is built they throw a `RouterException` instead of being accepted without effect. (A first
+use that could not build it — no routes loaded, a routes file that throws — leaves them
+open.)
 
 ### Options
 
@@ -617,7 +629,7 @@ $router->isDebug();   // what the router decided
 |------------|--------------|---------|-------------|
 | `debug` | `APP_DEBUG` | `false` | Enable debug mode (detailed errors). Boolean or boolean-like (`'true'`, `'0'`, ...). `null` means the default; `''` and `0` count as off; anything else is refused |
 | `basePath` | `ROUTER_BASE_PATH` | `''` | URL prefix for all routes (`/api`, `/api/` and `api` mean the same). Written decoded, like a route pattern (`/my app`, not `/my%20app`): a percent-encoded character, a backslash, a control character, `?`, `#` or a `.`/`..` segment is refused |
-| `baseUrl` | `APP_URL` | `null` | Base URL for `absoluteUrl()` |
+| `baseUrl` | `APP_URL` | `null` | Base URL for `absoluteUrl()`, put in front of the address as it is (a slash at its end is dropped). Empty means none: `null`, `''` and, as in 1.x, `false` (`getenv()` without the variable), `0` and `'0'`; another type is refused. Also `setBaseUrl()` |
 | `trailingSlash` | `ROUTER_TRAILING_SLASH` | `'strict'` | `'strict'` or `'ignore'`; `null` and `''` mean the default, anything else is refused |
 | `urlEncoding` | `ROUTER_URL_ENCODING` | `true` | `rawurlencode()` parameter values in `url()`/`absoluteUrl()`; `false` inserts them as given. Boolean or boolean-like, as `debug` |
 | `routesFile` | - | `null` | Routes file, as `loadRoutes()` sets it |
@@ -688,11 +700,14 @@ $router->on('hookError', function (array $data) {
 **Without an `error` hook nothing is logged.** An exception caught by the router becomes a
 500 response and leaves no other trace — logging is the application's job, the hook is how.
 
-**`path` and `params` are request data.** In `dispatch`, `notFound` and `methodNotAllowed`
-they are already URL-decoded — `/x%0Ay` arrives with a real line break in it. Encode them
-before they go into a line-based log. (One exception: a path that was refused for a
-[hidden separator](#slashes-in-a-parameter) arrives in `notFound` as it came, base path
-included — decoded it would read like the path of a route that exists.)
+**`path` and `params` are request data.** In `dispatch` and `methodNotAllowed` they are
+already URL-decoded; a control character never gets there (such a path has no route), but
+other characters do (`%E2%80%A8`, bytes that are not UTF-8). In `notFound` a path refused
+for a [hidden separator or a control character](#slashes-in-a-parameter) arrives as it
+came, unchanged — `%0A` stays `%0A`, and a control character that a request object of
+another make handed over as it stands stays one —, base path included, also outside the
+base path; any other path arrives decoded. Encode all of them before they go into a
+line-based log.
 
 ## PSR-15 Compatibility
 
@@ -732,6 +747,25 @@ $router = Router::create()
 // Controllers are resolved via container if available
 // Otherwise instantiated directly
 ```
+
+## Wrapping the Router
+
+All classes of the library are `final`, `Router` included (the exceptions stay open). What
+1.x applications did in a subclass of `Router` has its own place now: a middleware for
+every request (`middleware()`, also for a 404 page of your own), `setErrorHandler()`,
+hooks, route attributes, `Router::match()`, `setBaseUrl()`. If something is missing there, it belongs in
+the library — ask for it rather than building around it.
+
+Code that receives the router types against `Sodaho\Router\Contract\RouterInterface`:
+`handle()` (PSR-15), `match()`, `url()` and `absoluteUrl()`. That is also what a test
+doubles — `createMock(RouterInterface::class)`; `Router` itself is final and cannot be
+doubled. Setting the router up (`loadRoutes()`, `middleware()`, `app()`, `on()`,
+`setErrorHandler()`, ...) stays with the one concrete `Router` an application builds.
+
+A decorator of the interface sees what it wraps, but `run()` sends the router's own
+answer: to send a decorator's, call its `handle()` and `emit()` the response (or use your
+own emitter, see [PSR-15 Compatibility](#psr-15-compatibility)). A header on every answer
+belongs in `middleware()`, not in a decorator.
 
 ## Exceptions
 
@@ -836,8 +870,9 @@ relative folder means the working directory at the time of the call.
 to lie under the resolved folder — links are followed and checked), hidden files and
 folders (a leading dot, `.well-known` included — give those a route), files that cannot be
 read, file types that are not on the list (see `AppFolder::TYPES`, extend it with the
-`types` option), and paths with a NUL byte, a backslash, an encoded separator (`%2F`,
-`%5C`), an empty segment (`//`) or a segment that ends in a dot or a space. A requested
+`types` option), and paths with a control character (a NUL byte, a line break; such a path
+gets no start page either), a backslash, an encoded separator (`%2F`, `%5C`), an empty
+segment (`//`) or a segment that ends in a dot or a space. A requested
 path with a colon below the prefix is never looked up as a file (on Windows it would name
 a stream of one); as a path of the app's own router — `/login/item/urn:isbn:1` — it gets
 the start page. (Most PSR-7 implementations fold slashes at the very start of a path into
@@ -967,7 +1002,7 @@ return $rewritten
 ```
 
 `$match->path` is the path without the base path — except for a request outside the base
-path (and one with a hidden separator), where it is the whole path: with a base path,
+path (and one with a hidden separator or a control character), where it is the whole path: with a base path,
 compare against the request's own path instead. And with an app at `/` every `GET` path belongs to an app; there is nothing
 left for such a middleware to answer.
 
