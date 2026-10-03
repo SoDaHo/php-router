@@ -153,6 +153,36 @@ class RfcResponderTest extends TestCase
         ], $result);
     }
 
+    /**
+     * @return array<string, array{0: mixed, 1: mixed}>
+     */
+    public static function statusValues(): array
+    {
+        return [
+            'a status code' => [422, 422],
+            'a status code as a string' => ['422', 422],
+            // 1.x cast everything numeric: 404.7 became 404, '1e3' became 1000, and a float
+            // too large for an integer became a number that had nothing to do with it
+            // (PHP 8.5 warns about that cast)
+            'a float' => [404.7, 404.7],
+            'a float too large for an integer' => [1e30, 1e30],
+            'a string in scientific notation' => ['1e3', '1e3'],
+            'a string with a blank' => [' 404', ' 404'],
+            'a string with a line break' => ["404\n", "404\n"],
+            'four digits' => ['4040', '4040'],
+            'no number at all' => ['abc', 'abc'],
+            'true' => [true, true],
+        ];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('statusValues')]
+    public function testStatusIsANumberOnlyWhenItIsAStatusCode(mixed $given, mixed $expected): void
+    {
+        $result = (new RfcResponder())->formatError('Failed', null, ['status' => $given, 'other' => 1]);
+
+        $this->assertSame(['type' => 'about:blank', 'title' => 'Failed', 'status' => $expected, 'other' => 1], $result);
+    }
+
     public function testFormatErrorWithExtensionMembers(): void
     {
         $responder = new RfcResponder('https://api.example.com/errors');

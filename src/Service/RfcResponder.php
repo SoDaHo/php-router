@@ -79,9 +79,12 @@ final class RfcResponder implements ResponderInterface
                 unset($details['instance']);
             }
 
-            // If 'status' key exists, use it as the status field
-            if (isset($details['status']) && (is_int($details['status']) || is_numeric($details['status']))) {
-                $body['status'] = (int) $details['status'];
+            // If 'status' key exists, use it as the status field: a status code, as a
+            // number. Anything else stays what the application passed (below) — a float
+            // or a string like '1e3' is not turned into a number it never was.
+            if (isset($details['status'])) {
+                $status = $details['status'];
+                $body['status'] = is_string($status) && preg_match('/^\d{3}$/D', $status) === 1 ? (int) $status : $status;
                 unset($details['status']);
             }
 

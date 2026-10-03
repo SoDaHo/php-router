@@ -180,6 +180,34 @@ class ResponseTest extends TestCase
         Response::paginated([], 10, 1, -5);
     }
 
+    /**
+     * @return array<string, array{0: int, 1: int, 2: int}>
+     */
+    public static function totalsAndTheirLastPage(): array
+    {
+        return [
+            'nothing' => [0, 10, 0],
+            'one item' => [1, 10, 1],
+            'exactly one page' => [10, 10, 1],
+            'one more than a page' => [11, 10, 2],
+            'exactly three pages' => [30, 10, 3],
+            // 1.x went through a float: last_page was -9223372036854775808, and PHP 8.5
+            // warns about the cast
+            'the largest total, one per page' => [PHP_INT_MAX, 1, PHP_INT_MAX],
+            'the largest total, two per page' => [PHP_INT_MAX, 2, intdiv(PHP_INT_MAX, 2) + 1],
+            'a total a float cannot hold' => [9007199254740993, 1, 9007199254740993],
+            'one page for the largest total' => [PHP_INT_MAX, PHP_INT_MAX, 1],
+        ];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('totalsAndTheirLastPage')]
+    public function testLastPageIsCountedInWholeNumbers(int $total, int $perPage, int $lastPage): void
+    {
+        $body = json_decode((string) Response::paginated([], $total, 1, $perPage)->getBody(), true, 512, JSON_BIGINT_AS_STRING);
+
+        $this->assertSame((string) $lastPage, (string) $body['meta']['pagination']['last_page']);
+    }
+
     public function testErrorResponse(): void
     {
         $response = Response::error('Something failed', 400, 'CUSTOM_ERROR', ['field' => 'value']);

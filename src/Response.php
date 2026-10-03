@@ -132,7 +132,9 @@ final class Response
             throw new \InvalidArgumentException('$perPage must be at least 1');
         }
 
-        $lastPage = (int) ceil($total / $perPage);
+        // In whole numbers: ceil() goes through a float, which for a very large total is
+        // no longer the number it stands for (and PHP 8.5 warns when it is cast back)
+        $lastPage = intdiv($total, $perPage) + ($total % $perPage > 0 ? 1 : 0);
 
         return self::envelope(200, self::getResponder()->formatSuccess($items, null, [
             'pagination' => [
