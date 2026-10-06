@@ -281,13 +281,22 @@ final class RouteCollector
     }
 
     /**
-     * Group routes with common middleware.
+     * Group routes with common middleware — and, if given, common attributes: the same as
+     * an attributeGroup() around the middlewareGroup(), with the same rules (nested groups
+     * add up, the inner group wins per key, Route::attribute() wins over every group).
      *
      * @param string|array<string|object>|object $middleware Middleware class name(s) or instance(s)
      * @param callable $callback Receives RouteCollector instance
+     * @param array<string, mixed> $attributes Attribute name => value
      */
-    public function middlewareGroup(string|array|object $middleware, callable $callback): void
+    public function middlewareGroup(string|array|object $middleware, callable $callback, array $attributes = []): void
     {
+        if ($attributes !== []) {
+            $this->attributeGroup($attributes, fn (self $r) => $r->middlewareGroup($middleware, $callback));
+
+            return;
+        }
+
         $middleware = is_array($middleware) ? $middleware : [$middleware];
 
         $previousMiddleware = $this->currentMiddleware;

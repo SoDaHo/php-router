@@ -406,6 +406,94 @@ class RouteCollectorTest extends TestCase
         $this->assertSame($route, $this->collector->getData()[0]['GET']['/api/token']);
     }
 
+    public function testMiddlewareGroupTakesAttributesAsAnAttributeGroupAroundIt(): void
+    {
+        $this->collector->attributeGroup(['format' => 'envelope', 'cors' => false], function (RouteCollector $r): void {
+            $r->middlewareGroup('Auth', function (RouteCollector $r): void {
+                $r->get('/token', 'h');
+                $r->get('/avatar', 'h')->attribute('format', 'binary');
+                $r->middlewareGroup('Log', function (RouteCollector $r): void {
+                    $r->get('/deep', 'h');
+                }, ['scope' => 'admin', 'cors' => true]);
+            }, ['format' => 'oauth']);
+            $r->get('/after', 'h');
+        });
+        $this->collector->get('/outside', 'h');
+
+        $seen = [];
+        foreach ($this->collector->getRoutes() as $route) {
+            $seen[$route->pattern] = [$route->middleware, $route->attributes];
+        }
+
+        $this->assertSame([
+            // The inner group wins per key …
+            '/token' => [['Auth'], ['format' => 'oauth', 'cors' => false]],
+            // … the route wins over every group …
+            '/avatar' => [['Auth'], ['format' => 'binary', 'cors' => false]],
+            // … nested groups add up, middleware and attributes alike …
+            '/deep' => [['Auth', 'Log'], ['format' => 'oauth', 'cors' => true, 'scope' => 'admin']],
+            // … and both are over when the group ends
+            '/after' => [[], ['format' => 'envelope', 'cors' => false]],
+            '/outside' => [[], []],
+        ], $seen);
+    }
+
+    public function testShortFormBuildsTheSameRoutesAsTheLongForm(): void
+    {
+        $long = new RouteCollector();
+        $long->group('/api', function (RouteCollector $r): void {
+            $r->attributeGroup(['format' => 'oauth'], function (RouteCollector $r): void {
+                $r->middlewareGroup('Auth', function (RouteCollector $r): void {
+                    $r->get('/users/{id}', 'h')->name('users.show');
+                    $r->redirect('/old/{id}', '/api/users/{id}', 301);
+                    $r->attributeGroup(['scope' => 'admin'], function (RouteCollector $r): void {
+                        $r->middlewareGroup('Log', function (RouteCollector $r): void {
+                            $r->post('/admin', 'h');
+                        });
+                    });
+                });
+            });
+        });
+
+        $short = new RouteCollector();
+        $short->group('/api', function (RouteCollector $r): void {
+            $r->middlewareGroup('Auth', function (RouteCollector $r): void {
+                $r->get('/users/{id}', 'h')->name('users.show');
+                $r->redirect('/old/{id}', '/api/users/{id}', 301);
+                // Named arguments as well
+                $r->middlewareGroup(middleware: 'Log', callback: function (RouteCollector $r): void {
+                    $r->post('/admin', 'h');
+                }, attributes: ['scope' => 'admin']);
+            }, ['format' => 'oauth']);
+        });
+
+        $describe = static fn (RouteCollector $collector): array => array_map(
+            static fn (\Sodaho\Router\Route $route): array => [
+                $route->methods,
+                $route->pattern,
+                $route->middleware,
+                $route->attributes,
+                $route->name,
+                is_object($route->handler) ? $route->handler::class : $route->handler,
+            ],
+            $collector->getRoutes()
+        );
+
+        $this->assertSame($describe($long), $describe($short));
+        $this->assertCount(3, $describe($short));
+    }
+
+    public function testMiddlewareGroupWithoutAttributesIsAsBefore(): void
+    {
+        $this->collector->middlewareGroup('Auth', function (RouteCollector $r): void {
+            $r->get('/a', 'h');
+        }, []);
+
+        $route = $this->collector->getRoutes()[0];
+        $this->assertSame(['Auth'], $route->middleware);
+        $this->assertSame([], $route->attributes);
+    }
+
     /**
      * A routes file that catches what a group's callback throws and carries on must not
      * register the routes after it inside that group.
@@ -420,13 +508,17 @@ class RouteCollectorTest extends TestCase
             fn () => $this->collector->group('/admin', $giveUp),
             fn () => $this->collector->middlewareGroup('Auth', $giveUp),
             fn () => $this->collector->attributeGroup(['cors' => true], $giveUp),
+            fn () => $this->collector->middlewareGroup('Auth', $giveUp, ['cors' => true]),
         ] as $group) {
+            // Not with fail() inside the try: PHPUnit's failure is a RuntimeException as well
+            $thrown = null;
             try {
                 $group();
-                $this->fail('The exception was swallowed');
             } catch (\RuntimeException $e) {
-                $this->assertSame('routes of an optional module are missing', $e->getMessage());
+                $thrown = $e;
             }
+            $this->assertNotNull($thrown, 'The exception was swallowed');
+            $this->assertSame('routes of an optional module are missing', $thrown->getMessage());
         }
 
         $route = $this->collector->get('/public', 'h');
