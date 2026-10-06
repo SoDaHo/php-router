@@ -69,7 +69,10 @@ class TextStreamTest extends TestCase
             'seek before the start' => fn () => $stream->seek(-1),
             'seek before the start from the end' => fn () => $stream->seek(-4, SEEK_END),
             'seek beyond what an integer holds, from the current position' => function () use ($stream): void {
-                $stream->seek(1);
+                // Only the overflow may throw here: a failing seek(1) would hide it
+                $stream->rewind();
+                $stream->read(1);
+                $this->assertSame(1, $stream->tell());
                 $stream->seek(PHP_INT_MAX, SEEK_CUR);
             },
             'seek beyond what an integer holds, from the end' => fn () => $stream->seek(PHP_INT_MAX, SEEK_END),

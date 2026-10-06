@@ -49,6 +49,10 @@ class LastResortWithoutStreamsTest extends TestCase
 
     private function routes(): string
     {
+        // One file per test, also when a test builds several routers
+        if ($this->routesFile !== '') {
+            return $this->routesFile;
+        }
         $this->routesFile = sys_get_temp_dir() . '/router_no_streams_' . uniqid() . '.php';
         file_put_contents($this->routesFile, <<<'PHP'
             <?php
