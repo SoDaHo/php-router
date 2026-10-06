@@ -68,13 +68,7 @@ class TextStreamTest extends TestCase
             'negative length' => fn () => $stream->read(-1),
             'seek before the start' => fn () => $stream->seek(-1),
             'seek before the start from the end' => fn () => $stream->seek(-4, SEEK_END),
-            'seek beyond what an integer holds, from the current position' => function () use ($stream): void {
-                // Only the overflow may throw here: a failing seek(1) would hide it
-                $stream->rewind();
-                $stream->read(1);
-                $this->assertSame(1, $stream->tell());
-                $stream->seek(PHP_INT_MAX, SEEK_CUR);
-            },
+
             'seek beyond what an integer holds, from the end' => fn () => $stream->seek(PHP_INT_MAX, SEEK_END),
             'unknown whence' => fn () => $stream->seek(0, 99),
         ] as $label => $call) {
@@ -90,6 +84,18 @@ class TextStreamTest extends TestCase
 
         // Nothing of that changed the text
         $this->assertSame('abc', (string) $stream);
+    }
+
+    public function testSeekBeyondWhatAnIntegerHoldsFromTheCurrentPositionIsRefused(): void
+    {
+        // A test of its own: in the loop above a failing setup would pass for the refusal
+        $stream = new TextStream('abc');
+        $stream->read(1);
+        $this->assertSame(1, $stream->tell());
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('Cannot seek to that position');
+        $stream->seek(PHP_INT_MAX, SEEK_CUR);
     }
 
     public function testIsUnusableOnceClosedOrDetached(): void
