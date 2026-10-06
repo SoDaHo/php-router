@@ -148,6 +148,24 @@ final class Router implements RouterInterface
     }
 
     /**
+     * A plain-text answer that needs nothing the application can replace. When PHP cannot
+     * even open the stream for its text (the php:// wrapper unregistered), it goes out with
+     * a body that needs none (RouteDispatcher::plain()); what failed is handed to $report.
+     *
+     * @param \Closure(\Throwable): void $report
+     */
+    private function plainAnswer(int $status, string $text, \Closure $report): ResponseInterface
+    {
+        try {
+            return new \Nyholm\Psr7\Response($status, RouteDispatcher::PLAIN_HEADERS, $text);
+        } catch (\Throwable $e) {
+            $report($e);
+
+            return RouteDispatcher::plain($status, $text);
+        }
+    }
+
+    /**
      * A variable of the environment: $_ENV, then the environment of the process.
      *
      * getenv($key, true), not getenv($key): under PHP-FPM (and mod_php) the plain call
@@ -643,7 +661,7 @@ final class Router implements RouterInterface
             // Nothing was sent: the response cannot be read (its body closed, a getter
             // that throws). A 500 can go out, and the error hook hears why.
             $this->report($e, $request);
-            $prepared = $this->prepare(new \Nyholm\Psr7\Response(500, RouteDispatcher::PLAIN_HEADERS, 'Internal Server Error'), $withBody);
+            $prepared = $this->prepare($this->plainAnswer(500, 'Internal Server Error', fn (\Throwable $failure) => $this->report($failure, $request)), $withBody);
         }
 
         try {
@@ -679,7 +697,7 @@ final class Router implements RouterInterface
             // The application's responder (Response::setResponder()) failed
             $this->trigger('error', ['exception' => $failure] + $about + ['status' => $status]);
 
-            return new \Nyholm\Psr7\Response($status, RouteDispatcher::PLAIN_HEADERS, $text);
+            return $this->plainAnswer($status, $text, fn (\Throwable $last) => $this->trigger('error', ['exception' => $last] + $about + ['status' => $status]));
         }
     }
 
@@ -715,10 +733,11 @@ final class Router implements RouterInterface
             try {
                 return $response->withBody(\Nyholm\Psr7\Stream::create(''));
             } catch (\Throwable $failure) {
-                // The error handler's response does not take another body
+                // The error handler's response does not take another body (or PHP cannot
+                // open the stream for an empty one)
                 $this->reportOnce($failure, $request, $known);
 
-                return new \Nyholm\Psr7\Response(500, RouteDispatcher::PLAIN_HEADERS);
+                return RouteDispatcher::plain(500);
             }
         }
     }
@@ -783,7 +802,7 @@ final class Router implements RouterInterface
             // The application's responder (Response::setResponder()) failed
             $this->reportOnce($failure, $request, $known);
 
-            return new \Nyholm\Psr7\Response(500, RouteDispatcher::PLAIN_HEADERS, 'Internal Server Error');
+            return $this->plainAnswer(500, 'Internal Server Error', fn (\Throwable $last) => $this->reportOnce($last, $request, $known));
         }
     }
 

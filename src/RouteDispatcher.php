@@ -12,6 +12,7 @@ use Psr\Http\Server\RequestHandlerInterface;
 use Sodaho\Router\Exception\RouterException;
 use Sodaho\Router\Middleware\MiddlewareHandler;
 use Sodaho\Router\Middleware\RouteHandler;
+use Sodaho\Router\Stream\TextStream;
 use Sodaho\Router\Traits\HasHooks;
 
 /**
@@ -78,6 +79,18 @@ final class RouteDispatcher implements RequestHandlerInterface
         $this->trailingSlash = $trailingSlash;
         $this->debug = $debug;
         $this->issued = new \WeakMap();
+    }
+
+    /**
+     * A plain-text answer whose body needs nothing PHP has to open (a TextStream): what
+     * goes out when not even a stream can be opened any more (the php:// wrapper
+     * unregistered). A new one each time, so nothing a reader does to one touches another.
+     *
+     * @internal Also used by Router
+     */
+    public static function plain(int $status, string $text = ''): ResponseInterface
+    {
+        return (new \Nyholm\Psr7\Response($status, self::PLAIN_HEADERS))->withBody(new TextStream($text));
     }
 
     // ==================== Wiring (used by Router) ====================
@@ -496,13 +509,13 @@ final class RouteDispatcher implements RequestHandlerInterface
                 // Its answer refuses as well
                 $this->reportOnce($failure, $request, $known);
 
-                return new \Nyholm\Psr7\Response(500, self::PLAIN_HEADERS);
+                return self::plain(500);
             }
         }
 
         $this->reportOnce($e, $request, $known);
 
-        return new \Nyholm\Psr7\Response(500, self::PLAIN_HEADERS);
+        return self::plain(500);
     }
 
     /**

@@ -407,6 +407,76 @@ class EmitStatusTest extends TestCase
         $this->assertStringEndsWith(' | 200', $reports[0]);
     }
 
+    public function testWithoutStreamsAResponseThatCannotBeReadGetsAPlain500(): void
+    {
+        $response = new class () extends \Nyholm\Psr7\Response {
+            public function getProtocolVersion(): string
+            {
+                throw new \RuntimeException('protocol failed');
+            }
+        };
+
+        // A PHP error handler that makes warnings exceptions; the handler takes the streams away
+        set_error_handler(static function (int $severity, string $message): bool {
+            throw new \ErrorException($message, 0, $severity);
+        });
+
+        try {
+            [$sent, $reports] = $this->runWith(function () use ($response) {
+                stream_wrapper_unregister('php');
+
+                return $response;
+            });
+        } finally {
+            restore_error_handler();
+            if (!in_array('php', stream_get_wrappers(), true)) {
+                stream_wrapper_restore('php');
+            }
+        }
+
+        // Not even the plain 500 could be built the usual way: it went out with a body that needs no stream
+        $this->assertSame('Internal Server Error', $sent);
+        $this->assertSame(500, http_response_code());
+        // Why the response could not be read (its body needs a stream as well), then the plain 500
+        $this->assertCount(2, $reports);
+        $this->assertStringEndsWith(' | 500', $reports[0]);
+        $this->assertStringContainsString('wrapper "php"', $reports[1]);
+        $this->assertStringEndsWith(' | 500', $reports[1]);
+    }
+
+    public function testWithoutStreamsARequestThatCannotBeBuiltGetsAPlain500(): void
+    {
+        $_SERVER['REQUEST_METHOD'] = 'GET';
+        $_SERVER['REQUEST_URI'] = '/plain';
+        $reports = [];
+        $router = Router::create(['debug' => false])
+            ->loadRoutes($this->routesFile)
+            ->on('error', function (array $data) use (&$reports): void {
+                $reports[] = $data['status'];
+            });
+
+        set_error_handler(static function (int $severity, string $message): bool {
+            throw new \ErrorException($message, 0, $severity);
+        });
+        stream_wrapper_unregister('php');
+
+        ob_start();
+        try {
+            $router->run();
+        } finally {
+            $sent = (string) ob_get_clean();
+            restore_error_handler();
+            if (!in_array('php', stream_get_wrappers(), true)) {
+                stream_wrapper_restore('php');
+            }
+        }
+
+        // The request could not be built (php://input), nor the responder's 500, nor a plain one
+        $this->assertSame('Internal Server Error', $sent);
+        $this->assertSame(500, http_response_code());
+        $this->assertSame([500, 500, 500], $reports);
+    }
+
     public function testGetterThatThrowsBeforeTheFirstByteGivesA500(): void
     {
         $response = new class () extends \Nyholm\Psr7\Response {
