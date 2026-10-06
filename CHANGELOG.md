@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Fixed
+- `handle()` and `run()` keep their word when PHP cannot open a stream any more (the
+  `php://` wrapper unregistered). Not a single response can be built then, not even the
+  router's plain-text 500, and `handle()` and `run()` threw. That answer now goes out with a
+  body that needs no stream (a string held in memory, a new one for each answer, read-only);
+  the `error` hook hears what failed. The empty 500 that HEAD gets when a response refuses
+  another body is such a read-only body as well.
+
 ## [2.0.0] - 2026-10-03
 
 Every change that breaks something from 1.x is in the table; what is not listed works as
