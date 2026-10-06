@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-10-06
+
+### Added
+- `middlewareGroup()` takes attributes as a third argument: `middlewareGroup($middleware,
+  $callback, ['format' => 'envelope'])` is the same as an `attributeGroup()` around the
+  `middlewareGroup()`, with the same rules (nested groups add up, the inner group wins per
+  key, `Route::attribute()` wins over every group). A third argument that PHP used to drop
+  counts now: an array as attributes, anything else is a `TypeError`. See README,
+  "Middleware".
+
 ## [2.0.1] - 2026-10-06
 
 ### Fixed
@@ -317,7 +327,8 @@ themselves (`handle()` plus their own emitter) are not affected.
 - **Configuration** via constructor array, environment variables, or fluent API.
 - **Strict parameter validation**: invalid types return 400 (not 500), controller TypeErrors bubble up as 500.
 
-[Unreleased]: https://github.com/sodaho/php-router/compare/v2.0.1...HEAD
+[Unreleased]: https://github.com/sodaho/php-router/compare/v2.1.0...HEAD
+[2.1.0]: https://github.com/sodaho/php-router/compare/v2.0.1...v2.1.0
 [2.0.1]: https://github.com/sodaho/php-router/compare/v2.0.0...v2.0.1
 [2.0.0]: https://github.com/sodaho/php-router/compare/v1.2.0...v2.0.0
 [1.2.0]: https://github.com/sodaho/php-router/compare/v1.1.1...v1.2.0

@@ -234,7 +234,9 @@ $route->attributes;                          // all of them
 ```
 
 Groups nest: the inner group wins per key, and `attribute()` on the route wins over every
-group. See [Looking a Route Up](#looking-a-route-up) for where the route comes from.
+group. A `middlewareGroup()` takes attributes as its third argument, for routes that share
+both (see [Middleware](#middleware)). See [Looking a Route Up](#looking-a-route-up) for
+where the route comes from.
 
 ## Middleware
 
@@ -254,6 +256,11 @@ $r->middlewareGroup([AuthMiddleware::class, LogMiddleware::class], function ($r)
     $r->get('/profile', [ProfileController::class, 'show']);
     $r->put('/profile', [ProfileController::class, 'update']);
 });
+
+// Middleware and attributes in one group — the same as an attributeGroup() around it
+$r->middlewareGroup([AuthMiddleware::class], function ($r) {
+    $r->get('/me', [AccountController::class, 'show']);
+}, ['format' => 'envelope']);
 ```
 
 **Route parameters are available in middleware:**
