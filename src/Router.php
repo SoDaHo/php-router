@@ -1012,15 +1012,16 @@ final class Router implements RouterInterface
         // Readability BEFORE anything is sent: a detached/closed body used to blow up loudly
         // inside __toString(). Throwing after the headers went out would leave a half-sent
         // response; throwing here lets the error handler still produce a proper 500.
+        $unreadable = 'Response body is not readable (closed or detached before emit)';
         try {
             $body = $response->getBody();
             $readable = $body->isReadable();
         } catch (\Throwable $e) {
-            $readable = false;
+            throw new RouterException($unreadable, 0, $e);
         }
 
-        if (!$readable || !isset($body)) {
-            throw new RouterException('Response body is not readable (closed or detached before emit)', 0, $e ?? null);
+        if (!$readable) {
+            throw new RouterException($unreadable);
         }
 
         $statusLine = sprintf(
