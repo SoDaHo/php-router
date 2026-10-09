@@ -129,7 +129,7 @@ final class RouteHandler implements RequestHandlerInterface
             return null;
         }
 
-        $first = (new \ReflectionFunction(\Closure::fromCallable($handler)))->getParameters()[0] ?? null;
+        $first = new \ReflectionFunction(\Closure::fromCallable($handler))->getParameters()[0] ?? null;
 
         // With a name of its own for the first parameter PHP refuses the call before the
         // handler runs. A variadic first parameter collects the named value instead: the

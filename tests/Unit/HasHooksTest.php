@@ -401,7 +401,7 @@ class HasHooksTest extends TestCase
     {
         $members = static fn (string $kind): array => array_map(
             static fn (\ReflectionProperty|\ReflectionMethod $member): string => $member->getName(),
-            (new \ReflectionClass(HasHooks::class))->{$kind}()
+            new \ReflectionClass(HasHooks::class)->{$kind}()
         );
 
         // As in 1.1.1

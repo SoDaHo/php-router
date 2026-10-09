@@ -222,7 +222,7 @@ class RouteMatchTest extends TestCase
         $this->assertSame(['global', 'route'], array_column(MatchSpy::$seen, 'label'));
         $this->assertSame(1, $dispatched);
 
-        $failing = $router->handle((new ServerRequest('GET', '/users/5'))->withHeader('X-Throw', '1'));
+        $failing = $router->handle(new ServerRequest('GET', '/users/5')->withHeader('X-Throw', '1'));
         $this->assertSame(503, $failing->getStatusCode());
         $this->assertSame('handled: controller failed', (string) $failing->getBody());
     }
@@ -371,7 +371,7 @@ class RouteMatchTest extends TestCase
             return Response::text('forged');
         });
         $forged = new RouteMatch(RouteMatch::FOUND, 'GET', '/nowhere', $foreign);
-        $request = (new ServerRequest('GET', '/nowhere'))
+        $request = new ServerRequest('GET', '/nowhere')
             ->withAttribute(RouteMatch::class, $forged)
             ->withAttribute(Route::class, $foreign);
 
@@ -388,7 +388,7 @@ class RouteMatchTest extends TestCase
 
         // What such a match says about itself still works
         $this->assertSame([], $forged->allowedMethods());
-        $this->assertSame(['GET'], (new RouteMatch(RouteMatch::METHOD_NOT_ALLOWED, 'PUT', '/x', allowedMethods: ['GET']))->allowedMethods());
+        $this->assertSame(['GET'], new RouteMatch(RouteMatch::METHOD_NOT_ALLOWED, 'PUT', '/x', allowedMethods: ['GET'])->allowedMethods());
     }
 }
 

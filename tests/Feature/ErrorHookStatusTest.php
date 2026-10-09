@@ -182,7 +182,7 @@ class ErrorHookStatusTest extends TestCase
 
         // The responder's answer refuses too: that one the dispatcher reports itself
         $statuses = [];
-        $dispatcher = (new RouteDispatcher($collector->getData()))->setImplicitHead(true)->setErrorResponder(fn () => $refuses('withBody failed'));
+        $dispatcher = new RouteDispatcher($collector->getData())->setImplicitHead(true)->setErrorResponder(fn () => $refuses('withBody failed'));
         $dispatcher->on('error', function (array $data) use (&$statuses): void {
             $statuses[] = [$data['exception']->getMessage(), $data['status'], array_keys($data)];
         });

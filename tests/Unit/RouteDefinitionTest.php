@@ -126,13 +126,13 @@ class RouteDefinitionTest extends TestCase
         $reads = ['route' => '', 'pattern' => ''];
 
         try {
-            (new RouteCollector())->get("/x/{n\xE4me}", 'handler');
+            new RouteCollector()->get("/x/{n\xE4me}", 'handler');
         } catch (RouterException $e) {
             $reads['route'] = $e->getMessage();
         }
 
         try {
-            (new RouteCollector())->addPattern("d\xE4te", '\d+');
+            new RouteCollector()->addPattern("d\xE4te", '\d+');
         } catch (RouterException $e) {
             $reads['pattern'] = $e->getMessage();
         }
@@ -140,7 +140,7 @@ class RouteDefinitionTest extends TestCase
         // Literal text for the URL generator as well, not a placeholder (decoded: the
         // address itself has it encoded)
         $reads['parts'] = array_column(RouteCollector::parts("/x/{n\xE4me}"), 'name');
-        $reads['url'] = rawurldecode((new \Sodaho\Router\UrlGenerator([new \Sodaho\Router\Route(['GET'], "/x/{n\xE4me}", 'handler', [], 'n')]))->url('n'));
+        $reads['url'] = rawurldecode(new \Sodaho\Router\UrlGenerator([new \Sodaho\Router\Route(['GET'], "/x/{n\xE4me}", 'handler', [], 'n')])->url('n'));
 
         return $reads;
     }

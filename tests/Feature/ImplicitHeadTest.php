@@ -207,7 +207,7 @@ class ImplicitHeadTest extends TestCase
         foreach ([
             'page of a middleware' => [new ServerRequest('HEAD', '/nowhere'), 404, 'text/html; charset=utf-8'],
             'error handler' => [new ServerRequest('HEAD', '/boom'), 500, 'text/plain; charset=utf-8'],
-            'last resort' => [(new ServerRequest('HEAD', '/page'))->withHeader('X-Throw-Outside', '1'), 500, 'text/plain; charset=utf-8'],
+            'last resort' => [new ServerRequest('HEAD', '/page')->withHeader('X-Throw-Outside', '1'), 500, 'text/plain; charset=utf-8'],
         ] as $label => [$request, $status, $contentType]) {
             $head = $router->handle($request);
             $get = $router->handle($request->withMethod('GET'));
@@ -256,7 +256,7 @@ class ImplicitHeadTest extends TestCase
         $collector->post('/head-first', fn () => Response::text('post'));
         $collector->get('/head-first', fn () => Response::text('get'));
 
-        $off = (new RouteDispatcher($collector->getData()))->setImplicitHead(false);
+        $off = new RouteDispatcher($collector->getData())->setImplicitHead(false);
         $on = new RouteDispatcher($collector->getData());
 
         // As registered while the switch is off ...
@@ -294,7 +294,7 @@ class ImplicitHeadTest extends TestCase
     {
         $collector = new RouteCollector();
         $collector->get('/page', fn () => Response::text('page'));
-        $dispatcher = (new RouteDispatcher($collector->getData()))->setImplicitHead(false);
+        $dispatcher = new RouteDispatcher($collector->getData())->setImplicitHead(false);
         $request = new ServerRequest('HEAD', '/page');
 
         $before = $dispatcher->match($request);
@@ -334,7 +334,7 @@ class ImplicitHeadTest extends TestCase
 
         $get = $router->handle(new ServerRequest('GET', '/users/5'));
         $head = $router->handle(new ServerRequest('HEAD', '/users/5'));
-        $madeHead = $router->handle((new ServerRequest('POST', '/users/5'))->withHeader('X-As-Head', '1'));
+        $madeHead = $router->handle(new ServerRequest('POST', '/users/5')->withHeader('X-As-Head', '1'));
 
         $this->assertNotSame('"' . md5('') . '"', $get->getHeaderLine('ETag'));
         foreach (['HEAD' => $head, 'made HEAD on the way in' => $madeHead] as $label => $response) {
@@ -386,7 +386,7 @@ class ImplicitHeadTest extends TestCase
         $collector = new RouteCollector();
         $collector->get('/page', fn () => Response::text('page'));
         $collector->post('/page', fn () => Response::text('posted'));
-        $dispatcher = (new RouteDispatcher($collector->getData()))->setImplicitHead(false);
+        $dispatcher = new RouteDispatcher($collector->getData())->setImplicitHead(false);
 
         $before = $dispatcher->match(new ServerRequest('GET', '/page'));
         $dispatcher->setImplicitHead(true);

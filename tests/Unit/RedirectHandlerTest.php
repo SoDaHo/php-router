@@ -34,7 +34,7 @@ class RedirectHandlerTest extends TestCase
         $handler = new RedirectHandler('/profile/{id}');
 
         // Parameters must be in _route_params (as set by RouteDispatcher)
-        $request = (new ServerRequest('GET', '/users/42/profile'))
+        $request = new ServerRequest('GET', '/users/42/profile')
             ->withAttribute('_route_params', ['id' => 42]);
 
         $response = $handler->handle($request);
@@ -46,7 +46,7 @@ class RedirectHandlerTest extends TestCase
     {
         $handler = new RedirectHandler('/posts/{year}/{slug}');
 
-        $request = (new ServerRequest('GET', '/old'))
+        $request = new ServerRequest('GET', '/old')
             ->withAttribute('_route_params', ['year' => 2025, 'slug' => 'hello']);
 
         $response = $handler->handle($request);
@@ -59,7 +59,7 @@ class RedirectHandlerTest extends TestCase
         $handler = new RedirectHandler('/test/{id}');
 
         // Only _route_params are replaced, not other attributes
-        $request = (new ServerRequest('GET', '/old'))
+        $request = new ServerRequest('GET', '/old')
             ->withAttribute('_route_params', ['id' => 42])
             ->withAttribute('user_injected', 'should-be-ignored');
 
@@ -73,7 +73,7 @@ class RedirectHandlerTest extends TestCase
         $handler = new RedirectHandler('/search/{query}');
 
         // Special characters should be URL-encoded
-        $request = (new ServerRequest('GET', '/old'))
+        $request = new ServerRequest('GET', '/old')
             ->withAttribute('_route_params', ['query' => 'hello world&foo=bar']);
 
         $response = $handler->handle($request);

@@ -101,7 +101,7 @@ class LastResortWithoutStreamsTest extends TestCase
     {
         $router = Router::create(['debug' => false]);
         $router->on('error', function (array $data) use (&$reports): void {
-            $reports[] = (new \ReflectionClass($data['exception']))->getShortName();
+            $reports[] = new \ReflectionClass($data['exception'])->getShortName();
         });
 
         return $router;
@@ -168,7 +168,7 @@ class LastResortWithoutStreamsTest extends TestCase
         // The error responder's answer refuses another body — and there is no stream for one anyway
         $refuses = $this->createStub(ResponseInterface::class);
         $refuses->method('withBody')->willThrowException(new \LogicException('refuses'));
-        $dispatcher = (new RouteDispatcher($collector->getData()))
+        $dispatcher = new RouteDispatcher($collector->getData())
             ->setImplicitHead(true)
             ->setErrorResponder(fn () => $refuses);
 
@@ -243,7 +243,7 @@ class LastResortWithoutStreamsTest extends TestCase
         $reports = [];
         $router = Router::create(['debug' => false])->loadRoutes($this->routes())
             ->on('error', function (array $data) use (&$reports): void {
-                $reports[] = (new \ReflectionClass($data['exception']))->getShortName() . ':' . $data['status'];
+                $reports[] = new \ReflectionClass($data['exception'])->getShortName() . ':' . $data['status'];
             });
 
         [$sent] = $this->withoutStreams($exceptions, function () use ($router): string {

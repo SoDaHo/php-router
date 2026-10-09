@@ -192,7 +192,7 @@ class EmitStatusTest extends TestCase
         $router = Router::create($config + ['debug' => false]);
 
         ob_start();
-        $router->emit((new \Nyholm\Psr7\Response(200))->withBody($body));
+        $router->emit(new \Nyholm\Psr7\Response(200)->withBody($body));
         $sent = ob_get_clean();
 
         $this->assertSame('xx', $sent);
@@ -346,7 +346,7 @@ class EmitStatusTest extends TestCase
             return ++$calls === 1 ? 'A' : throw new \Sodaho\Router\Exception\RouterException('router exception mid-body');
         });
 
-        [$sent, $reports] = $this->runWith(fn () => (new \Nyholm\Psr7\Response(503))->withBody($body));
+        [$sent, $reports] = $this->runWith(fn () => new \Nyholm\Psr7\Response(503)->withBody($body));
 
         $this->assertSame('A', $sent);
         $this->assertSame(503, http_response_code());

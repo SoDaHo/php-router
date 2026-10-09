@@ -35,7 +35,7 @@ final class UrlGenerator
      */
     public function __construct(array $routes = [], ?array $patterns = null)
     {
-        $this->patterns = $patterns ?? (new RouteCollector())->getPatterns();
+        $this->patterns = $patterns ?? new RouteCollector()->getPatterns();
 
         foreach ($routes as $key => $value) {
             if ($value instanceof Route) {

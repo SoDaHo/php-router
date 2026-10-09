@@ -33,7 +33,7 @@ class RouteHandlerTest extends TestCase
         ]));
 
         // Route params must be in _route_params attribute
-        $request = (new ServerRequest('GET', '/test'))
+        $request = new ServerRequest('GET', '/test')
             ->withAttribute('_route_params', ['id' => 42, 'name' => 'John']);
 
         $response = $handler->handle($request);
@@ -60,10 +60,10 @@ class RouteHandlerTest extends TestCase
     #[\PHPUnit\Framework\Attributes\DataProvider('handlersWhoseFirstParameterHasThePlaceholdersName')]
     public function testPlaceholderWithTheNameOfTheFirstParameterIsNamed(mixed $callable, string $name): void
     {
-        $request = (new ServerRequest('GET', '/'))->withAttribute('_route_params', [$name => 'x', 'id' => 5]);
+        $request = new ServerRequest('GET', '/')->withAttribute('_route_params', [$name => 'x', 'id' => 5]);
 
         try {
-            (new RouteHandler($callable))->handle($request);
+            new RouteHandler($callable)->handle($request);
             $this->fail('The handler was called');
         } catch (RouterException $e) {
             // PHP says "Named parameter $request overwrites previous argument"
@@ -77,11 +77,11 @@ class RouteHandlerTest extends TestCase
 
     public function testErrorFromInsideTheHandlerStaysWhatItIs(): void
     {
-        $request = (new ServerRequest('GET', '/'))->withAttribute('_route_params', ['id' => 5]);
+        $request = new ServerRequest('GET', '/')->withAttribute('_route_params', ['id' => 5]);
 
         foreach ([fn ($request, $id) => throw new \Error('from the closure'), [ClashingController::class, 'fails']] as $callable) {
             try {
-                (new RouteHandler($callable))->handle($request);
+                new RouteHandler($callable)->handle($request);
                 $this->fail('No error');
             } catch (\Error $e) {
                 $this->assertStringStartsWith('from the ', $e->getMessage());
@@ -95,7 +95,7 @@ class RouteHandlerTest extends TestCase
         };
 
         try {
-            (new RouteHandler($variadic))->handle($request->withAttribute('_route_params', ['request' => 'x']));
+            new RouteHandler($variadic)->handle($request->withAttribute('_route_params', ['request' => 'x']));
             $this->fail('No error');
         } catch (\Error $e) {
             $this->assertSame('from the variadic handler, with 0,request', $e->getMessage());
@@ -103,7 +103,7 @@ class RouteHandlerTest extends TestCase
 
         // Arguments that are no list of parameters at all (a middleware overwrote the attribute)
         try {
-            (new RouteHandler(fn ($request) => Response::success([])))->handle($request->withAttribute('_route_params', 'text'));
+            new RouteHandler(fn ($request) => Response::success([]))->handle($request->withAttribute('_route_params', 'text'));
             $this->fail('No error');
         } catch (\Error $e) {
             $this->assertStringContainsString('unpacked', $e->getMessage());
@@ -112,7 +112,7 @@ class RouteHandlerTest extends TestCase
         // A parameter the handler does not have is PHP's own error, not a clash
         $this->expectException(\Error::class);
         $this->expectExceptionMessage('Unknown named parameter $id');
-        (new RouteHandler(fn ($request) => Response::success([])))->handle($request->withAttribute('_route_params', ['id' => 5, 'x' => 1]));
+        new RouteHandler(fn ($request) => Response::success([]))->handle($request->withAttribute('_route_params', ['id' => 5, 'x' => 1]));
     }
 
     public function testHandlesControllerArray(): void
@@ -178,7 +178,7 @@ class RouteHandlerTest extends TestCase
         $handler = new RouteHandler([TestController::class, 'show']);
 
         // Route params must be in _route_params attribute
-        $request = (new ServerRequest('GET', '/test'))
+        $request = new ServerRequest('GET', '/test')
             ->withAttribute('_route_params', ['id' => 99]);
         $response = $handler->handle($request);
 

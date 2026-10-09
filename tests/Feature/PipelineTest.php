@@ -200,7 +200,7 @@ class PipelineTest extends TestCase
         $collector->get('/ok', fn () => Response::success('ok'));
         $collector->get('/boom', fn () => throw new \RuntimeException('handler failed'));
 
-        $dispatcher = (new RouteDispatcher($collector->getData()))->setMiddleware([new PipelineTag('global')]);
+        $dispatcher = new RouteDispatcher($collector->getData())->setMiddleware([new PipelineTag('global')]);
 
         $this->assertSame('global', $dispatcher->handle(new ServerRequest('GET', '/ok'))->getHeaderLine('X-Seen-By'));
         $this->assertSame('global', $dispatcher->handle(new ServerRequest('GET', '/nowhere'))->getHeaderLine('X-Seen-By'));
@@ -450,7 +450,7 @@ class PipelineTest extends TestCase
 
         $router = $this->router()->middleware($override);
 
-        $response = $router->handle((new ServerRequest('POST', '/ok'))->withHeader('X-HTTP-Method-Override', 'DELETE'));
+        $response = $router->handle(new ServerRequest('POST', '/ok')->withHeader('X-HTTP-Method-Override', 'DELETE'));
 
         // The DELETE route ran, and what it found on the request describes the DELETE request
         $this->assertSame(
@@ -525,7 +525,7 @@ class PipelineTest extends TestCase
         });
 
         // A request that was matched for '/ok' and then sent somewhere else
-        $request = (new ServerRequest('GET', '/nowhere'))
+        $request = new ServerRequest('GET', '/nowhere')
             ->withAttribute(RouteMatch::class, $hit)
             ->withAttribute(\Sodaho\Router\Route::class, $hit->route);
 
@@ -855,7 +855,7 @@ class PipelineTest extends TestCase
             Response::setResponder($responder);
 
             try {
-                $response = $router->handle((new ServerRequest('GET', '/outer'))->withAttribute('router', $router));
+                $response = $router->handle(new ServerRequest('GET', '/outer')->withAttribute('router', $router));
             } finally {
                 Response::reset();
             }
@@ -941,7 +941,7 @@ class PipelineTest extends TestCase
 
         $collector = new RouteCollector();
         $collector->get('/x', fn () => $stubborn);
-        $dispatcher = (new RouteDispatcher($collector->getData()))->setImplicitHead(true);
+        $dispatcher = new RouteDispatcher($collector->getData())->setImplicitHead(true);
 
         $this->assertSame($stubborn, $dispatcher->handle(new ServerRequest('GET', '/x')));
 
@@ -981,7 +981,7 @@ class PipelineTest extends TestCase
         ];
 
         foreach ($responders as $responder) {
-            (new RouteDispatcher($collector->getData()))->setErrorResponder($responder)->handle(new ServerRequest('GET', '/x'));
+            new RouteDispatcher($collector->getData())->setErrorResponder($responder)->handle(new ServerRequest('GET', '/x'));
         }
 
         $this->assertSame(
@@ -991,7 +991,7 @@ class PipelineTest extends TestCase
 
         // The router's own responder gets the call's record as a third argument
         $record = null;
-        $dispatcher = (new RouteDispatcher($collector->getData()))->setErrorResponderWithRecord(
+        $dispatcher = new RouteDispatcher($collector->getData())->setErrorResponderWithRecord(
             function (\Throwable $e, ServerRequestInterface $request, \WeakMap $known) use (&$record): ResponseInterface {
                 $record = $known;
 
@@ -1027,7 +1027,7 @@ class PipelineTest extends TestCase
         $collector->get('/x', fn () => $refuses('route answer refuses'));
 
         $reports = [];
-        $dispatcher = (new RouteDispatcher($collector->getData()))
+        $dispatcher = new RouteDispatcher($collector->getData())
             ->setImplicitHead(true)
             ->setErrorResponder(fn (\Throwable $e) => $refuses('responder answer refuses'));
         $dispatcher->on('error', function (array $data) use (&$reports): void {
@@ -1048,7 +1048,7 @@ class PipelineTest extends TestCase
         $collector->get('/boom', fn () => throw new \RuntimeException('handler failed'));
 
         $calls = [];
-        $dispatcher = (new RouteDispatcher($collector->getData()))
+        $dispatcher = new RouteDispatcher($collector->getData())
             ->setMiddleware([new PipelineTag('global')])
             ->setErrorResponder(function (\Throwable $e) use (&$calls): ResponseInterface {
                 $calls[] = $e->getMessage();

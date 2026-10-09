@@ -111,7 +111,7 @@ class AdvancedSecurityTest extends TestCase
         $dispatcher = new RouteDispatcher($collector->getData());
 
         // Send a GET but try to override to POST via Header
-        $request = (new ServerRequest('GET', '/delete'))
+        $request = new ServerRequest('GET', '/delete')
             ->withHeader('X-HTTP-Method-Override', 'POST');
 
         $response = $dispatcher->handle($request);

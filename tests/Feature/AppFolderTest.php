@@ -271,21 +271,21 @@ class AppFolderTest extends TestCase
         $this->assertSame('1000', $head->getHeaderLine('Content-Length'));
         $this->assertSame('', (string) $head->getBody());
 
-        $part = $router->handle((new ServerRequest('GET', '/login/big.txt'))->withHeader('Range', 'bytes=10-19'));
+        $part = $router->handle(new ServerRequest('GET', '/login/big.txt')->withHeader('Range', 'bytes=10-19'));
 
         $this->assertSame(206, $part->getStatusCode());
         $this->assertSame('0123456789', (string) $part->getBody());
         $this->assertSame('bytes 10-19/1000', $part->getHeaderLine('Content-Range'));
         $this->assertSame('text/plain; charset=utf-8', $part->getHeaderLine('Content-Type'));
 
-        $this->assertSame(416, $router->handle((new ServerRequest('GET', '/login/big.txt'))->withHeader('Range', 'bytes=5000-'))->getStatusCode());
+        $this->assertSame(416, $router->handle(new ServerRequest('GET', '/login/big.txt')->withHeader('Range', 'bytes=5000-'))->getStatusCode());
 
         // A Range is for GET: HEAD says what the whole file is
-        $headOfPart = $router->handle((new ServerRequest('HEAD', '/login/big.txt'))->withHeader('Range', 'bytes=10-19'));
+        $headOfPart = $router->handle(new ServerRequest('HEAD', '/login/big.txt')->withHeader('Range', 'bytes=10-19'));
         $this->assertSame(200, $headOfPart->getStatusCode());
         $this->assertSame('1000', $headOfPart->getHeaderLine('Content-Length'));
         $this->assertFalse($headOfPart->hasHeader('Content-Range'));
-        $this->assertSame(200, $router->handle((new ServerRequest('HEAD', '/login/big.txt'))->withHeader('Range', 'bytes=5000-'))->getStatusCode());
+        $this->assertSame(200, $router->handle(new ServerRequest('HEAD', '/login/big.txt')->withHeader('Range', 'bytes=5000-'))->getStatusCode());
 
         // HEAD with the switch off: a HEAD request is still answered, headers as for GET
         $off = $this->get($this->router(['implicitHead' => false]), '/login/big.txt', 'HEAD');
@@ -656,7 +656,7 @@ class AppFolderTest extends TestCase
         $request->method('hasHeader')->willReturn(false);
         $request->method('getHeaderLine')->willReturnCallback(static fn (string $name): string => $name === 'If-None-Match' ? " *\t" : '');
 
-        $response = (new AppFolder('/login', $this->app))->serve($request, '/login/assets/style.css');
+        $response = new AppFolder('/login', $this->app)->serve($request, '/login/assets/style.css');
 
         $this->assertNotNull($response);
         $this->assertSame(304, $response->getStatusCode());
@@ -964,7 +964,7 @@ class AppFolderTest extends TestCase
         foreach (["/login/page\n", "/login/page\x7F", '/login/page\\x'] as $raw) {
             $uri = $this->createMock(\Psr\Http\Message\UriInterface::class);
             $uri->method('getPath')->willReturn($raw);
-            $this->assertNull($folder->serve((new ServerRequest('GET', '/login/page'))->withUri($uri), '/login/page'), json_encode($raw, JSON_THROW_ON_ERROR));
+            $this->assertNull($folder->serve(new ServerRequest('GET', '/login/page')->withUri($uri), '/login/page'), json_encode($raw, JSON_THROW_ON_ERROR));
         }
 
         // In the decoded path a caller hands over, whatever the raw one says
@@ -984,7 +984,7 @@ class AppFolderTest extends TestCase
             $uri = $this->createMock(\Psr\Http\Message\UriInterface::class);
             $uri->method('getPath')->willReturn($path);
 
-            $response = $router->handle((new ServerRequest('GET', '/login/'))->withUri($uri));
+            $response = $router->handle(new ServerRequest('GET', '/login/')->withUri($uri));
 
             $this->assertSame(404, $response->getStatusCode(), addcslashes($path, "\0"));
         }
@@ -997,7 +997,7 @@ class AppFolderTest extends TestCase
         // A request object that hands the path over as it came
         $uri = $this->createMock(\Psr\Http\Message\UriInterface::class);
         $uri->method('getPath')->willReturn('//login/assets/style.css');
-        $this->assertSame(404, $router->handle((new ServerRequest('GET', '/login/'))->withUri($uri))->getStatusCode());
+        $this->assertSame(404, $router->handle(new ServerRequest('GET', '/login/')->withUri($uri))->getStatusCode());
 
         // Most PSR-7 implementations fold slashes at the start into one (a path that begins
         // with '//' would read as a host). Then the folder is asked for an honest path —
@@ -1261,7 +1261,7 @@ class AppFolderTest extends TestCase
         $this->assertSame('p{}', (string) $response->getBody());
         $this->assertSame('DENY', $response->getHeaderLine('X-Frame-Options'));
 
-        $blocked = $router->handle((new ServerRequest('GET', '/login/assets/style.css'))->withHeader('X-Blocked', '1'));
+        $blocked = $router->handle(new ServerRequest('GET', '/login/assets/style.css')->withHeader('X-Blocked', '1'));
         $this->assertSame(403, $blocked->getStatusCode());
 
         $this->assertSame([RouteMatch::NOT_FOUND, RouteMatch::NOT_FOUND], $seen);

@@ -90,7 +90,7 @@ final class RouteDispatcher implements RequestHandlerInterface
      */
     public static function plain(int $status, string $text = ''): ResponseInterface
     {
-        return (new \Nyholm\Psr7\Response($status, self::PLAIN_HEADERS))->withBody(new TextStream($text));
+        return new \Nyholm\Psr7\Response($status, self::PLAIN_HEADERS)->withBody(new TextStream($text));
     }
 
     // ==================== Wiring (used by Router) ====================
@@ -762,7 +762,7 @@ final class RouteDispatcher implements RequestHandlerInterface
                 }
             }
             if (class_exists($middleware)) {
-                $constructor = (new \ReflectionClass($middleware))->getConstructor();
+                $constructor = new \ReflectionClass($middleware)->getConstructor();
                 if ($constructor !== null && $constructor->getNumberOfRequiredParameters() > 0) {
                     throw new RouterException(
                         sprintf(

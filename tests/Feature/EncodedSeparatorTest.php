@@ -196,7 +196,7 @@ class EncodedSeparatorTest extends TestCase
         $uri = $this->createMock(UriInterface::class);
         $uri->method('getPath')->willReturn("/tags/a{$character}b");
 
-        $response = $this->router()->handle((new ServerRequest('GET', '/tags/x'))->withUri($uri));
+        $response = $this->router()->handle(new ServerRequest('GET', '/tags/x')->withUri($uri));
 
         $this->assertSame(404, $response->getStatusCode());
     }
@@ -211,7 +211,7 @@ class EncodedSeparatorTest extends TestCase
             return $calls++ === 0 ? '/tags/safe' : '/tags/a%0Ab';
         });
 
-        $match = $this->router()->match((new ServerRequest('GET', '/tags/x'))->withUri($uri));
+        $match = $this->router()->match(new ServerRequest('GET', '/tags/x')->withUri($uri));
 
         $this->assertSame(RouteMatch::FOUND, $match->status);
         $this->assertSame(['tag' => 'safe'], $match->params);
@@ -223,7 +223,7 @@ class EncodedSeparatorTest extends TestCase
         $uri = $this->createMock(UriInterface::class);
         $uri->method('getPath')->willReturn('/files/a\\b');
 
-        $response = $this->router()->handle((new ServerRequest('GET', '/files/x'))->withUri($uri));
+        $response = $this->router()->handle(new ServerRequest('GET', '/files/x')->withUri($uri));
 
         $this->assertSame(404, $response->getStatusCode());
     }

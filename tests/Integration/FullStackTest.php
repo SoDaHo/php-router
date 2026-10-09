@@ -114,7 +114,7 @@ class FullStackTest extends TestCase
         $this->assertSame(401, $response->getStatusCode());
 
         // Protected route with token -> 200
-        $request = (new ServerRequest('GET', '/protected'))
+        $request = new ServerRequest('GET', '/protected')
             ->withHeader('Authorization', 'Bearer valid-token');
         $response = $router->handle($request);
         $this->assertSame(200, $response->getStatusCode());
@@ -249,7 +249,7 @@ class FullStackTest extends TestCase
         $this->assertSame(401, $response->getStatusCode());
 
         // Private endpoint with auth
-        $request = (new ServerRequest('GET', '/api/v1/private'))
+        $request = new ServerRequest('GET', '/api/v1/private')
             ->withHeader('Authorization', 'Bearer valid-token');
         $response = $router->handle($request);
         $this->assertSame(200, $response->getStatusCode());

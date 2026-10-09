@@ -310,7 +310,7 @@ class EmitOverHttpTest extends TestCase
         // Every name added here makes the response overrule the host for that field. That is
         // right for fields that exist once per message (RFC 9110) — and wrong for anything
         // that is a list or protects something; see the test above.
-        $list = (new \ReflectionClassConstant(\Sodaho\Router\Router::class, 'SINGLETON_HEADERS'))->getValue();
+        $list = new \ReflectionClassConstant(\Sodaho\Router\Router::class, 'SINGLETON_HEADERS')->getValue();
 
         $this->assertSame(
             [

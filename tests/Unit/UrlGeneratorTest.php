@@ -669,7 +669,7 @@ class UrlGeneratorTest extends TestCase
         $collector->addPattern('date', '\d{4}-\d{2}-\d{2}');
         $collector->get('/report/{day:date}', 'handler')->name('report');
 
-        $this->assertSame('/report/2024-01-31', (new UrlGenerator($collector->getRoutes(), $collector->getPatterns()))->url('report', ['day' => '2024-01-31']));
+        $this->assertSame('/report/2024-01-31', new UrlGenerator($collector->getRoutes(), $collector->getPatterns())->url('report', ['day' => '2024-01-31']));
 
         // Without URL encoding nothing is checked, as before
         $plain = new UrlGenerator($collector->getRoutes());

@@ -178,7 +178,7 @@ class RfcResponderTest extends TestCase
     #[\PHPUnit\Framework\Attributes\DataProvider('statusValues')]
     public function testStatusIsANumberOnlyWhenItIsAStatusCode(mixed $given, mixed $expected): void
     {
-        $result = (new RfcResponder())->formatError('Failed', null, ['status' => $given, 'other' => 1]);
+        $result = new RfcResponder()->formatError('Failed', null, ['status' => $given, 'other' => 1]);
 
         $this->assertSame(['type' => 'about:blank', 'title' => 'Failed', 'status' => $expected, 'other' => 1], $result);
     }

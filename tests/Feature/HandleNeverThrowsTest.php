@@ -665,11 +665,11 @@ class HandleNeverThrowsTest extends TestCase
         });
 
         // GET: nobody touches the body
-        $this->assertSame($stubborn, $router->handle((new ServerRequest('GET', '/x'))->withAttribute('response', $stubborn)));
+        $this->assertSame($stubborn, $router->handle(new ServerRequest('GET', '/x')->withAttribute('response', $stubborn)));
         $this->assertSame([], $reports);
 
         // HEAD: the body is to be cut, and the response object refuses
-        $response = $router->handle((new ServerRequest('HEAD', '/x'))->withAttribute('response', $stubborn));
+        $response = $router->handle(new ServerRequest('HEAD', '/x')->withAttribute('response', $stubborn));
 
         $this->assertSame(500, $response->getStatusCode());
         $this->assertSame('application/json', $response->getHeaderLine('Content-Type'));
@@ -789,7 +789,7 @@ class HandleNeverThrowsTest extends TestCase
                 $reports[] = $data['exception']->getMessage();
             });
 
-        $response = $router->handle((new ServerRequest('HEAD', '/x'))->withAttribute('response', $stubborn));
+        $response = $router->handle(new ServerRequest('HEAD', '/x')->withAttribute('response', $stubborn));
 
         $this->assertSame([503, ''], [$response->getStatusCode(), (string) $response->getBody()]);
         $this->assertSame(['handler failed', 'withBody failed'], $asked);
@@ -885,7 +885,7 @@ class HandleNeverThrowsTest extends TestCase
             ->on('error', function (array $data) use (&$reports): void {
                 $reports[] = $data['exception']->getMessage();
             })
-            ->handle((new ServerRequest('HEAD', '/x'))->withAttribute('response', $first));
+            ->handle(new ServerRequest('HEAD', '/x')->withAttribute('response', $first));
 
         $this->assertSame([500, ''], [$response->getStatusCode(), (string) $response->getBody()]);
         $this->assertSame(['shared withBody failure'], $reports);
@@ -899,7 +899,7 @@ class HandleNeverThrowsTest extends TestCase
         $second->method('withBody')->willThrowException(new \RuntimeException('withBody failed again'));
 
         $routes = $this->routes('return function ($r) { $r->get("/x", fn ($request) => $request->getAttribute("response")); };');
-        $request = (new ServerRequest('HEAD', '/x'))->withAttribute('response', $stubborn);
+        $request = new ServerRequest('HEAD', '/x')->withAttribute('response', $stubborn);
 
         // Its answer takes the empty body: that is the response
         $asked = [];
