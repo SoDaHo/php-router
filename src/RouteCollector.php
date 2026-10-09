@@ -393,11 +393,53 @@ final class RouteCollector
             );
         }
 
+        if ($wanted[1] !== [] && !self::fixesSchemeAndHost($to)) {
+            throw new RouterException(
+                'Redirect target has a placeholder where scheme or host belong: write them into the target, the host closed by "/", "?" or "#"',
+                debugMessage: $to,
+            );
+        }
+
         return $this->addRoute(
             ['GET', 'HEAD'],
             $from,
             new Middleware\RedirectHandler($to, $status)
         );
+    }
+
+    /**
+     * Whether a redirect target leaves scheme and host of the address to nothing a request
+     * brings: either it has neither (a path, '?…' or '#…', no ':' in front of its first
+     * '/', '?' or '#'), or it writes both — scheme and '//' or '//' alone, a host that is
+     * not empty, closed by '/', '?' or '#' — before its first placeholder. A value is
+     * encoded as a whole (RedirectHandler), so it cannot bring a '/', '?', '#' or ':' of
+     * its own; but in scheme or host position it would be the scheme or the host itself:
+     * 'https:///{path}' with 'evil.example' is https://evil.example for a browser.
+     *
+     * Read as a browser reads an address (WHATWG URL): blanks and control characters at
+     * the edges and tabs inside dropped, a backslash taken for a slash.
+     */
+    private static function fixesSchemeAndHost(string $target): bool
+    {
+        $seen = str_replace(['\\', "\t"], ['/', ''], trim($target, "\x00..\x20"));
+        $front = (string) strstr($seen . '{', '{', true);
+
+        // A ':' in front of the first '/', '?' or '#' ends a scheme
+        $firstSegment = substr($seen, 0, strcspn($seen, '/?#'));
+        $scheme = str_contains($firstSegment, ':');
+
+        if (!$scheme && !str_starts_with($seen, '//')) {
+            // A path, a query or a fragment of the address the client is at
+            return true;
+        }
+
+        // Scheme ('https:') — written, not a placeholder — and host, all before the first
+        // placeholder: '//', user information if any, a host that is not empty, a port if
+        // any, then '/', '?' or '#'
+        return preg_match(
+            '~^(?:[A-Za-z][A-Za-z0-9+.\-]*:)?//(?:[^/?#@]*@)?(?:\[[^\]/?#]+\]|[^/?#@:\[\]]+)(?::\d*)?[/?#]~',
+            $front,
+        ) === 1;
     }
 
     // ==================== Internal ====================

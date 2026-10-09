@@ -452,6 +452,68 @@ class RouteDefinitionTest extends TestCase
         $this->assertSame([], $collector->getRoutes());
     }
 
+    /**
+     * @return array<string, array{0: string}>
+     */
+    public static function targetsWithAPlaceholderInSchemeOrHost(): array
+    {
+        return [
+            'scheme without host' => ['https:{path}'],
+            'scheme and one slash' => ['http:/{path}'],
+            'scheme and an empty host' => ['https:///{path}'],
+            'empty host without scheme' => ['///{path}'],
+            'host that is a placeholder' => ['//{host}/x'],
+            'scheme that is a placeholder' => ['{a}:{path}'],
+            'host that the value would continue' => ['https://app.example{path}'],
+            'part of the host' => ['https://{sub}.example.com/x'],
+            'host behind user information' => ['https://user@{host}/x'],
+            'port' => ['https://app.example:{port}/x'],
+            'scheme without host, not one of the web' => ['mailto:{to}'],
+            // As a browser reads them: blanks in front dropped, a tab dropped, a backslash a slash
+            'blank in front of an empty host' => [' //{host}/x'],
+            'tab between the slashes' => ["/\t/{host}/x"],
+            'backslash for the second slash' => ['/\\{host}/x'],
+        ];
+    }
+
+    /**
+     * Such a target leaves scheme or host of the address to the request: 'https:///{path}'
+     * with the value 'evil.example' is https://evil.example for a browser, encoded or not
+     */
+    #[DataProvider('targetsWithAPlaceholderInSchemeOrHost')]
+    public function testRedirectTargetWithAPlaceholderInSchemeOrHostIsRefused(string $target): void
+    {
+        $collector = new RouteCollector();
+
+        try {
+            $collector->redirect('/go/{path}/{host}/{a}/{sub}/{port}/{to}', $target);
+            $this->fail('The redirect was registered');
+        } catch (RouterException $e) {
+            $this->assertSame(
+                'Redirect target has a placeholder where scheme or host belong: write them into the target, the host closed by "/", "?" or "#"',
+                $e->getMessage()
+            );
+            $this->assertSame($target, $e->getDebugMessage());
+        }
+
+        $this->assertSame([], $collector->getRoutes());
+    }
+
+    public function testRedirectTargetsWithoutAPlaceholderInSchemeOrHostStayAllowed(): void
+    {
+        $collector = new RouteCollector();
+        $targets = [
+            'https://app.example/{path}', 'https://app.example?next={path}', 'https://app.example#{path}',
+            'https://user@app.example/{path}', 'https://app.example:8443/{path}', 'https://[::1]:8080/{path}',
+            '//cdn.example/assets/{path}', '/new/{path}', '/{path}', '{path}', 'docs/{path}', '?next={path}',
+            '#{path}', ' /{path}', "/\t{path}", 'https:example.com', 'mailto:team@example.com',
+        ];
+
+        foreach ($targets as $i => $target) {
+            $this->assertSame($target, $collector->redirect("/r{$i}/{path:any}", $target)->handler->getTarget());
+        }
+    }
+
     public function testRedirectStatusIsA3xxStatus(): void
     {
         $collector = new RouteCollector();

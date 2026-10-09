@@ -68,52 +68,47 @@ class RedirectTest extends TestCase
     }
 
     /**
-     * @return array<string, array{0: string, 1: string, 2: string, 3?: string|null, 4?: string|null}>
+     * @return array<string, array{0: string, 1: string|null, 2: string}>
      */
-    public static function targetsWhoseSchemeAndHostAValueMustNotChange(): array
+    public static function targetsThatFixSchemeAndHost(): array
     {
+        // Target, its own scheme (null: that of the page), its own host
         return [
-            // The counterexamples of the reviews of the segment-wise encoding: each named
-            // another host with it — encoded as a whole, none does
-            'scheme without host, value with two slashes' => ['https:{path}', '/go///evil.example', 'https:%2F%2Fevil.example', 'https'],
-            'scheme without host, value with one slash' => ['https:{path}', '/go//evil.example', 'https:%2Fevil.example', 'https'],
-            'scheme without host, value with a slash inside' => ['https:{path}', '/go/a/b', 'https:a%2Fb', 'https'],
-            'scheme and one slash' => ['http:/{path}', '/go//evil.example', 'http:/%2Fevil.example', 'http'],
-            'scheme and an empty host' => ['https:///{path}', '/go/evil.example/x', 'https:///evil.example%2Fx', 'https'],
-            'empty host without scheme' => ['///{path}', '/go/evil.example/x', '///evil.example%2Fx'],
-            'host that the value would continue' => ['https://app.example{path}', '/go/.evil.example/x', 'https://app.example.evil.example%2Fx', 'https', 'app.example'],
-            'host of its own' => ['https://app.example/{path}', '/go//evil.example', 'https://app.example/%2Fevil.example', 'https', 'app.example'],
-            'host of its own, scheme of the page' => ['//cdn.example/assets/{path}', '/go//evil.example', '//cdn.example/assets/%2Fevil.example', null, 'cdn.example'],
-            'a slash and nothing else' => ['/{path}', '/go//evil.example/x', '/%2Fevil.example%2Fx'],
-            'a slash, value with a slash inside' => ['/{path}', '/go/a/b', '/a%2Fb'],
-            'nothing in front' => ['{path}', '/go///evil.example', '%2F%2Fevil.example'],
-            'relative path' => ['docs/{path}', '/go//evil.example', 'docs/%2Fevil.example'],
-            'query' => ['?next={path}', '/go//evil.example', '?next=%2Fevil.example'],
-            'scheme made of the value' => ['{a}:{path}', '/two/https///evil.example', 'https:%2F%2Fevil.example'],
-            // A browser drops tabs and leading blanks and reads a backslash as a slash
-            'tab in front' => ["/\t{path}", '/go//evil.example', "/\t%2Fevil.example"],
-            'blank in front (trimmed by the response)' => [' /{path}', '/go//evil.example', '/%2Fevil.example'],
-            'backslash in front' => ['/\\{path}', '/go//evil.example', '/\\%2Fevil.example'],
+            'host of its own' => ['https://trusted.example/{path}', 'https', 'trusted.example'],
+            'host of its own, query' => ['https://trusted.example?next={path}', 'https', 'trusted.example'],
+            'host of its own, scheme of the page' => ['//cdn.example/assets/{path}', null, 'cdn.example'],
+            'path' => ['/new/{path}', null, 'app.example'],
+            'a slash and nothing else' => ['/{path}', null, 'app.example'],
+            'nothing in front' => ['{path}', null, 'app.example'],
+            'relative path' => ['docs/{path}', null, 'app.example'],
+            'query' => ['?next={path}', null, 'app.example'],
+            'fragment' => ['#{path}', null, 'app.example'],
+            // A browser drops tabs and leading blanks
+            'tab in front' => ["/\t{path}", null, 'app.example'],
+            'blank in front (trimmed by the response)' => [' /{path}', null, 'app.example'],
         ];
     }
 
     /**
-     * Checked as a browser reads the address (WHATWG URL), from a page of either scheme:
-     * scheme and host are those the target names, or those of the page — or the address
-     * leads nowhere
+     * Scheme and host are those the target writes, or those of the page, whatever the
+     * value — checked as a browser reads the address (WHATWG URL) from a page of either
+     * scheme, for values without a slash, with one inside, and with two in front.
+     * (Targets that leave scheme or host to a value are refused when the route is
+     * registered, see RouteDefinitionTest.)
      */
-    #[DataProvider('targetsWhoseSchemeAndHostAValueMustNotChange')]
-    public function testValueNeverChangesSchemeOrHost(string $target, string $path, string $location, ?string $scheme = null, ?string $host = null): void
+    #[DataProvider('targetsThatFixSchemeAndHost')]
+    public function testValueNeverChangesSchemeOrHost(string $target, ?string $scheme, string $host): void
     {
         $collector = new RouteCollector();
-        str_starts_with($target, '{a}')
-            ? $collector->redirect('/two/{a}/{path:any}', $target)
-            : $collector->redirect('/go/{path:any}', $target);
+        $collector->redirect('/go/{path:any}', $target);
+        $dispatcher = new RouteDispatcher($collector->getData());
 
-        $response = new RouteDispatcher($collector->getData())->handle(new ServerRequest('GET', $path));
+        foreach (['/go/evil.example', '/go/evil.example/x', '/go///evil.example', '/go//evil.example', '/go/https:evil.example'] as $path) {
+            $location = $dispatcher->handle(new ServerRequest('GET', $path))->getHeaderLine('Location');
 
-        $this->assertSame($location, $response->getHeaderLine('Location'));
-        $this->assertSchemeAndHost($response->getHeaderLine('Location'), $path, $scheme, $host ?? 'app.example');
+            $this->assertStringNotContainsString('evil.example/', $location, 'a slash of the value is %2F');
+            $this->assertSchemeAndHost($location, $path, $scheme, $host);
+        }
     }
 
     /**
@@ -139,8 +134,8 @@ class RedirectTest extends TestCase
 
     /**
      * Scheme and host of the address as a browser resolves it from a page at $path, for a
-     * page of either scheme. An address it cannot read leads nowhere — not to another host
-     * either.
+     * page of either scheme. The address has to be one a browser can read: one it cannot
+     * read would make this check say nothing.
      *
      * @param string|null $scheme The target's own scheme; null: that of the page
      */
@@ -151,10 +146,9 @@ class RedirectTest extends TestCase
             $this->assertNotNull($base);
             $resolved = \Uri\WhatWg\Url::parse($location, $base);
 
-            if ($resolved !== null) {
-                $this->assertSame($scheme ?? $page, $resolved->getScheme(), "scheme of {$location} from {$page}");
-                $this->assertSame($host, $resolved->getAsciiHost(), "host of {$location} from {$page}");
-            }
+            $this->assertNotNull($resolved, "{$location} from {$page} is no address a browser can read");
+            $this->assertSame($scheme ?? $page, $resolved->getScheme(), "scheme of {$location} from {$page}");
+            $this->assertSame($host, $resolved->getAsciiHost(), "host of {$location} from {$page}");
         }
     }
 

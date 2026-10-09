@@ -196,6 +196,7 @@ $r->get('/caf%C3%A9', $handler);             // a pattern is written decoded: '/
 $r->get('/search?q={q}', $handler);          // a pattern is a path: no '?' or '#'
 $r->addPattern('hex', '[0-9a-f#]+');         // unescaped '#'
 $r->redirect('/old/{id}', '/new/{slug}');    // the target uses a placeholder its source does not have
+$r->redirect('/go/{to}', 'https:{to}');      // a placeholder where scheme or host belong
 ```
 
 A route pattern is compared with the request path after it was decoded, so it is written
@@ -477,13 +478,19 @@ $r->redirect('/users/{id}/profile', '/profile/{id}');  // With parameters
 A placeholder in the target is `{name}` — nothing else in braces — and has to exist in the
 source (the prefix of its groups included). The status is a 3xx status, and the target
 has no control character other than a tab; both are refused where the route is written.
-A value goes into the target encoded as a whole (`rawurlencode()`): its slashes become
-`%2F`, so that no value can change scheme or host of the address. That is also why
+A placeholder must not stand where scheme or host belong: a target that has a scheme or
+begins with `//` writes scheme and host before its first placeholder, the host closed by
+`/`, `?` or `#` (`'https://app.example/{path}'`, `'//cdn.example/{path}'`); anything else
+(`'https:{path}'`, `'https:///{path}'`, `'//{host}/x'`, `'https://app.example{path}'`,
+`'{scheme}:{path}'`) is refused where the route is written — read as a browser reads it,
+so a backslash counts as a slash. A target without scheme and host (`'/new/{path}'`,
+`'docs/{path}'`, `'?next={path}'`) stays on the address the client is at.
+
+In the targets it accepts, no value can change scheme or host: a value goes in encoded as
+a whole (`rawurlencode()`), its slashes become `%2F`. That is also why
 `redirect('/old/{path:any}', '/new/{path}')` sends `/old/docs/intro` to
 `/new/docs%2Fintro` — a path this router answers with 404. For redirects that keep the
-segments of a path, use a route or a handler of your own. Write scheme and host into the
-target: one that begins with a scheme but no host (`'https:{path}'`) leaves the host to
-what a client makes of the value.
+segments of a path, use a route or a handler of your own.
 
 ## Response Helpers
 
