@@ -63,9 +63,12 @@
 - A redirect route encodes the values of its target segment by segment, as `url()` does:
   `redirect('/old/{path:any}', '/new/{path}')` sent `/old/docs/intro` to
   `/new/docs%2Fintro`, which the router answers with 404 (`%2F`); it goes to
-  `/new/docs/intro` now. Where that would make the target begin with `//` — `'/{path}'`
-  with a value that begins with a slash, another host for the client — the slashes are
-  encoded as before.
+  `/new/docs/intro` now. Only where a slash of a value cannot change scheme or host as a
+  browser reads the address: the target names both and ends the host before its first
+  placeholder (`'https://app.example/{path}'`), or the address has neither. Everywhere else
+  — `'https:{path}'` or `'/{path}'` with a value that begins with a slash, a target with a
+  backslash, a blank or a tab, an address that would get a `.`/`..` segment — the slashes
+  are encoded as before.
 - `baseUrl` (config, `setBaseUrl()`, `APP_URL` through `fromEnv()`) refuses a value with a
   control character or a blank. It is put in front of every absolute address as it is: a
   line break made each of them a `Location` header that the response refuses (a 500), a

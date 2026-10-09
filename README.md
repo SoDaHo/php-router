@@ -479,8 +479,14 @@ source (the prefix of its groups included). The status is a 3xx status, and the 
 has no control character other than a tab; both are refused where the route is written.
 Values are encoded as `url()` encodes them: each segment on its own, so that
 `redirect('/old/{path:any}', '/new/{path}')` sends `/old/docs/intro` to `/new/docs/intro`
-— except where that would make the target begin with `//` (`'/{path}'` with a value that
-begins with a slash would name another host): there the slashes are encoded too.
+— but only where a slash of a value cannot change scheme or host of the address: the
+target names both and ends the host before its first placeholder
+(`'https://app.example/{path}'`), or the address has neither (`'/new/{path}'`,
+`'docs/{path}'`, `'/{path}'` with a value that does not begin with a slash). Everywhere
+else the slashes are encoded too (`%2F`), as before: `'https:{path}'` with the value
+`//evil.example` would name another host, and so would `'/{path}'` with `/evil.example`.
+A target that begins with a scheme but no host (`'https:{path}'`) lets the value decide
+the host in any case — write the host into the target.
 
 ## Response Helpers
 

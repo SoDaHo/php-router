@@ -41,19 +41,54 @@ final class RedirectHandler implements RequestHandlerInterface
         /** @var array<string, scalar> $params */
         $params = $request->getAttribute('_route_params', []);
 
-        // Each segment of a value is encoded on its own, as url() writes it: a value with
-        // slashes ({path:any}) goes out as a path — encoded as a whole, its %2F would be
-        // answered with 404 by the router it leads to
-        $target = $this->fill($params, static fn (string $value): string => implode('/', array_map(rawurlencode(...), explode('/', $value))));
+        // A value encoded as a whole, as 2.1.0 did: its slashes are %2F, so it can neither
+        // begin nor end a host — but a value with slashes ({path:any}) leads to a path the
+        // router answers with 404
+        $whole = $this->fill($params, rawurlencode(...));
 
-        // … except where that would make the target begin with '//' when the target as
-        // written does not: '/{path}' with the value '/evil.example' names another host.
-        // There the slashes are encoded as well.
-        if (str_starts_with($target, '//') && !str_starts_with($this->target, '//')) {
-            $target = $this->fill($params, rawurlencode(...));
+        // Each segment encoded on its own, as url() writes it: the value goes out as a path
+        $segments = $this->fill($params, static fn (string $value): string => implode('/', array_map(rawurlencode(...), explode('/', $value))));
+
+        return Response::redirect($this->slashesStayInThePath($segments, $whole) ? $segments : $whole, $this->status);
+    }
+
+    /**
+     * Whether the slashes a value brings in stay in the path — so that scheme and host of
+     * the address are what the target as written says, whatever the values are. A browser
+     * (WHATWG URL) is lenient here: 'https:/evil.example' is https://evil.example from a
+     * page of another scheme, tabs and blanks are dropped, a backslash is a slash. So the
+     * segment-wise form is taken only where that cannot happen:
+     *
+     * - the target as written names scheme and host (or '//' and host) and ends the host
+     *   with '/', '?' or '#' before its first placeholder: 'https://app.example/{path}';
+     * - or the address has neither: it begins with '?' or '#', with '/' and something
+     *   other than a second slash ('/{path}' with 'a/b', not with '/evil.example'), or with
+     *   a segment without ':' ('docs/{path}') — a value's own ':' is encoded.
+     *
+     * A target with a backslash, a blank or a control character, and an address that gets
+     * a '.' or '..' segment its values did not bring as a whole, keep the whole encoding.
+     */
+    private function slashesStayInThePath(string $segments, string $whole): bool
+    {
+        if ($segments === $whole || preg_match('/[\x00-\x20\x7F\\\\]/', $this->target) === 1) {
+            return $segments === $whole;
         }
 
-        return Response::redirect($target, $this->status);
+        // A '.' or '..' segment a client resolves away ('/a/.' with the value './b'),
+        // counted in the part in front of the query
+        $dots = static fn (string $address): int => (int) preg_match_all('~(?:^|/)\.\.?(?=/|$)~', substr($address, 0, strcspn($address, '?#')));
+        if ($dots($segments) > $dots($whole)) {
+            return false;
+        }
+
+        // Scheme and host as written, and the host ended, before the first placeholder
+        $front = (string) strstr($this->target . '{', '{', true);
+        if (preg_match('~^(?:[A-Za-z][A-Za-z0-9+.\-]*:)?//[^/?#]*[/?#]~', $front) === 1) {
+            return true;
+        }
+
+        // No scheme and no host at all, whatever the values brought in
+        return preg_match('~^(?:[?#]|/(?!/)|[^/?#:]+(?:[/?#]|$))~', $segments) === 1;
     }
 
     /**
