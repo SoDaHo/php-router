@@ -352,7 +352,9 @@ final class RouteDispatcher implements RequestHandlerInterface
      */
     private function normalizePath(string $requestPath): ?string
     {
-        $uri = rawurldecode($requestPath);
+        // A URI built without a path ('http://example.com') asks for the root, as a client
+        // that sends it means it; over HTTP the path is never empty
+        $uri = $requestPath === '' ? '/' : rawurldecode($requestPath);
 
         // BasePath handling: requests MUST start with basePath
         if ($this->basePath !== '') {

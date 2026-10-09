@@ -99,6 +99,32 @@ class RouteDispatcherTest extends TestCase
         $this->assertTrue($body['data']['object_middleware']);
     }
 
+    /**
+     * A URI built without a path (new ServerRequest('GET', 'http://example.com')) is the
+     * address of the root, as a client that sends it means it — over HTTP a path is never empty
+     */
+    public function testRequestWithoutAPathIsAskedForTheRoot(): void
+    {
+        $collector = new \Sodaho\Router\RouteCollector();
+        $collector->get('/', fn () => Response::text('root'));
+
+        $dispatcher = new RouteDispatcher($collector->getData());
+        $request = new ServerRequest('GET', 'http://example.com');
+        $this->assertSame('', $request->getUri()->getPath());
+
+        $match = $dispatcher->match($request);
+        $this->assertTrue($match->isFound());
+        $this->assertSame('/', $match->path);
+
+        $response = $dispatcher->handle($request);
+        $this->assertSame(200, $response->getStatusCode());
+        $this->assertSame('root', (string) $response->getBody());
+
+        // Below a base path the root is none of its routes
+        $based = new RouteDispatcher($collector->getData(), basePath: '/api');
+        $this->assertSame(404, $based->handle($request)->getStatusCode());
+    }
+
     public function testTrailingSlashStrict(): void
     {
         $route = new Route(['GET'], '/test', fn ($req) => Response::success(['ok' => true]));

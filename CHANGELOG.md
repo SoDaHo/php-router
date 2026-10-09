@@ -42,6 +42,9 @@
   blank an address that is none. The message names `APP_URL` where the value came from it.
 - `{id:int}` with the value `-0` is answered with "expected integer", not "integer overflow"
   (in debug mode); the status stays 400.
+- A request whose URI has no path at all (`new ServerRequest('GET', 'http://example.com')`,
+  only built in code — over HTTP a path is never empty) is looked up as `/` instead of
+  ending in 404.
 - A route expression that PCRE gives up on — the backtrack limit or the JIT stack, reached
   by a pattern of your own with nested quantifiers — is a failure, not "no match":
   `handle()` answers 500 and the `error` hook gets a `RouterException` that names the PCRE
