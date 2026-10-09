@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [2.1.1] - 2026-10-09
+
 ### Security
 - A request path with a `.` or `..` segment has no route: `/files/..`, `/files/a/./b` and
   the encoded forms (`/files/%2E%2E/etc/passwd`, `/files/.%2e`) are answered with 404
@@ -28,43 +30,25 @@
   `perPage` below 1. It answered with nonsense: page 0 gave `from: -4`, a negative page
   negative positions, `PHP_INT_MAX` a float. **An application that passes `?page=0` on
   unchecked gets a 500 instead of that 200 now** — check the page number first.
+- Requires `nyholm/psr7` 1.8.2 and `psr/http-factory` 1.1 at least: the earlier releases
+  that `^1.8` and `^1.0` allowed declare parameters PHP 8.5 reports as deprecated when it
+  loads them (implicitly nullable). Tested now: CI runs the tests against the lowest
+  versions `composer.json` allows, and validates `composer.json` against the committed
+  `composer.lock`.
 
 ### Fixed
-- A pattern of your own (`addPattern()`) that closes its group early (`'a)|(.*'`) is
-  refused when the route table is built. Wrapped in the group of its placeholder it
-  compiled, and turned the rest of the route's expression into an alternative that matched
-  any path — the route answered for every dynamic route registered after it. Each fragment
-  a route uses is now compiled on its own as well, behind an empty group for each
-  placeholder of the route, so that it may still refer to them (`(?P=a)`).
-- `baseUrl` (config, `setBaseUrl()`, `APP_URL` through `fromEnv()`) refuses a value with a
-  control character or a blank. It is put in front of every absolute address as it is: a
-  line break made each of them a `Location` header that the response refuses (a 500), a
-  blank an address that is none. The message names `APP_URL` where the value came from it.
-- `{id:int}` with the value `-0` is answered with "expected integer", not "integer overflow"
-  (in debug mode); the status stays 400.
-- A request whose URI has no path at all (`new ServerRequest('GET', 'http://example.com')`,
-  only built in code — over HTTP a path is never empty) is looked up as `/` instead of
-  ending in 404.
-- `FileStream::read()` with a negative length throws a `RuntimeException`, as PSR-7
-  promises and as `TextStream` does — not an `InvalidArgumentException`.
-- An error response in the format of `RfcResponder` carries `status`, the status code of
-  the response, as RFC 9457 has it and the README showed — it was missing. Added behind
-  `title` where the details do not name a status; one they name stays as it is.
-- README: the example of a responder of your own no longer promises XML — a responder
-  shapes an array that is always sent as JSON. RFC 7807 is called by its successor, RFC
-  9457, throughout.
-- README: a static route wins over a dynamic one whatever the order of definition (it
-  said "routes match in definition order"); the order of middleware in nested groups;
-  that `url()` leaves out parameters that are no placeholders (no query string); that in
-  the mode `strict` a group's own address (`/api`) cannot be registered inside it; the
-  Quick Start controller has the methods its routes name; hard links and SVG files in a
-  web app folder.
 - A route expression that PCRE gives up on — the backtrack limit or the JIT stack, reached
   by a pattern of your own with nested quantifiers — is a failure, not "no match":
   `handle()` answers 500 and the `error` hook gets a `RouterException` that names the PCRE
   error, `match()` throws it. The request used to go on to the next route that matched (a
   catch-all) or 404 without a word, and the 405 list left the method out; `url()` said the
   values do not fit where it could not tell — it names the PCRE error now.
+- A pattern of your own (`addPattern()`) that closes its group early (`'a)|(.*'`) is
+  refused when the route table is built. Wrapped in the group of its placeholder it
+  compiled, and turned the rest of the route's expression into an alternative that matched
+  any path — the route answered for every dynamic route registered after it. Each fragment
+  a route uses is now compiled on its own as well, behind an empty group for each
+  placeholder of the route, so that it may still refer to them (`(?P=a)`).
 - `match()` refuses a method list that no request could use: an empty one (the route was
   never found) and a method that is no token of RFC 9110 (`'GE T'`, `"GET\r\n"` — that one
   stood in the `Allow` header of every 405 for the path and made each of them a 500). A
@@ -82,6 +66,32 @@
   `/new/docs/intro` now. Where that would make the target begin with `//` — `'/{path}'`
   with a value that begins with a slash, another host for the client — the slashes are
   encoded as before.
+- `baseUrl` (config, `setBaseUrl()`, `APP_URL` through `fromEnv()`) refuses a value with a
+  control character or a blank. It is put in front of every absolute address as it is: a
+  line break made each of them a `Location` header that the response refuses (a 500), a
+  blank an address that is none. The message names `APP_URL` where the value came from it.
+- Middleware given as an array is kept as a list, whatever keys the array came with: two
+  calls of `middleware()` (route or router) or nested `middlewareGroup()`s with the same
+  string key add up — the second replaced the first.
+- `{id:int}` with the value `-0` is answered with "expected integer", not "integer overflow"
+  (in debug mode); the status stays 400.
+- A request whose URI has no path at all (`new ServerRequest('GET', 'http://example.com')`,
+  only built in code — over HTTP a path is never empty) is looked up as `/` instead of
+  ending in 404.
+- An error response in the format of `RfcResponder` carries `status`, the status code of
+  the response, as RFC 9457 has it and the README showed — it was missing. Added behind
+  `title` where the details do not name a status; one they name stays as it is.
+- `FileStream::read()` with a negative length throws a `RuntimeException`, as PSR-7
+  promises and as `TextStream` does — not an `InvalidArgumentException`.
+- README: the example of a responder of your own no longer promises XML — a responder
+  shapes an array that is always sent as JSON. RFC 7807 is called by its successor, RFC
+  9457, throughout.
+- README: a static route wins over a dynamic one whatever the order of definition (it
+  said "routes match in definition order"); the order of middleware in nested groups;
+  that `url()` leaves out parameters that are no placeholders (no query string); that in
+  the mode `strict` a group's own address (`/api`) cannot be registered inside it; the
+  Quick Start controller has the methods its routes name; hard links and SVG files in a
+  web app folder.
 
 ## [2.1.0] - 2026-10-06
 
