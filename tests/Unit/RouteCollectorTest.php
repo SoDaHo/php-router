@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace Sodaho\Router\Tests\Unit;
 
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Sodaho\Router\Exception\DuplicateRouteException;
+use Sodaho\Router\Exception\RouterException;
 use Sodaho\Router\RouteCollector;
 
 class RouteCollectorTest extends TestCase
@@ -142,6 +144,82 @@ class RouteCollectorTest extends TestCase
         $route = $this->collector->match(['get', 'post'], '/form', 'handler');
 
         $this->assertSame(['GET', 'POST'], $route->methods);
+    }
+
+    /**
+     * @return array<string, array{0: list<string>, 1: string}>
+     */
+    public static function methodListsNoRequestCouldUse(): array
+    {
+        $token = 'HTTP method must be a token (RFC 9110): ASCII letters, digits and !#$%&\'*+-.^_`|~';
+
+        return [
+            'empty list' => [[], 'Route needs at least one HTTP method'],
+            'empty method' => [[''], $token],
+            'blank inside' => [['GE T'], $token],
+            // In the Allow header of every 405 on the path, and a 500 for each of them
+            'line break at the end' => [["GET\r\n"], $token],
+            'list in one string' => [['GET,POST'], $token],
+            'letter beyond ASCII' => [["G\u{00C9}T"], $token],
+            'second method of the list' => [['GET', 'PO ST'], $token],
+        ];
+    }
+
+    /**
+     * @param list<string> $methods
+     */
+    #[DataProvider('methodListsNoRequestCouldUse')]
+    public function testMethodListNoRequestCouldUseIsRefused(array $methods, string $message): void
+    {
+        try {
+            $this->collector->match($methods, '/form', 'handler');
+            $this->fail('The route was registered');
+        } catch (RouterException $e) {
+            $this->assertNotInstanceOf(DuplicateRouteException::class, $e);
+            $this->assertSame($message, $e->getMessage());
+        }
+
+        // Nothing of it stays behind: the path is free for every method
+        $this->assertSame([], $this->collector->getRoutes());
+        $this->collector->match(['GET', 'POST'], '/form', 'handler');
+        $this->assertCount(1, $this->collector->getRoutes());
+    }
+
+    public function testEveryTokenIsAMethod(): void
+    {
+        $route = $this->collector->match(['PROPFIND', 'M-SEARCH', 'x_y.z~1'], '/dav', 'handler');
+
+        $this->assertSame(['PROPFIND', 'M-SEARCH', 'X_Y.Z~1'], $route->methods);
+    }
+
+    public function testRefusedMethodListLeavesNoMethodBehind(): void
+    {
+        $this->collector->post('/x', 'handler');
+
+        try {
+            $this->collector->match(['GET', 'POST'], '/x', 'handler');
+            $this->fail('The route was registered');
+        } catch (DuplicateRouteException $e) {
+            $this->assertSame('POST /x', $e->getDebugMessage());
+        }
+
+        // GET was not taken by the refused route
+        $route = $this->collector->get('/x', 'handler');
+
+        $this->assertSame(['GET'], $route->methods);
+        $this->assertCount(2, $this->collector->getRoutes());
+    }
+
+    public function testSameMethodTwiceInOneListIsADuplicate(): void
+    {
+        try {
+            $this->collector->match(['GET', 'get'], '/y', 'handler');
+            $this->fail('The route was registered');
+        } catch (DuplicateRouteException $e) {
+            $this->assertSame('GET /y', $e->getDebugMessage());
+        }
+
+        $this->assertSame(['GET'], $this->collector->get('/y', 'handler')->methods);
     }
 
     public function testAnyMethod(): void

@@ -77,6 +77,12 @@ $r->match(['GET', 'POST'], '/search', $handler);
 $r->any('/webhook', $handler);
 ```
 
+`match()` takes at least one method, each a token of RFC 9110 — ASCII letters, digits and
+``!#$%&'*+-.^_`|~`` (`PROPFIND`, `M-SEARCH`); it upper-cases them. An empty list or a
+method with a blank, a line break or a comma is refused where it is written: no request
+could ever ask for it. A route that is refused takes none of its methods (a later route
+may still use them).
+
 A `HEAD` request to a route registered with `get()` is answered by that route: its
 middleware and handler run, and the response goes out with its status and headers but
 without its body. `Allow` names `HEAD` right behind `GET`. The router does not change the

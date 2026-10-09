@@ -46,6 +46,9 @@ final class RouteCollector
     /** @internal */
     public const PLAIN_PATH_RULE = 'must be a plain path, written decoded: no backslash, control character, percent-encoded character (%20), "?", "#" or dot segment';
 
+    /** What an HTTP method is made of: a token of RFC 9110 (section 5.6.2), one or more of these */
+    private const TOKEN_CHARACTERS = "!#$%&'*+-.^_`|~0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+
     /**
      * How a pattern is read, for parts() and compile() alike: anything in braces, and what
      * a placeholder looks like. Spelled out instead of \w, which takes bytes beyond ASCII
@@ -386,6 +389,22 @@ final class RouteCollector
      */
     private function addRoute(array $methods, string $pattern, mixed $handler): Route
     {
+        // A route without a method is never asked for. A method that is no token cannot be
+        // the method of a request — and would stand in the Allow header of every 405 for
+        // the path: "GET\r\n" made each of those a 500.
+        if ($methods === []) {
+            throw new RouterException('Route needs at least one HTTP method', debugMessage: $pattern);
+        }
+
+        foreach ($methods as $method) {
+            if ($method === '' || strspn($method, self::TOKEN_CHARACTERS) !== strlen($method)) {
+                throw new RouterException(
+                    'HTTP method must be a token (RFC 9110): ASCII letters, digits and !#$%&\'*+-.^_`|~',
+                    debugMessage: sprintf('%s %s', json_encode($method, JSON_INVALID_UTF8_SUBSTITUTE), $pattern),
+                );
+            }
+        }
+
         if ($this->preserveTrailingSlash) {
             // Strict mode: preserve trailing slash, only normalize leading
             $prefix = rtrim($this->currentPrefix, '/');
@@ -407,17 +426,21 @@ final class RouteCollector
 
         self::assertPattern($path);
 
-        // Check for duplicate routes
+        // Check for duplicate routes — every method first, then take them all: a route
+        // refused for its second method leaves its first one free (and the same method
+        // twice in one list is a duplicate as well)
+        $keys = [];
         foreach ($methods as $method) {
             $key = $method . ':' . $path;
-            if (isset($this->registeredRoutes[$key])) {
+            if (isset($this->registeredRoutes[$key]) || isset($keys[$key])) {
                 throw new DuplicateRouteException(
                     'Route is already registered for this method',
                     debugMessage: sprintf('%s %s', $method, $path),
                 );
             }
-            $this->registeredRoutes[$key] = true;
+            $keys[$key] = true;
         }
+        $this->registeredRoutes += $keys;
 
         $route = new Route($methods, $path, $handler, attributes: $this->currentAttributes);
 

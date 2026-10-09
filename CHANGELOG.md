@@ -25,6 +25,12 @@
   error, `match()` throws it. The request used to go on to the next route that matched (a
   catch-all) or 404 without a word, and the 405 list left the method out; `url()` said the
   values do not fit where it could not tell — it names the PCRE error now.
+- `match()` refuses a method list that no request could use: an empty one (the route was
+  never found) and a method that is no token of RFC 9110 (`'GE T'`, `"GET\r\n"` — that one
+  stood in the `Allow` header of every 405 for the path and made each of them a 500). A
+  route refused as a duplicate for one of its methods no longer keeps the methods before
+  it: after a caught `DuplicateRouteException` for `match(['GET', 'POST'], '/x')` (POST
+  taken), `get('/x')` works. The same method twice in one list is still a duplicate.
 
 ## [2.1.0] - 2026-10-06
 
