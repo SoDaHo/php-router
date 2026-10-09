@@ -30,11 +30,12 @@
   `perPage` below 1. It answered with nonsense: page 0 gave `from: -4`, a negative page
   negative positions, `PHP_INT_MAX` a float. **An application that passes `?page=0` on
   unchecked gets a 500 instead of that 200 now** — check the page number first.
-- Requires `nyholm/psr7` 1.8.2 and `psr/http-factory` 1.1 at least: the earlier releases
-  that `^1.8` and `^1.0` allowed declare parameters PHP 8.5 reports as deprecated when it
-  loads them (implicitly nullable). Tested now: CI runs the tests against the lowest
-  versions `composer.json` allows, and validates `composer.json` against the committed
-  `composer.lock`.
+- Requires `nyholm/psr7` 1.8.2 and `psr/http-factory` 1.1 at least, so that the router runs
+  without deprecations under PHP 8.5: the earlier releases that `^1.8` and `^1.0` allowed
+  declare parameters PHP 8.5 reports as deprecated when it loads them (implicitly
+  nullable). An application that pins one of those has to update it. Tested now: CI runs
+  the tests against the lowest versions `composer.json` allows, and validates
+  `composer.json` against the committed `composer.lock`.
 
 ### Fixed
 - A route expression that PCRE gives up on — the backtrack limit or the JIT stack, reached
