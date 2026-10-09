@@ -50,6 +50,45 @@ class RedirectTest extends TestCase
         $this->assertSame('/profile/42', $response->getHeaderLine('Location'));
     }
 
+    /**
+     * A value with slashes ({path:any}) goes out segment by segment, as url() writes it:
+     * encoded as a whole it was '/new/docs%2Fintro' — and the router answers %2F with 404
+     */
+    public function testTargetOfAValueWithSlashesLeadsToTheRouteOfThatPath(): void
+    {
+        $collector = new RouteCollector();
+        $collector->redirect('/old/{path:any}', '/new/{path}', 301);
+        $collector->get('/new/{path:any}', fn ($req, string $path) => \Sodaho\Router\Response::text('new: ' . $path));
+
+        $dispatcher = new RouteDispatcher($collector->getData());
+
+        $response = $dispatcher->handle(new ServerRequest('GET', '/old/docs/my%20intro'));
+        $this->assertSame(301, $response->getStatusCode());
+        $this->assertSame('/new/docs/my%20intro', $response->getHeaderLine('Location'));
+
+        $followed = $dispatcher->handle(new ServerRequest('GET', $response->getHeaderLine('Location')));
+        $this->assertSame(200, $followed->getStatusCode());
+        $this->assertSame('new: docs/my intro', (string) $followed->getBody());
+    }
+
+    /**
+     * Segment by segment, a value that begins with a slash would turn '/{path}' into an
+     * address of another host ('//evil.example/x'): there its slashes are encoded as well
+     */
+    public function testValueWithSlashesNeverMakesTheTargetNameAnotherHost(): void
+    {
+        $collector = new RouteCollector();
+        $collector->redirect('/go/{path:any}', '/{path}');
+        $collector->redirect('/bare/{path:any}', '{path}');
+
+        $dispatcher = new RouteDispatcher($collector->getData());
+
+        $this->assertSame('/%2Fevil.example%2Fx', $dispatcher->handle(new ServerRequest('GET', '/go//evil.example/x'))->getHeaderLine('Location'));
+        $this->assertSame('%2F%2Fevil.example', $dispatcher->handle(new ServerRequest('GET', '/bare///evil.example'))->getHeaderLine('Location'));
+        // Below a path of its own, a leading slash of the value is harmless and stays a slash
+        $this->assertSame('/a/b', $dispatcher->handle(new ServerRequest('GET', '/go/a/b'))->getHeaderLine('Location'));
+    }
+
     public function testRedirectWorksWithHead(): void
     {
         $collector = new RouteCollector();

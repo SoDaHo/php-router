@@ -36,6 +36,12 @@
   request to the route ended in a 500 — the response refused the `Location` header), and a
   status that is no 3xx status (a `Location` with a 200 is no redirect). This keeps the
   promise of 2.0.0 for redirect routes; `Response::redirect()` takes any status, as before.
+- A redirect route encodes the values of its target segment by segment, as `url()` does:
+  `redirect('/old/{path:any}', '/new/{path}')` sent `/old/docs/intro` to
+  `/new/docs%2Fintro`, which the router answers with 404 (`%2F`); it goes to
+  `/new/docs/intro` now. Where that would make the target begin with `//` — `'/{path}'`
+  with a value that begins with a slash, another host for the client — the slashes are
+  encoded as before.
 
 ## [2.1.0] - 2026-10-06
 
