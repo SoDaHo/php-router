@@ -61,15 +61,6 @@
   request to the route ended in a 500 — the response refused the `Location` header), and a
   status that is no 3xx status (a `Location` with a 200 is no redirect). This keeps the
   promise of 2.0.0 for redirect routes; `Response::redirect()` takes any status, as before.
-- A redirect route encodes the values of its target segment by segment, as `url()` does:
-  `redirect('/old/{path:any}', '/new/{path}')` sent `/old/docs/intro` to
-  `/new/docs%2Fintro`, which the router answers with 404 (`%2F`); it goes to
-  `/new/docs/intro` now. Only where a slash of a value cannot change scheme or host as a
-  browser reads the address: the target names both and ends the host before its first
-  placeholder (`'https://app.example/{path}'`), or the address has neither. Everywhere else
-  — `'https:{path}'` or `'/{path}'` with a value that begins with a slash, a target with a
-  backslash, a blank or a tab, an address that would get a `.`/`..` segment — the slashes
-  are encoded as before.
 - `baseUrl` (config, `setBaseUrl()`, `APP_URL` through `fromEnv()`) refuses a value with a
   control character or a blank. It is put in front of every absolute address as it is: a
   line break made each of them a `Location` header that the response refuses (a 500), a
@@ -93,6 +84,13 @@
   the mode `strict` a group's own address (`/api`) cannot be registered inside it; the
   Quick Start controller has the methods its routes name; hard links and SVG files in a
   web app folder.
+
+### Known limitations
+- A redirect target with a placeholder encodes the value as a whole: its slashes become
+  `%2F`, so that no value can change scheme or host of the address.
+  `redirect('/old/{path:any}', '/new/{path}')` therefore sends `/old/docs/intro` to
+  `/new/docs%2Fintro`, which this router answers with 404 — for redirects that keep the
+  segments of a path, use a route or a handler of your own. See README, "Redirect Routes".
 
 ## [2.1.0] - 2026-10-06
 

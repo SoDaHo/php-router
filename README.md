@@ -477,16 +477,13 @@ $r->redirect('/users/{id}/profile', '/profile/{id}');  // With parameters
 A placeholder in the target is `{name}` — nothing else in braces — and has to exist in the
 source (the prefix of its groups included). The status is a 3xx status, and the target
 has no control character other than a tab; both are refused where the route is written.
-Values are encoded as `url()` encodes them: each segment on its own, so that
-`redirect('/old/{path:any}', '/new/{path}')` sends `/old/docs/intro` to `/new/docs/intro`
-— but only where a slash of a value cannot change scheme or host of the address: the
-target names both and ends the host before its first placeholder
-(`'https://app.example/{path}'`), or the address has neither (`'/new/{path}'`,
-`'docs/{path}'`, `'/{path}'` with a value that does not begin with a slash). Everywhere
-else the slashes are encoded too (`%2F`), as before: `'https:{path}'` with the value
-`//evil.example` would name another host, and so would `'/{path}'` with `/evil.example`.
-A target that begins with a scheme but no host (`'https:{path}'`) lets the value decide
-the host in any case — write the host into the target.
+A value goes into the target encoded as a whole (`rawurlencode()`): its slashes become
+`%2F`, so that no value can change scheme or host of the address. That is also why
+`redirect('/old/{path:any}', '/new/{path}')` sends `/old/docs/intro` to
+`/new/docs%2Fintro` — a path this router answers with 404. For redirects that keep the
+segments of a path, use a route or a handler of your own. Write scheme and host into the
+target: one that begins with a scheme but no host (`'https:{path}'`) leaves the host to
+what a client makes of the value.
 
 ## Response Helpers
 
