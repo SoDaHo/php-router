@@ -158,7 +158,10 @@ The name is made of ASCII letters, digits and underscores. The fragment becomes 
 regular expression delimited by `#`: write a literal `#` as `\#`. A pattern may be added
 after the routes that use it. The fragment is a regular expression of its own — its
 parentheses pair up (`'a)|(.*'` is refused when the route table is built); it may refer to
-the placeholders of its route by name (`(?P=other)`).
+the placeholders of its route by name (`(?P=other)`). Keep it free of nested quantifiers
+(`(a+)+`): where PCRE gives up on an expression (the backtrack limit, the JIT stack), the
+request is answered with 500 and the `error` hook gets a `RouterException` naming the PCRE
+error — never treated as "no match", which would hand it to the next route.
 
 ### What a Route Pattern May Contain
 
@@ -371,8 +374,8 @@ $match->params;            // ['id' => '5'] — as in the path, not cast yet
 $match->allowedMethods();  // every method the path is registered with
 $match->path;              // the path the table was asked with (decoded, without basePath);
                            // as requested where the table was not asked: outside the
-                           // base path (decoded), with a hidden separator or a control
-                           // character (as it came)
+                           // base path (decoded), with a hidden separator, a control
+                           // character or a dot segment (as it came)
 ```
 
 `match()` needs no container, so it works before the application is booted;

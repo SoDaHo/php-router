@@ -268,7 +268,18 @@ final class UrlGenerator
             // … and, in the mode 'ignore', without the slashes at its end
             $seen = $this->ignoreTrailingSlash && $candidate !== '/' ? rtrim($candidate, '/') : $candidate;
 
-            if (preg_match($regex, $seen, $captured) !== 1 || array_intersect_key($captured, $values) !== $values) {
+            $result = preg_match($regex, $seen, $captured);
+
+            // PCRE gave up on the expression (the backtrack limit, the JIT stack): that says
+            // nothing about whether the values fit
+            if ($result === false) {
+                throw new RouterException(
+                    sprintf('The parameters could not be checked against the pattern of route "%s": %s', $name, preg_last_error_msg()),
+                    debugMessage: $candidate,
+                );
+            }
+
+            if ($result !== 1 || array_intersect_key($captured, $values) !== $values) {
                 throw new RouterException(
                     sprintf('The parameters do not fit the pattern of route "%s": the address would not lead back to it', $name),
                     debugMessage: $candidate,

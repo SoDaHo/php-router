@@ -19,6 +19,12 @@
   any path — the route answered for every dynamic route registered after it. Each fragment
   a route uses is now compiled on its own as well, behind an empty group for each
   placeholder of the route, so that it may still refer to them (`(?P=a)`).
+- A route expression that PCRE gives up on — the backtrack limit or the JIT stack, reached
+  by a pattern of your own with nested quantifiers — is a failure, not "no match":
+  `handle()` answers 500 and the `error` hook gets a `RouterException` that names the PCRE
+  error, `match()` throws it. The request used to go on to the next route that matched (a
+  catch-all) or 404 without a word, and the 405 list left the method out; `url()` said the
+  values do not fit where it could not tell — it names the PCRE error now.
 
 ## [2.1.0] - 2026-10-06
 

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Sodaho\Router;
 
+use Sodaho\Router\Exception\RouterException;
+
 /**
  * Low-level route matching.
  *
@@ -41,6 +43,8 @@ final class Dispatcher
      * @param string $method HTTP method
      * @param string $uri Request URI
      *
+     * @throws RouterException When PCRE gives up on a route's expression (see matches())
+     *
      * @return array{0: int, 1: mixed, 2: array<string, string>, 3: array<string, string>} [Status, Route|AllowedMethods, Params, Casts]
      */
     public function dispatch(string $method, string $uri): array
@@ -75,7 +79,7 @@ final class Dispatcher
         }
 
         foreach ($this->dynamicRoutes[$method] as $data) {
-            if (preg_match($data['regex'], $uri, $matches)) {
+            if (self::matches($data, $uri, $matches)) {
                 // Filter numeric keys from matches (we only want named params)
                 $params = array_filter($matches, 'is_string', ARRAY_FILTER_USE_KEY);
 
@@ -100,6 +104,8 @@ final class Dispatcher
      *
      * @param string $uri Request URI
      *
+     * @throws RouterException When PCRE gives up on a route's expression (see matches())
+     *
      * @return list<string>
      */
     public function allowedMethods(string $uri): array
@@ -122,7 +128,7 @@ final class Dispatcher
         // Check dynamic routes
         foreach ($this->dynamicRoutes as $method => $routes) {
             foreach ($routes as $data) {
-                if (preg_match($data['regex'], $uri)) {
+                if (self::matches($data, $uri)) {
                     $allowed[] = $method;
                     break; // Once found for a method, skip to next method
                 }
@@ -131,5 +137,33 @@ final class Dispatcher
 
         // array_values(): array_unique() keeps keys, and a list with gaps is a JSON object in the 405 body.
         return array_values(array_unique($allowed));
+    }
+
+    /**
+     * Whether a route's expression matches the path. PCRE may give up on an expression
+     * instead of answering (the backtrack limit, the JIT stack — a pattern of your own with
+     * nested quantifiers): that is no "no match", which would hand the request to the next
+     * route that matches (a catch-all) or leave a method out of the 405 list without a
+     * word. It is thrown.
+     *
+     * @param array{regex: string, route: Route, casts: array<string, string>} $data
+     * @param array<int|string, string>|null $matches
+     *
+     * @param-out array<int|string, string> $matches
+     *
+     * @throws RouterException When PCRE gives up on the expression
+     */
+    private static function matches(array $data, string $uri, ?array &$matches = null): bool
+    {
+        $result = preg_match($data['regex'], $uri, $matches);
+
+        if ($result === false) {
+            throw new RouterException(
+                'Route pattern could not be matched: ' . preg_last_error_msg(),
+                debugMessage: $data['route']->pattern,
+            );
+        }
+
+        return $result === 1;
     }
 }

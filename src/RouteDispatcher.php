@@ -409,8 +409,25 @@ final class RouteDispatcher implements RequestHandlerInterface
         /** @var \WeakMap<\Throwable, true> $known */
         $known = new \WeakMap();
 
-        $enter = function (ServerRequestInterface $request) use (&$current, &$head): ServerRequestInterface {
-            $current = $this->attachMatch($request);
+        // What the lookup of a request object failed with. Asked again (the last resort
+        // below), the same failure is thrown again instead of a new one of the same kind —
+        // reported once, like a request object that throws the same exception each time.
+        /** @var \WeakMap<ServerRequestInterface, \Throwable> $unroutable */
+        $unroutable = new \WeakMap();
+
+        $enter = function (ServerRequestInterface $request) use (&$current, &$head, $unroutable): ServerRequestInterface {
+            if (isset($unroutable[$request])) {
+                throw $unroutable[$request];
+            }
+
+            try {
+                $current = $this->attachMatch($request);
+            } catch (\Throwable $e) {
+                $unroutable[$request] = $e;
+
+                throw $e;
+            }
+
             $head = $head || $current->getMethod() === 'HEAD';
 
             return $current;

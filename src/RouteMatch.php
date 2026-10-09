@@ -62,6 +62,12 @@ final class RouteMatch
      * those of this path). With implicitHead, HEAD stands right behind GET. Empty when no
      * route knows the path.
      *
+     * For a FOUND match the list is built when it is first asked for — with another pass
+     * over the route table, which throws a RouterException where PCRE gives up on a
+     * route's expression (see Router::match()).
+     *
+     * @throws Exception\RouterException When PCRE gives up on a route's expression
+     *
      * @return list<string>
      */
     public function allowedMethods(): array

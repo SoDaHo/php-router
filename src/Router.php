@@ -754,7 +754,9 @@ final class Router implements RouterInterface
      * trailing slash mode are taken as they are at that moment. What the routes file itself
      * throws while it is loaded comes out as it is.
      *
-     * @throws RouterException If no routes are loaded or routes file is invalid
+     * @throws RouterException If no routes are loaded or routes file is invalid, or when PCRE
+     *                         gives up on a route's expression (the backtrack limit, the JIT
+     *                         stack) — through handle() that is a 500, never "no match"
      */
     public function match(ServerRequestInterface $request): RouteMatch
     {
