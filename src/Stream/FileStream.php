@@ -144,9 +144,9 @@ final class FileStream implements StreamInterface
 
     public function eof(): bool
     {
-        // Handle-Zustand zuerst: nach close()/detach() werfen read()/tell()/getContents(),
-        // eof() muss dann true melden — sonst laeuft die kanonische Konsumenten-Schleife
-        // `while (!eof()) read()` in genau diese Exception hinein (Nyholm meldet dort true).
+        // The handle first: after close()/detach(), read(), tell() and getContents() throw,
+        // so eof() has to say true — otherwise the usual loop of a consumer,
+        // `while (!eof()) read()`, runs straight into that exception (Nyholm says true there).
         return !is_resource($this->handle) || $this->exhausted || $this->pos >= $this->length;
     }
 

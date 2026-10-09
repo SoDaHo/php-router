@@ -7,7 +7,9 @@ namespace Sodaho\Router;
 /**
  * Value object representing a single route.
  *
- * Partially mutable: middleware, name and attributes can be set via fluent setters.
+ * Partially mutable: middleware, name and attributes can be set via fluent setters — meant
+ * for the routes file. The object is shared by every request the route serves: what a
+ * request changes on it holds for every request after it in the same process.
  */
 final class Route
 {

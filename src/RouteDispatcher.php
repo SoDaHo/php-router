@@ -352,6 +352,9 @@ final class RouteDispatcher implements RequestHandlerInterface
      */
     private function normalizePath(string $requestPath): ?string
     {
+        // Decoded before the base path is taken off: the base path is written decoded, like
+        // route patterns. What decoding could hide (%2F, %2E%2E) was refused before this is
+        // asked (hasNoRoute()), so the decoded path has the segments the client sent.
         // A URI built without a path ('http://example.com') asks for the root, as a client
         // that sends it means it; over HTTP the path is never empty
         $uri = $requestPath === '' ? '/' : rawurldecode($requestPath);
@@ -655,7 +658,10 @@ final class RouteDispatcher implements RequestHandlerInterface
         float $startTime
     ): ResponseInterface {
         // 1. Inject parameters into Request (BEFORE Middleware!)
-        // Store route params separately for handler invocation
+        // Store route params separately for handler invocation. Each parameter is also an
+        // attribute of its own name — and replaces an attribute of that name that a
+        // middleware for every request set before (a placeholder {client_id} beats the
+        // client_id of a token). Name placeholders so that they do not collide.
         $request = $request->withAttribute('_route_params', $params);
         foreach ($params as $key => $value) {
             $request = $request->withAttribute($key, $value);
@@ -868,9 +874,14 @@ final class RouteDispatcher implements RequestHandlerInterface
     }
 
     /**
+     * Turns what {x:bool} took into a boolean — called for every such value ('TRUE' is
+     * true). Its default branch is reached only where an application replaced the
+     * built-in pattern of the type (addPattern('bool', …)): that one lets nothing else
+     * through.
+     *
      * @throws \TypeError If value is not a valid boolean
      *
-     * @codeCoverageIgnore Dead code: regex pattern filters invalid bool values before this is called
+     * @codeCoverageIgnore For the default branch, which the built-in pattern keeps out of reach
      */
     private static function castBool(string $value, string $key): bool
     {

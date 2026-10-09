@@ -9,6 +9,11 @@ use Sodaho\Router\Exception\RouterException;
 
 /**
  * Generates URLs from named routes.
+ *
+ * With URL encoding on (the default), an address is only returned when it leads back to
+ * its route with exactly the values given, and when it is a path on this site: one slash
+ * in front, no backslash, no '.' or '..' segment, nothing a client would read as another
+ * host. With encoding off the application answers for what it puts in.
  */
 final class UrlGenerator
 {

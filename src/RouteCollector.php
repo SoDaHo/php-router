@@ -9,6 +9,13 @@ use Sodaho\Router\Exception\RouterException;
 
 /**
  * Collects route definitions and compiles them for the Dispatcher.
+ *
+ * What can be said about a route when it is written is said there, with a
+ * RouterException: a pattern that is no plain path, a method no request can have, a method
+ * and path that are taken already (nothing of a refused route stays behind). What depends
+ * on patterns that may still be added — a type nobody defined, a fragment of addPattern()
+ * that does not compile — is said by getData(), when the table is built. A group's prefix,
+ * middleware and attributes hold only while its callback runs, also when it throws.
  */
 final class RouteCollector
 {

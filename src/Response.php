@@ -18,6 +18,10 @@ use Sodaho\Router\Stream\FileStream;
  * Delegates body formatting to a ResponderInterface implementation.
  * Default: JsonResponder with {success, data, error} format.
  *
+ * The responder is static state of the process: setResponder() changes it for every
+ * response built afterwards — every router, every request a long-running worker serves —
+ * until reset(). Each helper builds a new response object; nothing else is kept.
+ *
  * JSON Structure:
  * Success: {"success": true, "data": {...}, "message": "...", "meta": {...}}
  * Error: {"success": false, "message": "...", "error": {"message": "...", "code": "...", "details": {...}}}

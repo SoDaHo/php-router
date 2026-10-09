@@ -971,6 +971,18 @@ final class Router implements RouterInterface
         return $this->urlGenerator;
     }
 
+    /**
+     * Send a response: status line, headers and body — for a response built outside
+     * handle(), or one handle() returned when run() is not used. What can be read is read
+     * before anything is sent; nothing is sent once output has started (the error hook gets
+     * type 'emit'). Fields that exist once per message replace what the host set, all other
+     * fields add up.
+     *
+     * @param bool $withBody False for a HEAD request: the body is not read at all
+     *
+     * @throws RouterException If the body cannot be read, or the reason phrase has a control
+     *                         character other than a tab — before anything is sent
+     */
     public function emit(ResponseInterface $response, bool $withBody = true): void
     {
         $this->send($response, $withBody);

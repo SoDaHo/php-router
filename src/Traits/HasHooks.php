@@ -7,11 +7,11 @@ namespace Sodaho\Router\Traits;
 /**
  * Trait for event hooks.
  *
- * Provides on() for registering and trigger() for firing events.
- * Unlike pdo-wrapper/container (which let exceptions bubble up), this
- * implementation catches hook exceptions and hands them to the 'hookError' hook
- * (stderr without one). The router must always return a response to the client
- * (API-first design).
+ * Provides on() for registering and trigger() for firing events. A hook that throws never
+ * interrupts the caller: its exception goes to the 'hookError' hook (a line on stderr
+ * without one), and the hooks after it still run — the router has to answer every request.
+ * The trait adds no member a class that uses it could already have (see
+ * handleHookException()).
  */
 trait HasHooks
 {
@@ -31,9 +31,7 @@ trait HasHooks
     }
 
     /**
-     * Trigger all callbacks for an event.
-     *
-     * Method is named trigger() for API consistency with pdo-wrapper/container.
+     * Trigger all callbacks for an event, in the order they were registered.
      *
      * @param string $event Event name
      * @param array<string, mixed> $data Event data passed to callbacks
