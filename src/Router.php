@@ -462,7 +462,8 @@ final class Router implements RouterInterface
      */
     public function middleware(string|array|object $middleware): self
     {
-        $this->middleware = array_merge($this->middleware, is_array($middleware) ? $middleware : [$middleware]);
+        // A list, whatever keys the array came with: two calls add up, also under the same key
+        $this->middleware = [...$this->middleware, ...(is_array($middleware) ? array_values($middleware) : [$middleware])];
         $this->dispatcher?->setMiddleware($this->middleware);
 
         return $this;

@@ -44,8 +44,9 @@ final class UrlGenerator
                     $this->namedRoutes[$value->name] = $value->pattern;
                 }
             } else {
-                // Pattern mapping: name => pattern
-                $this->namedRoutes[$key] = $value;
+                // Pattern mapping: name => pattern. A name that is a number ('1' => …) is a
+                // key PHP keeps as an integer; the name is its string form all the same.
+                $this->namedRoutes[(string) $key] = $value;
             }
         }
     }

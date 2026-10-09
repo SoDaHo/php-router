@@ -297,10 +297,11 @@ final class RouteCollector
             return;
         }
 
-        $middleware = is_array($middleware) ? $middleware : [$middleware];
+        // A list, whatever keys the array came with: nested groups add up, also under the same key
+        $middleware = is_array($middleware) ? array_values($middleware) : [$middleware];
 
         $previousMiddleware = $this->currentMiddleware;
-        $this->currentMiddleware = array_merge($this->currentMiddleware, $middleware);
+        $this->currentMiddleware = [...$this->currentMiddleware, ...$middleware];
 
         try {
             $callback($this);

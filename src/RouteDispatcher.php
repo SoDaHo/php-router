@@ -559,18 +559,22 @@ final class RouteDispatcher implements RequestHandlerInterface
      */
     public static function describe(ServerRequestInterface $request): array
     {
-        $read = static function (\Closure $get): string {
-            try {
-                return $get();
-            } catch (\Throwable) {
-                return '';
-            }
-        };
+        $method = '';
+        $path = '';
 
-        return [
-            'method' => $read(static fn (): string => $request->getMethod()),
-            'path' => $read(static fn (): string => $request->getUri()->getPath()),
-        ];
+        try {
+            $method = $request->getMethod();
+        } catch (\Throwable) {
+            // Stays empty
+        }
+
+        try {
+            $path = $request->getUri()->getPath();
+        } catch (\Throwable) {
+            // Stays empty
+        }
+
+        return ['method' => $method, 'path' => $path];
     }
 
     /**

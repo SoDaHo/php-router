@@ -66,6 +66,15 @@ class RouteTest extends TestCase
         $this->assertSame(['First', 'Second'], $route->middleware);
     }
 
+    public function testMiddlewareIsAListWhateverKeysItCameWith(): void
+    {
+        // Two calls with the same key add up instead of the second replacing the first
+        $route = new Route(['GET'], '/test', 'Handler');
+        $route->middleware(['auth' => 'First'])->middleware(['auth' => 'Second']);
+
+        $this->assertSame(['First', 'Second'], $route->middleware);
+    }
+
     public function testFluentName(): void
     {
         $route = new Route(['GET'], '/test', 'handler');

@@ -51,8 +51,9 @@ final class Route
      */
     public function middleware(string|array|object $middleware): self
     {
-        $middleware = is_array($middleware) ? $middleware : [$middleware];
-        $this->middleware = array_merge($this->middleware, $middleware);
+        // A list, whatever keys the array came with: two calls add up, also under the same key
+        $middleware = is_array($middleware) ? array_values($middleware) : [$middleware];
+        $this->middleware = [...$this->middleware, ...$middleware];
         return $this;
     }
 
