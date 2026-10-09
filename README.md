@@ -51,13 +51,27 @@ use Psr\Http\Message\ResponseInterface;
 
 class UserController
 {
+    public function index(ServerRequestInterface $request): ResponseInterface
+    {
+        return Response::success([['id' => 1, 'name' => 'John']]);
+    }
+
     public function show(ServerRequestInterface $request, int $id): ResponseInterface
     {
         $user = ['id' => $id, 'name' => 'John'];
         return Response::success($user);
     }
+
+    public function store(ServerRequestInterface $request): ResponseInterface
+    {
+        $user = ['id' => 2] + (array) $request->getParsedBody();
+        return Response::created($user, location: '/users/2');
+    }
 }
 ```
+
+Every method a route names has to exist: a missing one is a 500, and without an `error`
+hook nothing tells you why (see [Hooks](#hooks-logging)).
 
 ## HTTP Methods
 
@@ -230,6 +244,11 @@ $r->group('/api', function (RouteCollector $r) {
 // → /api/v1/users
 ```
 
+In the trailing slash mode `strict` (the default), a route inside a group is written
+behind the prefix: `get('')` and `get('/')` in `group('/api', …)` both register `/api/`
+(the second one is a duplicate), and the address `/api` itself cannot be registered in
+the group. Register it outside: `$r->get('/api', $handler)`.
+
 ## Route Attributes
 
 What your application wants to know about a route before its handler runs — the response
@@ -327,6 +346,10 @@ public function process($request, $handler): ResponseInterface
 }
 ```
 
+The order, from the outside in: middleware added to the router (first added = outermost),
+then the groups from the outermost to the innermost (`middlewareGroup()`), then the
+route's own (`->middleware()`); on the way out the other way round.
+
 A middleware that passes the request on with another method or path — a method override, a
 stripped locale prefix — gets it routed as passed on: the route is looked up again for
 everything further in (the middleware added after it, the error handler, the route). The
@@ -423,13 +446,15 @@ placeholder taking its value, and each value has to pass the cast of its type. A
 that does not fit throws (`12a` or `01` for `{id:int}`, an empty value, a slash where one
 segment is expected), and so do values that the pattern would split differently — in the
 trailing slash mode `ignore` also a value that ends in a slash, which the router drops
-before it looks the route up. What `url()` does not look at: whether another route,
-registered before this one, takes the same path (`/users/me` in front of `/users/{id}`
-with `id => 'me'`). A slash that the placeholder takes
+before it looks the route up. What `url()` does not look at: whether another route takes
+the same path first (a static `/users/me`, or a dynamic route defined before this one,
+in front of `/users/{id}` with `id => 'me'`). A slash that the placeholder takes
 (`{path:any}`) stays a slash, each segment encoded on its own — the router refuses `%2F`.
 `null` is no value. And the address as a whole has no `.` or `..` segment, no path that
 begins with `//` below the base path, begins with a single `/` and contains no backslash,
-whatever route pattern and base path are made of:
+whatever route pattern and base path are made of. Parameters that are not placeholders of
+the route are left out: `url()` writes no query string (append one yourself, e.g. with
+`http_build_query()`):
 
 ```php
 $router->url('files', ['path' => 'my dir/a b.txt']);   // /files/{path:any} → /files/my%20dir/a%20b.txt
@@ -904,7 +929,9 @@ router still needs its routes file (`loadRoutes()`), also when it serves folders
 relative folder means the working directory at the time of the call.
 
 **Never served**, whatever the folder contains: anything outside it (the resolved file has
-to lie under the resolved folder — links are followed and checked), hidden files and
+to lie under the resolved folder — symbolic links are followed and checked; a hard link
+cannot be told from the file it shares its content with, so one inside the folder is
+served even when that content also lies elsewhere), hidden files and
 folders (a leading dot, `.well-known` included — give those a route), files that cannot be
 read, file types that are not on the list (see `AppFolder::TYPES`, extend it with the
 `types` option), and paths with a control character (a NUL byte, a line break; such a path
@@ -918,6 +945,11 @@ one before the router sees it: `//login/x` is `/login/x` then, for routes and ap
 PHP sources (`php`, `phtml`, `phar`, `inc`, …) cannot be put on the list. Source maps
 (`.map`) are not on it: they publish the sources of the app —
 `'types' => ['map' => 'application/json']` if that is what you want.
+
+Files go out `inline`, under the origin of the application. An SVG can carry script that
+runs when the file is opened on its own — keep only files of your own in the folder (no
+uploads), or send a `Content-Security-Policy` from a middleware for every request (`sandbox`
+for the folder's paths), or take `svg` off the list (`'types' => ['svg' => null]`).
 
 The folder you register is trusted as a whole: the rule for hidden names applies below
 it, not to its own path, and a folder that is a link is followed (deployments switch
@@ -1171,7 +1203,7 @@ protected function tearDown(): void
 | Optional segments `[/suffix]` | Complexity vs. benefit. Define two routes instead. Refused when the route is registered — and with them every `[` or `]` in a route pattern. |
 | Regex in route patterns | Use predefined patterns or `addPattern()`. Refused when the route is registered. |
 | Literal `{`, `}`, `?`, `#`, `%XX` in a route pattern | A pattern is a path, written decoded; braces are placeholders. Refused when the route is registered. |
-| Route priority/ordering | Routes match in definition order. Define specific routes first. |
+| Route priority/ordering | A static route (no placeholder) always wins, whatever the order of definition: `/users/me` beats `/users/{name}`. Among routes with placeholders the first one defined that matches wins — define the specific ones first. |
 | Async/Swoole out-of-box | Use `handle()` method, not `run()`. Emit response yourself. |
 | >500 dynamic routes efficiently | O(n) matching. Consider splitting into microservices. |
 

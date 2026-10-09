@@ -10,6 +10,24 @@ use Sodaho\Router\Route;
 
 class DispatcherTest extends TestCase
 {
+    /**
+     * A static route is looked up first, whatever the order of definition; among dynamic
+     * routes the first one defined that matches wins
+     */
+    public function testStaticRouteWinsOverADynamicOneDefinedBefore(): void
+    {
+        $collector = new \Sodaho\Router\RouteCollector();
+        $collector->get('/users/{name}', 'dynamic, defined first');
+        $collector->get('/users/me', 'static, defined later');
+        $collector->get('/users/{id:int}', 'dynamic, defined later');
+
+        [$static, $dynamic] = $collector->getData();
+        $dispatcher = new Dispatcher($static, $dynamic);
+
+        $this->assertSame('static, defined later', $dispatcher->dispatch('GET', '/users/me')[1]->handler);
+        $this->assertSame('dynamic, defined first', $dispatcher->dispatch('GET', '/users/5')[1]->handler);
+    }
+
     public function testStaticRouteMatch(): void
     {
         $route = new Route(['GET'], '/users', 'handler');

@@ -50,6 +50,11 @@ class PipelineTest extends TestCase
                     $r->get('/unresolvable', [NeverBuilt::class, 'show']);
                     $r->get('/returned-500', fn () => Response::serverError('returned, not thrown'));
                     $r->get('/tagged', fn () => Response::success('ok'))->middleware(new PipelineTag('route'));
+                    $r->middlewareGroup(new PipelineTag('outer group'), function ($r) {
+                        $r->middlewareGroup(new PipelineTag('inner group'), function ($r) {
+                            $r->get('/grouped', fn () => Response::success('ok'))->middleware(new PipelineTag('route'));
+                        });
+                    });
                     $r->delete('/ok', fn ($request) => Response::success([
                         'method' => $request->getMethod(),
                         'matched' => $request->getAttribute(Sodaho\Router\RouteMatch::class)->method,
@@ -120,6 +125,25 @@ class PipelineTest extends TestCase
         $this->assertSame('route, b, a', $response->getHeaderLine('X-Seen-By'));
         $this->assertSame(
             ['a in 1', 'b in 1', 'route in 1', 'route out 200', 'b out 200', 'a out 200'],
+            PipelineTag::$log
+        );
+    }
+
+    /**
+     * From the outside in: the middleware for every request, the groups from the outermost
+     * to the innermost, the route's own — and back out in reverse
+     */
+    public function testOrderOfNestedGroups(): void
+    {
+        $router = $this->router()->middleware(new PipelineTag('global'));
+
+        $router->handle(new ServerRequest('GET', '/grouped'));
+
+        $this->assertSame(
+            [
+                'global in 1', 'outer group in 1', 'inner group in 1', 'route in 1',
+                'route out 200', 'inner group out 200', 'outer group out 200', 'global out 200',
+            ],
             PipelineTag::$log
         );
     }

@@ -53,6 +53,12 @@
 - README: the example of a responder of your own no longer promises XML — a responder
   shapes an array that is always sent as JSON. RFC 7807 is called by its successor, RFC
   9457, throughout.
+- README: a static route wins over a dynamic one whatever the order of definition (it
+  said "routes match in definition order"); the order of middleware in nested groups;
+  that `url()` leaves out parameters that are no placeholders (no query string); that in
+  the mode `strict` a group's own address (`/api`) cannot be registered inside it; the
+  Quick Start controller has the methods its routes name; hard links and SVG files in a
+  web app folder.
 - A route expression that PCRE gives up on — the backtrack limit or the JIT stack, reached
   by a pattern of your own with nested quantifiers — is a failure, not "no match":
   `handle()` answers 500 and the `error` hook gets a `RouterException` that names the PCRE
