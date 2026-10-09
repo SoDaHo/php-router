@@ -156,7 +156,9 @@ $r->get('/events/{date:date}', $handler);  // 2024-12-06
 
 The name is made of ASCII letters, digits and underscores. The fragment becomes part of a
 regular expression delimited by `#`: write a literal `#` as `\#`. A pattern may be added
-after the routes that use it.
+after the routes that use it. The fragment is a regular expression of its own — its
+parentheses pair up (`'a)|(.*'` is refused when the route table is built); it may refer to
+the placeholders of its route by name (`(?P=other)`).
 
 ### What a Route Pattern May Contain
 

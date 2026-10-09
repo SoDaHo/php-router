@@ -275,6 +275,7 @@ class RouteDefinitionTest extends TestCase
     {
         return [
             'group that is not closed' => ['broken', '(\d+'],
+            'one parenthesis too many on either side' => ['broken', 'a))|((.*'],
             'quantifier without anything to repeat' => ['broken', '+\d'],
             'reference to a placeholder the route does not have' => ['broken', '(?P=other)'],
         ];
@@ -320,6 +321,62 @@ class RouteDefinitionTest extends TestCase
         $this->expectExceptionMessage('Route pattern does not compile with its own pattern types');
 
         $collector->getData();
+    }
+
+    /**
+     * @return array<string, array{0: string}>
+     */
+    public static function fragmentsThatBreakOutOfTheirGroup(): array
+    {
+        return [
+            'closes the group and starts an alternative' => ['a)|(.*'],
+            'closes it and starts a group that does not capture' => ['a)|(?:.*'],
+            'closes it and opens another' => ['\d+)(\w*'],
+        ];
+    }
+
+    /**
+     * Wrapped in its group, such a fragment compiles — and takes the rest of the route's
+     * expression into an alternative of its own: '/x/{v}' with 'a)|(.*' matched every path
+     * of every dynamic route registered after it
+     */
+    #[DataProvider('fragmentsThatBreakOutOfTheirGroup')]
+    public function testOwnPatternThatBreaksOutOfItsGroupIsRefusedWhenTheTableIsBuilt(string $regex): void
+    {
+        $collector = new RouteCollector();
+        $collector->addPattern('loose', $regex);
+        $collector->get('/x/{v:loose}', 'handler');
+        $collector->get('/other/{id:int}', 'handler');
+
+        try {
+            $collector->getData();
+            $this->fail('The table was built');
+        } catch (RouterException $e) {
+            $this->assertSame('Route pattern uses a pattern type that is no regular expression of its own (its parentheses do not pair up)', $e->getMessage());
+            $this->assertStringStartsWith('/x/{v:loose}: ', (string) $e->getDebugMessage());
+        }
+    }
+
+    public function testOwnPatternsThatStayWithinTheirGroupAreAllowed(): void
+    {
+        $collector = new RouteCollector();
+        $collector->addPatterns([
+            'either' => 'a|b',
+            'same' => '(?P=a)x',
+            // A pattern that calls its own group: the placeholder's name is known to it as well
+            'nested' => '\((?:[^()]|(?P>n))*\)',
+        ]);
+        $collector->get('/e/{v:either}', 'handler');
+        $collector->get('/s/{a}/{b:same}', 'handler');
+        $collector->get('/n/{n:nested}', 'handler');
+
+        $dynamic = $collector->getData()[1]['GET'];
+
+        $this->assertSame(1, preg_match($dynamic[0]['regex'], '/e/b'));
+        $this->assertSame(0, preg_match($dynamic[0]['regex'], '/e/c'));
+        $this->assertSame(1, preg_match($dynamic[1]['regex'], '/s/q/qx'));
+        $this->assertSame(1, preg_match($dynamic[2]['regex'], '/n/(a(b)c)'));
+        $this->assertSame(0, preg_match($dynamic[2]['regex'], '/n/(a(b c)'));
     }
 
     // ==================== redirects ====================

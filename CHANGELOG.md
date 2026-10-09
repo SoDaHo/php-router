@@ -12,6 +12,14 @@
   their own (`/files/...`, `/files/.env`) still reach the route. See README, "Slashes in a
   Parameter".
 
+### Fixed
+- A pattern of your own (`addPattern()`) that closes its group early (`'a)|(.*'`) is
+  refused when the route table is built. Wrapped in the group of its placeholder it
+  compiled, and turned the rest of the route's expression into an alternative that matched
+  any path — the route answered for every dynamic route registered after it. Each fragment
+  a route uses is now compiled on its own as well, behind an empty group for each
+  placeholder of the route, so that it may still refer to them (`(?P=a)`).
+
 ## [2.1.0] - 2026-10-06
 
 ### Added

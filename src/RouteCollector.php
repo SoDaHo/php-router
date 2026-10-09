@@ -564,6 +564,10 @@ final class RouteCollector
                     );
                 }
 
+                if ($own) {
+                    $this->assertOwnFragments($route->pattern);
+                }
+
                 $dynamicRoutes[$method][] = [
                     'regex' => $regex,
                     'route' => $route,
@@ -573,6 +577,44 @@ final class RouteCollector
         }
 
         return [$staticRoutes, $dynamicRoutes];
+    }
+
+    /**
+     * Each fragment of addPattern() that a route uses is a regular expression of its own.
+     * The route's expression wraps it in its group, '(?P<v>' . $fragment . ')', and with
+     * that a fragment that closes the group early still compiles: 'a)|(.*' turns the rest
+     * of the expression into an alternative that matches any path — of every dynamic route
+     * registered after it. So each fragment is compiled once more on its own, behind an
+     * empty group for every placeholder of the route (its own one included): a fragment may
+     * refer to them ('(?P=a)', '(?P>v)'), nothing else. This comes on top of compiling the
+     * whole expression: '+\d' compiles behind an empty group, not in its place.
+     *
+     * @throws RouterException When a fragment compiles only together with the group around it
+     */
+    private function assertOwnFragments(string $pattern): void
+    {
+        $parts = self::parts($pattern);
+
+        $groups = '';
+        foreach ($parts as $part) {
+            if ($part['name'] !== null) {
+                $groups .= '(?P<' . $part['name'] . '>)';
+            }
+        }
+
+        foreach ($parts as $part) {
+            $type = $part['type'];
+            if ($type === null || $this->patterns[$type] === (self::BUILT_IN[$type] ?? null)) {
+                continue;
+            }
+
+            if (@preg_match('#' . $groups . $this->patterns[$type] . '#', '') === false) {
+                throw new RouterException(
+                    'Route pattern uses a pattern type that is no regular expression of its own (its parentheses do not pair up)',
+                    debugMessage: sprintf('%s: {%s:%s} is %s', $pattern, $part['name'], $type, $this->patterns[$type]),
+                );
+            }
+        }
     }
 
     /**
