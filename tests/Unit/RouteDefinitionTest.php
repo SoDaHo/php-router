@@ -473,6 +473,9 @@ class RouteDefinitionTest extends TestCase
             'blank in front of an empty host' => [' //{host}/x'],
             'tab between the slashes' => ["/\t/{host}/x"],
             'backslash for the second slash' => ['/\\{host}/x'],
+            'placeholder inside what is a scheme' => ['ht{a}tps://app.example/x'],
+            // Not accepted either: an empty host in front of a fixed one
+            'empty host in front of a fixed one' => ['https:///fixed.example/{path}'],
         ];
     }
 
@@ -507,6 +510,8 @@ class RouteDefinitionTest extends TestCase
             'https://user@app.example/{path}', 'https://app.example:8443/{path}', 'https://[::1]:8080/{path}',
             '//cdn.example/assets/{path}', '/new/{path}', '/{path}', '{path}', 'docs/{path}', '?next={path}',
             '#{path}', ' /{path}', "/\t{path}", 'https:example.com', 'mailto:team@example.com',
+            // A scheme begins with a letter (RFC 3986): this is a relative path with a ':' in it
+            '1:relative/{path}', '1{path}:x',
         ];
 
         foreach ($targets as $i => $target) {

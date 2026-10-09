@@ -424,9 +424,21 @@ final class RouteCollector
         $seen = str_replace(['\\', "\t"], ['/', ''], trim($target, "\x00..\x20"));
         $front = (string) strstr($seen . '{', '{', true);
 
-        // A ':' in front of the first '/', '?' or '#' ends a scheme
+        // A ':' in front of the first '/', '?' or '#' ends a scheme — if what stands in front
+        // of it is one (RFC 3986: a letter, then letters, digits, '+', '-', '.'): '1:x' is a
+        // path. A placeholder in there could make one ('{a}:', 'ht{a}tps:') unless a
+        // character in front of it already rules that out.
         $firstSegment = substr($seen, 0, strcspn($seen, '/?#'));
-        $scheme = str_contains($firstSegment, ':');
+        $colon = strpos($firstSegment, ':');
+        $scheme = false;
+
+        if ($colon !== false) {
+            $beforeColon = substr($firstSegment, 0, $colon);
+            if (preg_match('~^(?:[A-Za-z][A-Za-z0-9+.\-]*)?\{~', $beforeColon) === 1) {
+                return false;
+            }
+            $scheme = preg_match('~^[A-Za-z][A-Za-z0-9+.\-]*$~D', $beforeColon) === 1;
+        }
 
         if (!$scheme && !str_starts_with($seen, '//')) {
             // A path, a query or a fragment of the address the client is at

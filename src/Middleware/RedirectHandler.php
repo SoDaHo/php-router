@@ -7,6 +7,7 @@ namespace Sodaho\Router\Middleware;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Server\RequestHandlerInterface;
+use Sodaho\Router\Exception\RouterException;
 use Sodaho\Router\Response;
 
 /**
@@ -33,6 +34,8 @@ final class RedirectHandler implements RequestHandlerInterface
      *
      * @param ServerRequestInterface $request PSR-7 request
      *
+     * @throws RouterException When the values would change scheme or host of the target
+     *
      * @return ResponseInterface Redirect response
      */
     public function handle(ServerRequestInterface $request): ResponseInterface
@@ -47,7 +50,39 @@ final class RedirectHandler implements RequestHandlerInterface
             $target = str_replace('{' . $key . '}', rawurlencode((string) $value), $target);
         }
 
+        // Encoded, a value brings no '/', ':' or '\' of its own — but it may be empty: in
+        // '/{a}/{b}' a '' (or false) for {a} makes '//evil.example', another host. What
+        // would begin with '//' or carry a scheme where the target as written does not is
+        // not sent: a failure of the application (RouterException, a 500), not a redirect.
+        $sent = self::asABrowserReadsIt($target);
+        $written = self::asABrowserReadsIt($this->target);
+
+        if ((str_starts_with($sent, '//') && !str_starts_with($written, '//')) || self::scheme($sent) !== self::scheme($written)) {
+            throw new RouterException(
+                'Redirect not sent: its placeholders would change scheme or host of the target (an empty value in front of a slash)',
+                debugMessage: $target,
+            );
+        }
+
         return Response::redirect($target, $this->status);
+    }
+
+    /**
+     * An address as a browser reads it (WHATWG URL): blanks and control characters at the
+     * edges and tabs and line breaks inside dropped, a backslash taken for a slash.
+     */
+    private static function asABrowserReadsIt(string $address): string
+    {
+        return str_replace(['\\', "\t", "\n", "\r"], ['/', '', '', ''], trim($address, "\x00..\x20"));
+    }
+
+    /**
+     * The scheme an address begins with (RFC 3986: a letter, then letters, digits, '+',
+     * '-' or '.', then ':'), null for none.
+     */
+    private static function scheme(string $address): ?string
+    {
+        return preg_match('~^([A-Za-z][A-Za-z0-9+.\-]*):~', $address, $match) === 1 ? strtolower($match[1]) : null;
     }
 
     /**

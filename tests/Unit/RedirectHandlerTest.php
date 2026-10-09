@@ -42,6 +42,29 @@ class RedirectHandlerTest extends TestCase
         $this->assertSame('/profile/42', $response->getHeaderLine('Location'));
     }
 
+    /**
+     * A handler built by hand gets no check of its target when a route is registered: a
+     * value that turns into a scheme the target does not have is not sent either
+     */
+    public function testValueThatWouldMakeASchemeIsNotSent(): void
+    {
+        $handler = new RedirectHandler('{a}:{b}');
+        $request = new ServerRequest('GET', '/x')->withAttribute('_route_params', ['a' => 'https', 'b' => 'evil.example']);
+
+        $this->expectException(\Sodaho\Router\Exception\RouterException::class);
+        $this->expectExceptionMessage('Redirect not sent: its placeholders would change scheme or host of the target');
+
+        $handler->handle($request);
+    }
+
+    public function testSchemeOfTheTargetItselfIsSent(): void
+    {
+        $handler = new RedirectHandler('HTTPS://app.example/{b}');
+        $request = new ServerRequest('GET', '/x')->withAttribute('_route_params', ['b' => 'x']);
+
+        $this->assertSame('HTTPS://app.example/x', $handler->handle($request)->getHeaderLine('Location'));
+    }
+
     public function testRedirectWithMultipleParameters(): void
     {
         $handler = new RedirectHandler('/posts/{year}/{slug}');

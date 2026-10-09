@@ -478,19 +478,25 @@ $r->redirect('/users/{id}/profile', '/profile/{id}');  // With parameters
 A placeholder in the target is `{name}` — nothing else in braces — and has to exist in the
 source (the prefix of its groups included). The status is a 3xx status, and the target
 has no control character other than a tab; both are refused where the route is written.
-A placeholder must not stand where scheme or host belong: a target that has a scheme or
-begins with `//` writes scheme and host before its first placeholder, the host closed by
-`/`, `?` or `#` (`'https://app.example/{path}'`, `'//cdn.example/{path}'`); anything else
+A placeholder must not stand where scheme or host belong: a target that has a scheme (a
+letter, then letters, digits, `+`, `-`, `.`, then `:`) or begins with `//` writes scheme
+and host before its first placeholder, the host not empty and closed by `/`, `?` or `#`
+(`'https://app.example/{path}'`, `'//cdn.example/{path}'`); anything else
 (`'https:{path}'`, `'https:///{path}'`, `'//{host}/x'`, `'https://app.example{path}'`,
-`'{scheme}:{path}'`) is refused where the route is written — read as a browser reads it,
-so a backslash counts as a slash. A target without scheme and host (`'/new/{path}'`,
-`'docs/{path}'`, `'?next={path}'`) stays on the address the client is at.
+`'{scheme}:{path}'`, and also `'https:///fixed.example/{path}'` with its empty host in
+front of the fixed one) is refused where the route is written — read as a browser reads
+it, so a backslash counts as a slash. A target without scheme and host (`'/new/{path}'`,
+`'docs/{path}'`, `'?next={path}'`, `'1:relative/{path}'`) stays on the address the client
+is at.
 
-In the targets it accepts, no value can change scheme or host: a value goes in encoded as
-a whole (`rawurlencode()`), its slashes become `%2F`. That is also why
-`redirect('/old/{path:any}', '/new/{path}')` sends `/old/docs/intro` to
-`/new/docs%2Fintro` — a path this router answers with 404. For redirects that keep the
-segments of a path, use a route or a handler of your own.
+A value goes in encoded as a whole (`rawurlencode()`): its slashes become `%2F`, so it
+cannot change scheme or host of an accepted target by what it contains. What it renders
+as is checked once more when the redirect goes out: an address that would change scheme
+or host — an empty value in front of a slash, `'/{a}/{b}'` with `a` empty or `false`
+giving `//evil.example` — is not sent; the request ends in a 500 and the `error` hook gets
+the `RouterException`. Encoded as a whole, `redirect('/old/{path:any}', '/new/{path}')`
+sends `/old/docs/intro` to `/new/docs%2Fintro` — a path this router answers with 404. For
+redirects that keep the segments of a path, use a route or a handler of your own.
 
 ## Response Helpers
 

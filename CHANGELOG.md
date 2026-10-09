@@ -25,11 +25,17 @@
   `'https:{path}'`, `'http:/{path}'`, `'https:///{path}'`, `'///{path}'`, `'//{host}/x'`,
   `'{scheme}:{path}'`, `'https://app.example{path}'`, also `'mailto:{to}'` — read as a
   browser reads an address (a backslash is a slash, tabs and blanks at the edges are
-  dropped). Such a target left scheme or host to the request: `'https:///{path}'` with the
-  value `evil.example` sent the client to https://evil.example. Targets without scheme and
-  host (`'/new/{path}'`, `'docs/{path}'`, `'?next={path}'`) and those that write both
-  (`'https://app.example/{path}'`) are registered as before; in them no value can change
-  scheme or host, its slashes become `%2F`.
+  dropped; a scheme begins with a letter, so `'1:relative/{path}'` is a path). An empty
+  host in front of a fixed one is not accepted either (`'https:///fixed.example/{path}'`).
+  Such a target left scheme or host to the request: `'https:///{path}'` with the value
+  `evil.example` sent the client to https://evil.example. Targets without scheme and host
+  (`'/new/{path}'`, `'docs/{path}'`, `'?next={path}'`) and those that write both
+  (`'https://app.example/{path}'`) are registered as before.
+- A redirect whose values would change scheme or host of its target is not sent: an empty
+  value in front of a slash — `redirect('/go/{a:bool}/{b}', '/{a}/{b}')` with
+  `/go/false/evil.example` rendered `//evil.example`, another host. Checked as the address
+  goes out (as a browser reads it): `handle()` answers 500 and the `error` hook gets a
+  `RouterException`, instead of sending the client elsewhere.
 - The line written for a failing hook without a `hookError` callback names the event, the
   class of the exception and the file and line it was thrown at — no longer its message.
   A message may carry what a request sent, and a line break in it forged a second line in
@@ -98,8 +104,9 @@
 
 ### Known limitations
 - A redirect target with a placeholder encodes the value as a whole: its slashes become
-  `%2F`, so that in the targets `redirect()` accepts no value can change scheme or host
-  of the address. `redirect('/old/{path:any}', '/new/{path}')` therefore sends
+  `%2F`, so that no value can change scheme or host of an accepted target by what it
+  contains (a rendering that would change them anyway, an empty value in front of a
+  slash, is a 500). `redirect('/old/{path:any}', '/new/{path}')` therefore sends
   `/old/docs/intro` to `/new/docs%2Fintro`, which this router answers with 404 — for
   redirects that keep the segments of a path, use a route or a handler of your own. See
   README, "Redirect Routes".

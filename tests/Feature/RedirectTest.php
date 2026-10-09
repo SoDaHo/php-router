@@ -7,8 +7,10 @@ namespace Sodaho\Router\Tests\Feature;
 use Nyholm\Psr7\ServerRequest;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use Sodaho\Router\Exception\RouterException;
 use Sodaho\Router\RouteCollector;
 use Sodaho\Router\RouteDispatcher;
+use Sodaho\Router\Router;
 
 class RedirectTest extends TestCase
 {
@@ -103,11 +105,86 @@ class RedirectTest extends TestCase
         $collector->redirect('/go/{path:any}', $target);
         $dispatcher = new RouteDispatcher($collector->getData());
 
-        foreach (['/go/evil.example', '/go/evil.example/x', '/go///evil.example', '/go//evil.example', '/go/https:evil.example'] as $path) {
+        foreach (['/go/evil.example', '/go/evil.example/x', '/go///evil.example', '/go//evil.example', '/go/https:evil.example', '/go/'] as $path) {
             $location = $dispatcher->handle(new ServerRequest('GET', $path))->getHeaderLine('Location');
 
             $this->assertStringNotContainsString('evil.example/', $location, 'a slash of the value is %2F');
             $this->assertSchemeAndHost($location, $path, $scheme, $host);
+        }
+    }
+
+    /**
+     * @return array<string, array{0: string, 1: string, 2: string, 3: string|null, 4?: string|null, 5?: string}>
+     */
+    public static function rendersWithAnEmptyValue(): array
+    {
+        // Source, target, request path, Location (null: refused), its own scheme, its own host
+        return [
+            // A placeholder that renders as '' in front of a slash: '//evil.example' — another host
+            'bool false in front of a slash' => ['/go/{a:bool}/{b}', '/{a}/{b}', '/go/false/evil.example', null],
+            'bool true in front of a slash' => ['/go/{a:bool}/{b}', '/{a}/{b}', '/go/true/evil.example', '/1/evil.example'],
+            'empty value in front of a slash' => ['/go/{x:any}/{b}', '/{x}/{b}', '/go//evil.example', null],
+            'two empty values' => ['/go/{x:any}/{y:any}/{b}', '/{x}/{y}/{b}', '/go///evil.example', null],
+            'empty value in front of a backslash' => ['/go/{x:any}/{b}', '/{x}\\{b}', '/go//evil.example', null],
+            'empty value in front of a tab and a slash' => ['/go/{x:any}/{b}', "/{x}\t/{b}", '/go//evil.example', null],
+            'empty value, blank in front' => ['/go/{x:any}/{b}', ' /{x}/{b}', '/go//evil.example', null],
+            // Where '' cannot change the host, the redirect goes out
+            'relative target, empty first value' => ['/go/{x:any}/{b}', '{x}/{b}', '/go//evil.example', '/evil.example'],
+            'empty value that is not in front' => ['/go/{x:any}/{b}', '/new/{x}/{b}', '/go//evil.example', '/new//evil.example'],
+            'empty value behind a host of its own' => ['/go/{x:any}/{b}', 'https://trusted.example/{x}/{b}', '/go//evil.example', 'https://trusted.example//evil.example', 'https', 'trusted.example'],
+            'empty value in the query' => ['/go/{x:any}/{b}', '?next=/{x}/{b}', '/go//evil.example', '?next=//evil.example'],
+        ];
+    }
+
+    /**
+     * What the values render as is checked once more when the redirect goes out: an
+     * address that would begin with '//' (as a browser reads it) where the target does
+     * not, or that would carry a scheme the target does not, is not sent — RouterException,
+     * through Router::handle() a 500. Everything else keeps scheme and host.
+     */
+    #[DataProvider('rendersWithAnEmptyValue')]
+    public function testRenderingThatWouldChangeTheHostIsNotSent(string $source, string $target, string $path, ?string $location, ?string $scheme = null, string $host = 'app.example'): void
+    {
+        $collector = new RouteCollector();
+        $collector->redirect($source, $target);
+        $dispatcher = new RouteDispatcher($collector->getData());
+
+        try {
+            $actual = $dispatcher->handle(new ServerRequest('GET', $path))->getHeaderLine('Location');
+        } catch (RouterException $e) {
+            $this->assertNull($location, 'refused: ' . $e->getMessage());
+            $this->assertSame('Redirect not sent: its placeholders would change scheme or host of the target (an empty value in front of a slash)', $e->getMessage());
+
+            return;
+        }
+
+        $this->assertSame($location, $actual);
+        $this->assertSchemeAndHost($actual, $path, $scheme, $host);
+    }
+
+    public function testRenderingThatWouldChangeTheHostIsA500ThroughTheRouter(): void
+    {
+        $routes = sys_get_temp_dir() . '/router_redirect_render_' . uniqid() . '.php';
+        file_put_contents($routes, "<?php\nreturn function (\$r) { \$r->redirect('/go/{a:bool}/{b}', '/{a}/{b}'); };\n");
+
+        try {
+            $router = Router::create()->loadRoutes($routes);
+            $reported = [];
+            $router->on('error', function (array $data) use (&$reported): void {
+                $reported[] = $data['exception'];
+            });
+
+            $response = $router->handle(new ServerRequest('GET', '/go/false/evil.example'));
+
+            $this->assertSame(500, $response->getStatusCode());
+            $this->assertFalse($response->hasHeader('Location'));
+            $this->assertCount(1, $reported);
+            $this->assertInstanceOf(RouterException::class, $reported[0]);
+            $this->assertSame('//evil.example', $reported[0]->getDebugMessage());
+
+            $this->assertSame('/1/evil.example', $router->handle(new ServerRequest('GET', '/go/true/evil.example'))->getHeaderLine('Location'));
+        } finally {
+            unlink($routes);
         }
     }
 
