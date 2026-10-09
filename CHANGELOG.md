@@ -17,6 +17,10 @@
   dropped such a status line and sent its own 200 — a 403 went out as a 200, with PHP's
   warning in the body and no report. Text beyond ASCII (`202 Akzeptiert ä`) and a tab go
   out as before (RFC 9112).
+- The line written for a failing hook without a `hookError` callback names the event, the
+  class of the exception and the file and line it was thrown at — no longer its message.
+  A message may carry what a request sent, and a line break in it forged a second line in
+  the log. The whole exception still goes to `hookError`.
 
 ### Fixed
 - A pattern of your own (`addPattern()`) that closes its group early (`'a)|(.*'`) is

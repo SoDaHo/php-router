@@ -716,8 +716,10 @@ body), and type `emit` (output had started before the router could send). Where 
 status (the CLI), that is the 200 it would send.
 
 **Note:** Hook exceptions are caught and never affect the response. Register `hookError` to
-get them; without it a line goes to stderr (`error_log()` where there is none). A
-`hookError` callback that fails itself gets that line too. Where not even the line can
+get them; without it a line goes to stderr (`error_log()` where there is none) that names
+the event, the class of the exception and the file and line it was thrown at — not its
+message, which may carry what a request sent (a line break would forge a second log line).
+A `hookError` callback that fails itself gets that line too. Where not even the line can
 be written (`STDERR` closed), it is dropped — a failing hook never interrupts the request.
 
 ```php

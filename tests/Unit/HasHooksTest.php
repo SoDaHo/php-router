@@ -283,7 +283,26 @@ class HasHooksTest extends TestCase
 
         $written = $this->loggedWhile($log, fn () => $obj->fire('dispatch'));
 
-        $this->assertStringContainsString("[Router] Hook error in 'dispatch': metrics down in ", $written);
+        $this->assertStringContainsString("[Router] Hook error in 'dispatch': RuntimeException in ", $written);
+    }
+
+    /**
+     * The message of an exception may carry what a request sent — a line break included,
+     * which forged a second line in a line-based log. The line says where, not what: the
+     * whole exception goes to hookError only.
+     */
+    public function testLineNamesTheExceptionAndItsPlaceButNotItsMessage(): void
+    {
+        [$obj, $log] = $this->hookedObjectWithReadableLog();
+        $line = __LINE__ + 1;
+        $obj->on('dispatch', fn () => throw new \RuntimeException("token=secret\n[Router] Hook error in 'forged': x in y:1"));
+
+        $written = $this->loggedWhile($log, fn () => $obj->fire('dispatch'));
+
+        $this->assertStringContainsString("[Router] Hook error in 'dispatch': RuntimeException in " . __FILE__ . ':' . $line . "\n", $written);
+        $this->assertStringNotContainsString('secret', $written);
+        $this->assertStringNotContainsString('forged', $written);
+        $this->assertSame(1, substr_count($written, '[Router]'));
     }
 
     public function testHookErrorCallbackGetsEventAndExceptionAndNothingIsWritten(): void
@@ -331,8 +350,8 @@ class HasHooksTest extends TestCase
         // Not handed to itself again: one call. Then both lines — the callback's own failure
         // and the one it was called for, so that nothing is lost
         $this->assertSame(1, $calls);
-        $this->assertSame(1, substr_count($written, "[Router] Hook error in 'hookError': logger down too in "));
-        $this->assertSame(1, substr_count($written, "[Router] Hook error in 'dispatch': metrics down in "));
+        $this->assertSame(1, substr_count($written, "[Router] Hook error in 'hookError': LogicException in "));
+        $this->assertSame(1, substr_count($written, "[Router] Hook error in 'dispatch': RuntimeException in "));
     }
 
     public function testEveryHookErrorCallbackGetsItsTurn(): void
@@ -369,8 +388,8 @@ class HasHooksTest extends TestCase
         $written = $this->loggedWhile($log, fn () => $obj->fire('dispatch'));
 
         $this->assertSame(1, $calls);
-        $this->assertSame(1, substr_count($written, "[Router] Hook error in 'audit': audit down in "));
-        $this->assertStringNotContainsString('metrics down', $written, 'the callback took it, nothing more to write');
+        $this->assertSame(1, substr_count($written, "[Router] Hook error in 'audit': RuntimeException in "));
+        $this->assertStringNotContainsString("'dispatch'", $written, 'the callback took it, nothing more to write');
 
         // ... and the callback is back in charge for the next failure
         $this->loggedWhile($log, fn () => $obj->fire('dispatch'));
@@ -390,7 +409,7 @@ class HasHooksTest extends TestCase
         $written = $this->loggedWhile($log, fn () => $obj->fire('hookError'));
 
         $this->assertSame(1, $calls, 'its own failure is not handed to it again');
-        $this->assertSame(1, substr_count($written, "[Router] Hook error in 'hookError': always fails"));
+        $this->assertSame(1, substr_count($written, "[Router] Hook error in 'hookError': LogicException in "));
     }
 
     /**

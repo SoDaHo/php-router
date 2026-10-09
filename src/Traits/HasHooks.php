@@ -56,6 +56,10 @@ trait HasHooks
      * and decides what to do with them. Without one a line goes to stderr (error_log()
      * where there is no stderr). A callback that fails itself gets that line too — and so
      * does the failure it was called for, so that nothing is lost.
+     *
+     * The line names the event, the class of the exception and where it was thrown — not
+     * its message: that may carry what a request sent (a line break that forges a second
+     * line in the log, a token). The whole exception goes to 'hookError' only.
      */
     protected function handleHookException(string $event, \Throwable $e): void
     {
@@ -69,7 +73,7 @@ trait HasHooks
             $message = sprintf(
                 "[Router] Hook error in '%s': %s in %s:%d\n",
                 $event,
-                $e->getMessage(),
+                $e::class,
                 $e->getFile(),
                 $e->getLine()
             );
