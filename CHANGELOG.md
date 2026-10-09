@@ -31,6 +31,11 @@
   route refused as a duplicate for one of its methods no longer keeps the methods before
   it: after a caught `DuplicateRouteException` for `match(['GET', 'POST'], '/x')` (POST
   taken), `get('/x')` works. The same method twice in one list is still a duplicate.
+- `redirect()` refuses what never made a redirect where the route is written: a target with
+  a control character other than a tab (`"/new\r\nX-Evil: 1"` was registered, and every
+  request to the route ended in a 500 — the response refused the `Location` header), and a
+  status that is no 3xx status (a `Location` with a 200 is no redirect). This keeps the
+  promise of 2.0.0 for redirect routes; `Response::redirect()` takes any status, as before.
 
 ## [2.1.0] - 2026-10-06
 

@@ -450,7 +450,8 @@ $r->redirect('/users/{id}/profile', '/profile/{id}');  // With parameters
 ```
 
 A placeholder in the target is `{name}` — nothing else in braces — and has to exist in the
-source (the prefix of its groups included).
+source (the prefix of its groups included). The status is a 3xx status, and the target
+has no control character other than a tab; both are refused where the route is written.
 
 ## Response Helpers
 

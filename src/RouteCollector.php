@@ -343,12 +343,28 @@ final class RouteCollector
      *
      * @param string $from Source URL pattern
      * @param string $to Target URL
-     * @param int $status HTTP status code (default: 302)
+     * @param int $status HTTP status code (default: 302), a 3xx status
      *
      * @throws DuplicateRouteException If route already exists
+     * @throws RouterException If the target has a control character or a placeholder its
+     *                         source does not have, or the status is no 3xx status
      */
     public function redirect(string $from, string $to, int $status = 302): Route
     {
+        // What a response cannot carry in its Location header is said here, not by a 500
+        // for every request to the route (a tab it carries, as it always did)
+        if (preg_match('/[\x00-\x08\x0A-\x1F\x7F]/', $to) === 1) {
+            throw new RouterException(
+                'Redirect target must not contain a control character',
+                debugMessage: (string) json_encode($to, JSON_INVALID_UTF8_SUBSTITUTE),
+            );
+        }
+
+        // A Location with a 200 is no redirect: the client shows the empty body
+        if ($status < 300 || $status > 399) {
+            throw new RouterException('Redirect status must be a 3xx status', debugMessage: (string) $status);
+        }
+
         // A placeholder in the target that the source (with the prefix of its groups) does
         // not have would go out as it stands. Said before the route is registered.
         $known = array_column(self::parts($this->currentPrefix . '/' . $from), 'name');

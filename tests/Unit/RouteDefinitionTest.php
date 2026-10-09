@@ -418,4 +418,62 @@ class RouteDefinitionTest extends TestCase
         $this->assertSame('/from/{id}/{name}', $route->pattern);
         $this->assertSame('/plain', $collector->redirect('/plain', '/target')->pattern);
     }
+
+    /**
+     * @return array<string, array{0: string}>
+     */
+    public static function targetsNoResponseCanCarry(): array
+    {
+        return [
+            'line break' => ["/new\r\nX-Evil: 1"],
+            'line feed alone' => ["/new\nx"],
+            'NUL' => ["/new\0"],
+            'DEL' => ["/new\x7F"],
+            'escape' => ["/new\x1B[0m"],
+        ];
+    }
+
+    /**
+     * Such a target used to be registered, and every request to the route ended in a 500:
+     * the response object refuses the Location header
+     */
+    #[DataProvider('targetsNoResponseCanCarry')]
+    public function testRedirectTargetWithAControlCharacterIsRefusedWhereItIsWritten(string $target): void
+    {
+        $collector = new RouteCollector();
+
+        try {
+            $collector->redirect('/old', $target);
+            $this->fail('The redirect was registered');
+        } catch (RouterException $e) {
+            $this->assertSame('Redirect target must not contain a control character', $e->getMessage());
+        }
+
+        $this->assertSame([], $collector->getRoutes());
+    }
+
+    public function testRedirectStatusIsA3xxStatus(): void
+    {
+        $collector = new RouteCollector();
+
+        foreach ([200, 201, 299, 400, 0, 1000] as $status) {
+            try {
+                $collector->redirect('/old', '/new', $status);
+                $this->fail('The redirect was registered with ' . $status);
+            } catch (RouterException $e) {
+                $this->assertSame('Redirect status must be a 3xx status', $e->getMessage());
+                $this->assertSame((string) $status, $e->getDebugMessage());
+            }
+        }
+        $this->assertSame([], $collector->getRoutes());
+
+        foreach ([300, 301, 302, 303, 307, 308, 399] as $status) {
+            $handler = $collector->redirect('/old/' . $status, '/new', $status)->handler;
+            $this->assertInstanceOf(\Sodaho\Router\Middleware\RedirectHandler::class, $handler);
+            $this->assertSame($status, $handler->getStatus());
+        }
+
+        // A tab is no line break: a response carries it, as before
+        $this->assertSame('/tab', $collector->redirect('/tab', "/new\tpage")->pattern);
+    }
 }
