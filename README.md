@@ -471,6 +471,11 @@ Response::noContent();                                 // 204
 Response::paginated($items, $total, $page, $perPage);  // 200 with pagination meta
 ```
 
+`paginated()` throws an `InvalidArgumentException` for a page below 1, a total below 0, a
+`perPage` below 1, and a page whose last item would be beyond the largest integer. Check
+a page number that comes from the request (`?page=0`) before you pass it on — through
+`handle()` the exception is a 500.
+
 ### Error Responses
 
 ```php

@@ -118,9 +118,12 @@ final class Response
      * 200 OK response with pagination meta.
      *
      * @param array<mixed> $items Paginated items
-     * @param int $total Total number of items
-     * @param int $page Current page number
-     * @param int $perPage Items per page
+     * @param int $total Total number of items, not negative
+     * @param int $page Current page number, from 1
+     * @param int $perPage Items per page, from 1
+     *
+     * @throws \InvalidArgumentException When a number is none of those, or the last item of
+     *                                   the page would be beyond the largest integer
      */
     public static function paginated(
         array $items,
@@ -130,6 +133,21 @@ final class Response
     ): ResponseInterface {
         if ($perPage < 1) {
             throw new \InvalidArgumentException('$perPage must be at least 1');
+        }
+
+        // Page 0 used to give 'from' -4; validate a page number from the request before it
+        // gets here, or this is a 500
+        if ($page < 1) {
+            throw new \InvalidArgumentException('$page must be at least 1');
+        }
+
+        if ($total < 0) {
+            throw new \InvalidArgumentException('$total must not be negative');
+        }
+
+        // $page * $perPage below: beyond the largest integer PHP makes a float of it
+        if ($page > intdiv(PHP_INT_MAX, $perPage)) {
+            throw new \InvalidArgumentException('$page is too large for $perPage: the last item of the page would be beyond the largest integer');
         }
 
         // In whole numbers: ceil() goes through a float, which for a very large total is

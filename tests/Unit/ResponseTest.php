@@ -181,6 +181,49 @@ class ResponseTest extends TestCase
     }
 
     /**
+     * @return array<string, array{0: int, 1: int, 2: int, 3: string}>
+     */
+    public static function pagesThatAreNone(): array
+    {
+        $page = '$page must be at least 1';
+        $total = '$total must not be negative';
+        $tooLarge = '$page is too large for $perPage: the last item of the page would be beyond the largest integer';
+
+        return [
+            // 1.x and 2.0: from -4, to 0
+            'page zero' => [10, 0, 5, $page],
+            // from -19, to -15
+            'negative page' => [10, -3, 5, $page],
+            'negative total' => [-1, 1, 5, $total],
+            // from 4.6E+19, a float
+            'largest page' => [10, PHP_INT_MAX, 5, $tooLarge],
+            'first page beyond the largest integer' => [10, intdiv(PHP_INT_MAX, 5) + 1, 5, $tooLarge],
+        ];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('pagesThatAreNone')]
+    public function testPaginatedRejectsAPageThatIsNone(int $total, int $page, int $perPage, string $message): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage($message);
+
+        Response::paginated([], $total, $page, $perPage);
+    }
+
+    public function testPaginatedTakesTheLastPageThatFitsAnInteger(): void
+    {
+        $page = intdiv(PHP_INT_MAX, 5);
+        $pagination = json_decode((string) Response::paginated([], PHP_INT_MAX, $page, 5)->getBody(), true)['meta']['pagination'];
+
+        $this->assertSame(($page - 1) * 5 + 1, $pagination['from']);
+        $this->assertSame($page * 5, $pagination['to']);
+
+        $pagination = json_decode((string) Response::paginated([], PHP_INT_MAX, PHP_INT_MAX, 1)->getBody(), true)['meta']['pagination'];
+        $this->assertSame(PHP_INT_MAX, $pagination['from']);
+        $this->assertSame(PHP_INT_MAX, $pagination['to']);
+    }
+
+    /**
      * @return array<string, array{0: int, 1: int, 2: int}>
      */
     public static function totalsAndTheirLastPage(): array

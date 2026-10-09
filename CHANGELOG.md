@@ -22,6 +22,13 @@
   A message may carry what a request sent, and a line break in it forged a second line in
   the log. The whole exception still goes to `hookError`.
 
+### Changed
+- `Response::paginated()` throws an `InvalidArgumentException` for a page below 1, a total
+  below 0 and a page whose last item would be beyond the largest integer, as it did for a
+  `perPage` below 1. It answered with nonsense: page 0 gave `from: -4`, a negative page
+  negative positions, `PHP_INT_MAX` a float. **An application that passes `?page=0` on
+  unchecked gets a 500 instead of that 200 now** — check the page number first.
+
 ### Fixed
 - A pattern of your own (`addPattern()`) that closes its group early (`'a)|(.*'`) is
   refused when the route table is built. Wrapped in the group of its placeholder it
