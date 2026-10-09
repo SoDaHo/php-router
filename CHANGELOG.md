@@ -47,6 +47,12 @@
   ending in 404.
 - `FileStream::read()` with a negative length throws a `RuntimeException`, as PSR-7
   promises and as `TextStream` does — not an `InvalidArgumentException`.
+- An error response in the format of `RfcResponder` carries `status`, the status code of
+  the response, as RFC 9457 has it and the README showed — it was missing. Added behind
+  `title` where the details do not name a status; one they name stays as it is.
+- README: the example of a responder of your own no longer promises XML — a responder
+  shapes an array that is always sent as JSON. RFC 7807 is called by its successor, RFC
+  9457, throughout.
 - A route expression that PCRE gives up on — the backtrack limit or the JIT stack, reached
   by a pattern of your own with nested quantifiers — is a failure, not "no match":
   `handle()` answers 500 and the `error` hook gets a `RouterException` that names the PCRE

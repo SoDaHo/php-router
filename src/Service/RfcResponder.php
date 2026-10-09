@@ -7,9 +7,9 @@ namespace Sodaho\Router\Service;
 use Sodaho\Router\Contract\ResponderInterface;
 
 /**
- * RFC 7807 Problem Details responder.
+ * RFC 9457 Problem Details responder (RFC 9457 replaced RFC 7807, the format is the same).
  *
- * Error format follows RFC 7807 (Problem Details for HTTP APIs):
+ * Error format follows RFC 9457 (Problem Details for HTTP APIs):
  * {
  *   "type": "https://example.com/errors/not-found",
  *   "title": "Resource not found",
@@ -18,10 +18,13 @@ use Sodaho\Router\Contract\ResponderInterface;
  *   "instance": "/users/123"
  * }
  *
- * Success format uses simple JSON (RFC 7807 only defines error format):
+ * "status" is the status code of the response: formatError() is not told it, so
+ * Response adds it where the details do not name one.
+ *
+ * Success format uses simple JSON (RFC 9457 only defines error format):
  * {"data": {...}, "message": "..."}
  *
- * @see https://datatracker.ietf.org/doc/html/rfc7807
+ * @see https://www.rfc-editor.org/rfc/rfc9457
  */
 final class RfcResponder implements ResponderInterface
 {
@@ -44,7 +47,7 @@ final class RfcResponder implements ResponderInterface
 
     public function formatSuccess(mixed $data, ?string $message = null, ?array $meta = null): array
     {
-        // RFC 7807 only defines error format, use simple structure for success
+        // RFC 9457 only defines error format, use simple structure for success
         $body = ['data' => $data];
 
         if ($message !== null) {
@@ -105,7 +108,7 @@ final class RfcResponder implements ResponderInterface
     }
 
     /**
-     * RFC 7807: Success responses use standard JSON, not problem+json.
+     * RFC 9457: Success responses use standard JSON, not problem+json.
      */
     public function getSuccessContentType(): string
     {

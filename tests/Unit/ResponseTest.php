@@ -405,6 +405,40 @@ class ResponseTest extends TestCase
         $this->assertArrayNotHasKey('success', $body);
     }
 
+    /**
+     * RFC 9457: "status" is the status code of the response. The responder is not told the
+     * status (ResponderInterface::formatError() has no such parameter), so the response
+     * adds it where the application did not pass one
+     */
+    public function testRfcResponderErrorCarriesTheStatusOfTheResponse(): void
+    {
+        Response::setResponder(new RfcResponder('https://api.example.com/errors'));
+
+        $notFound = json_decode((string) Response::notFound('User', 7)->getBody(), true);
+        $this->assertSame(['type', 'title', 'status'], array_keys($notFound));
+        $this->assertSame(404, $notFound['status']);
+
+        $detailed = json_decode((string) Response::error('Bad', 400, 'BAD', ['detail' => 'more', 'field' => 'x'])->getBody(), true);
+        $this->assertSame(['type', 'title', 'status', 'detail', 'field'], array_keys($detailed));
+        $this->assertSame(400, $detailed['status']);
+
+        $this->assertSame(500, json_decode((string) Response::serverError()->getBody(), true)['status']);
+
+        // A status the application passed stays as it is (whether it may is a question of its own)
+        $this->assertSame(418, json_decode((string) Response::error('Bad', 400, null, ['status' => 418])->getBody(), true)['status']);
+
+        // Success responses are no problem details
+        $this->assertArrayNotHasKey('status', json_decode((string) Response::success(['a' => 1])->getBody(), true));
+    }
+
+    public function testJsonResponderGetsNoStatusOfItsOwn(): void
+    {
+        $body = json_decode((string) Response::notFound('User')->getBody(), true);
+
+        $this->assertArrayNotHasKey('status', $body);
+        $this->assertArrayNotHasKey('status', $body['error']);
+    }
+
     public function testResetRestoresDefaultResponder(): void
     {
         Response::setResponder(new RfcResponder());

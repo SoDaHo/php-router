@@ -1100,16 +1100,18 @@ location / {
 
 ## Custom Response Formats
 
-The router uses `JsonResponder` by default. You can swap it for RFC 7807 or custom formats:
+The router uses `JsonResponder` by default. You can swap it for RFC 9457 (Problem Details,
+which replaced RFC 7807) or a JSON format of your own:
 
 ```php
 use Sodaho\Router\Response;
 use Sodaho\Router\Service\RfcResponder;
 
-// RFC 7807 Problem Details format
+// RFC 9457 Problem Details format
 Response::setResponder(new RfcResponder('https://api.example.com/errors'));
 
-// Error responses now use RFC 7807:
+// Error responses now use RFC 9457 ("status" is the status code of the response,
+// unless the details name one):
 // {
 //   "type": "https://api.example.com/errors/not-found",
 //   "title": "User not found",
@@ -1122,29 +1124,35 @@ Response::setResponder(new RfcResponder('https://api.example.com/errors'));
 ```php
 use Sodaho\Router\Contract\ResponderInterface;
 
-class XmlResponder implements ResponderInterface
+class ApiResponder implements ResponderInterface
 {
     public function formatSuccess(mixed $data, ?string $message = null, ?array $meta = null): array
     {
-        // Return array that will be converted to XML
+        return ['data' => $data] + ($meta !== null ? ['meta' => $meta] : []);
     }
 
     public function formatError(string $message, ?string $code = null, ?array $details = null): array
     {
-        // Return array for error responses
+        return ['errors' => [['title' => $message, 'code' => $code, 'meta' => $details]]];
     }
 
     public function getContentType(): string
     {
-        return 'application/xml';  // Used for 4xx/5xx responses
+        return 'application/vnd.api+json';  // Used for 4xx/5xx responses
     }
 
     public function getSuccessContentType(): string
     {
-        return 'application/xml';  // Used for 2xx responses
+        return 'application/vnd.api+json';  // Used for 2xx responses
     }
 }
 ```
+
+A responder shapes the array; the body is always that array **encoded as JSON**, sent with
+the content type the responder names. It cannot produce XML or another format that is not
+JSON — `application/xml` would only label a JSON body. Build such responses yourself
+(`Response::text()`, or a PSR-7 response of your own). A responder is not told the status
+of the response; for `RfcResponder` the router adds `status` itself.
 
 **Reset in tests:**
 ```php

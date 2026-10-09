@@ -9,6 +9,7 @@ use Psr\Http\Message\ResponseInterface;
 use Sodaho\Router\Contract\ResponderInterface;
 use Sodaho\Router\Exception\RouterException;
 use Sodaho\Router\Service\JsonResponder;
+use Sodaho\Router\Service\RfcResponder;
 use Sodaho\Router\Stream\FileStream;
 
 /**
@@ -483,11 +484,22 @@ final class Response
      */
     private static function envelope(int $status, array $data): ResponseInterface
     {
-        // RFC 7807: application/problem+json is only for error responses (4xx/5xx).
+        // RFC 9457: application/problem+json is only for error responses (4xx/5xx).
         // Success responses (2xx/3xx) use getSuccessContentType() (allows custom formats like JSON:API).
         $contentType = ($status >= 400)
             ? self::getResponder()->getContentType()
             : self::getResponder()->getSuccessContentType();
+
+        // RFC 9457: "status" is the status code of the response. formatError() is not told
+        // it (its signature has no status, and a new parameter would break every responder
+        // of an application), so it is added here, behind "title" — only where the
+        // application passed none: what it passed in the details stays as it is.
+        if ($status >= 400 && self::getResponder() instanceof RfcResponder && !array_key_exists('status', $data)) {
+            $at = array_search('title', array_keys($data), true);
+            $data = $at === false
+                ? $data + ['status' => $status]
+                : array_slice($data, 0, $at + 1, true) + ['status' => $status] + array_slice($data, $at + 1, null, true);
+        }
 
         return new Psr7Response(
             $status,

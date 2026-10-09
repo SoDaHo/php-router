@@ -44,7 +44,7 @@ interface ResponderInterface
     /**
      * Get the Content-Type header value for success responses (2xx/3xx).
      *
-     * RFC 7807: 'application/problem+json' is only for errors.
+     * RFC 9457: 'application/problem+json' is only for errors.
      * Override this if your format requires a different success Content-Type.
      *
      * @return string MIME type (default: 'application/json')
