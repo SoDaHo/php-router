@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Sodaho\Router\Tests\Unit;
 
-use InvalidArgumentException;
 use PHPUnit\Framework\TestCase;
 use RuntimeException;
 use Sodaho\Router\Exception\RouterException;
@@ -225,11 +224,16 @@ class FileStreamTest extends TestCase
         $stream->write('nope');
     }
 
+    /**
+     * PSR-7 promises a RuntimeException for what read() refuses — as TextStream throws it
+     * (2.1.0 threw an InvalidArgumentException here)
+     */
     public function testNegativeReadLengthThrows(): void
     {
         $stream = new FileStream($this->path);
 
-        $this->expectException(InvalidArgumentException::class);
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('Length must not be negative');
         $stream->read(-1);
     }
 

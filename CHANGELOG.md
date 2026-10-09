@@ -45,6 +45,8 @@
 - A request whose URI has no path at all (`new ServerRequest('GET', 'http://example.com')`,
   only built in code — over HTTP a path is never empty) is looked up as `/` instead of
   ending in 404.
+- `FileStream::read()` with a negative length throws a `RuntimeException`, as PSR-7
+  promises and as `TextStream` does — not an `InvalidArgumentException`.
 - A route expression that PCRE gives up on — the backtrack limit or the JIT stack, reached
   by a pattern of your own with nested quantifiers — is a failure, not "no match":
   `handle()` answers 500 and the `error` hook gets a `RouterException` that names the PCRE

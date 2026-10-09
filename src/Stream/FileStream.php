@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Sodaho\Router\Stream;
 
-use InvalidArgumentException;
 use Psr\Http\Message\StreamInterface;
 use RuntimeException;
 use Sodaho\Router\Exception\RouterException;
@@ -211,7 +210,8 @@ final class FileStream implements StreamInterface
         }
 
         if ($length < 0) {
-            throw new InvalidArgumentException('Length must not be negative');
+            // A RuntimeException, as PSR-7 promises for what read() refuses
+            throw new RuntimeException('Length must not be negative');
         }
 
         $remaining = $this->length - $this->pos;
