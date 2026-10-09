@@ -52,6 +52,10 @@ class EmitOverHttpTest extends TestCase
         $ping = var_export(self::PING, true);
         $fields = var_export([...self::REPLACED, ...self::ADDED], true);
 
+        // Not periodic: an offset that is off by a whole period would not show
+        file_put_contents(self::$docroot . '/payload.bin', self::payload());
+        $payload = var_export(self::$docroot . '/payload.bin', true);
+
         file_put_contents(
             self::$docroot . '/routes.php',
             <<<PHP
@@ -77,6 +81,7 @@ class EmitOverHttpTest extends TestCase
                         ->withAddedHeader('Set-Cookie', 'b=2'));
                     \$r->match(['GET', 'HEAD'], '/page', fn() => Response::text('BODY')->withHeader('Content-Length', '4'));
                     \$r->get('/early', fn() => Response::text('never sent')->withHeader('X-Late', '1'));
+                    \$r->get('/media', fn(\$req) => Response::file({$payload}, 'clip.bin', 'application/octet-stream', true, \$req->getHeaderLine('Range') ?: null));
                     \$r->get('/fields', function () {
                         \$response = Response::text('BODY');
                         foreach ({$fields} as \$name) {
@@ -221,16 +226,29 @@ class EmitOverHttpTest extends TestCase
     {
         self::stopServer();
 
-        foreach (['/routes.php', '/index.php', '/error.log', '/keys.log'] as $file) {
+        foreach (['/routes.php', '/index.php', '/error.log', '/keys.log', '/payload.bin'] as $file) {
             @unlink(self::$docroot . $file);
         }
         @rmdir(self::$docroot);
     }
 
+    /** 40,000 bytes, more than four chunks of the emitter, none of them like another */
+    private static function payload(): string
+    {
+        $payload = '';
+        for ($i = 0; $i < 1250; $i++) {
+            $payload .= hash('sha256', (string) $i, true);
+        }
+
+        return $payload;
+    }
+
     /**
+     * @param list<string> $headers Further request header lines
+     *
      * @return array{status: string, headers: list<string>, body: string}|null null when nothing answered in time
      */
-    private static function send(string $method, string $path, float $timeout): ?array
+    private static function send(string $method, string $path, float $timeout, array $headers = []): ?array
     {
         $socket = @fsockopen('127.0.0.1', self::$port, $errno, $error, $timeout);
         if (!is_resource($socket)) {
@@ -238,7 +256,7 @@ class EmitOverHttpTest extends TestCase
         }
 
         stream_set_timeout($socket, (int) ceil($timeout), 0);
-        fwrite($socket, "{$method} {$path} HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n");
+        fwrite($socket, "{$method} {$path} HTTP/1.0\r\nHost: 127.0.0.1\r\n" . implode('', array_map(static fn (string $line): string => $line . "\r\n", $headers)) . "\r\n");
         $raw = (string) stream_get_contents($socket);
         fclose($socket);
 
@@ -253,11 +271,13 @@ class EmitOverHttpTest extends TestCase
     }
 
     /**
+     * @param list<string> $headers Further request header lines
+     *
      * @return array{status: string, headers: list<string>, body: string}
      */
-    private function request(string $method, string $path): array
+    private function request(string $method, string $path, array $headers = []): array
     {
-        $response = self::send($method, $path, 5.0);
+        $response = self::send($method, $path, 5.0, $headers);
         $this->assertNotNull($response, "No answer for {$method} {$path}");
 
         return $response;
@@ -421,6 +441,48 @@ class EmitOverHttpTest extends TestCase
     {
         $this->assertSame('HTTP/1.1 202 Akzeptiert ä', $this->request('GET', '/phrase-beyond-ascii')['status']);
         $this->assertSame("HTTP/1.1 200 All\tright", $this->request('GET', '/phrase-tab')['status']);
+    }
+
+    /**
+     * Response::file() with a Range, as it leaves the process: status line, Content-Range
+     * and Content-Length on the wire, and a body that is exactly the slice — across several
+     * chunks of the emitter
+     */
+    public function testRangeGoesOutAs206WithExactlyTheSlice(): void
+    {
+        $payload = self::payload();
+
+        $response = $this->request('GET', '/media', ['Range: bytes=1000-30999']);
+        $this->assertSame('HTTP/1.1 206 Partial Content', $response['status']);
+        $this->assertSame(['bytes 1000-30999/40000'], self::valuesOf($response['headers'], 'Content-Range'));
+        $this->assertSame(['30000'], self::valuesOf($response['headers'], 'Content-Length'));
+        $this->assertSame(['bytes'], self::valuesOf($response['headers'], 'Accept-Ranges'));
+        $this->assertSame(substr($payload, 1000, 30000), $response['body']);
+
+        // The last bytes of the file
+        $suffix = $this->request('GET', '/media', ['Range: bytes=-100']);
+        $this->assertSame('HTTP/1.1 206 Partial Content', $suffix['status']);
+        $this->assertSame(['bytes 39900-39999/40000'], self::valuesOf($suffix['headers'], 'Content-Range'));
+        $this->assertSame(substr($payload, -100), $suffix['body']);
+
+        // Without a Range: the whole file
+        $whole = $this->request('GET', '/media');
+        $this->assertSame('HTTP/1.1 200 OK', $whole['status']);
+        $this->assertSame(['40000'], self::valuesOf($whole['headers'], 'Content-Length'));
+        $this->assertSame([], self::valuesOf($whole['headers'], 'Content-Range'));
+        $this->assertSame($payload, $whole['body']);
+    }
+
+    public function testRangeBeyondTheFileGoesOutAs416(): void
+    {
+        $response = $this->request('GET', '/media', ['Range: bytes=40000-']);
+
+        // (The reason phrase is the PSR-7 implementation's)
+        $this->assertStringStartsWith('HTTP/1.1 416 ', $response['status']);
+        $this->assertSame(['bytes */40000'], self::valuesOf($response['headers'], 'Content-Range'));
+        $this->assertSame(['0'], self::valuesOf($response['headers'], 'Content-Length'));
+        $this->assertSame([], self::valuesOf($response['headers'], 'Content-Disposition'));
+        $this->assertSame('', $response['body']);
     }
 
     public function testResponseThatCanNoLongerBeSentIsReported(): void
