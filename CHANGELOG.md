@@ -29,6 +29,10 @@
   any path — the route answered for every dynamic route registered after it. Each fragment
   a route uses is now compiled on its own as well, behind an empty group for each
   placeholder of the route, so that it may still refer to them (`(?P=a)`).
+- `baseUrl` (config, `setBaseUrl()`, `APP_URL` through `fromEnv()`) refuses a value with a
+  control character or a blank. It is put in front of every absolute address as it is: a
+  line break made each of them a `Location` header that the response refuses (a 500), a
+  blank an address that is none. The message names `APP_URL` where the value came from it.
 - A route expression that PCRE gives up on — the backtrack limit or the JIT stack, reached
   by a pattern of your own with nested quantifiers — is a failure, not "no match":
   `handle()` answers 500 and the `error` hook gets a `RouterException` that names the PCRE

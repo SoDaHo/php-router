@@ -659,7 +659,7 @@ open.)
 |------------|--------------|---------|-------------|
 | `debug` | `APP_DEBUG` | `false` | Enable debug mode (detailed errors). Boolean or boolean-like (`'true'`, `'0'`, ...). `null` means the default; `''` and `0` count as off; anything else is refused |
 | `basePath` | `ROUTER_BASE_PATH` | `''` | URL prefix for all routes (`/api`, `/api/` and `api` mean the same). Written decoded, like a route pattern (`/my app`, not `/my%20app`): a percent-encoded character, a backslash, a control character, `?`, `#` or a `.`/`..` segment is refused |
-| `baseUrl` | `APP_URL` | `null` | Base URL for `absoluteUrl()`, put in front of the address as it is (a slash at its end is dropped). Empty means none: `null`, `''` and, as in 1.x, `false` (`getenv()` without the variable), `0` and `'0'`; another type is refused. Also `setBaseUrl()` |
+| `baseUrl` | `APP_URL` | `null` | Base URL for `absoluteUrl()`, put in front of the address as it is (a slash at its end is dropped). Empty means none: `null`, `''` and, as in 1.x, `false` (`getenv()` without the variable), `0` and `'0'`; another type is refused, and so is a string with a control character or a blank. Also `setBaseUrl()` |
 | `trailingSlash` | `ROUTER_TRAILING_SLASH` | `'strict'` | `'strict'` or `'ignore'`; `null` and `''` mean the default, anything else is refused |
 | `urlEncoding` | `ROUTER_URL_ENCODING` | `true` | `rawurlencode()` parameter values in `url()`/`absoluteUrl()`; `false` inserts them as given. Boolean or boolean-like, as `debug` |
 | `routesFile` | - | `null` | Routes file, as `loadRoutes()` sets it |

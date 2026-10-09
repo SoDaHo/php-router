@@ -218,18 +218,28 @@ final class Router implements RouterInterface
      * The base URL as the router keeps it, null for none. Empty means none: null, '' and,
      * as in 1.x, false ('baseUrl' => getenv('APP_URL') without the variable), 0 and '0'.
      * Any other string is put in front of the address as it is (a slash at its end is
-     * dropped); anything else is refused.
+     * dropped) — unless it has a control character or a blank, which no address has: a line
+     * break made every absolute address a Location header the response refuses. Anything
+     * else is refused.
      *
-     * @throws RouterException If the value is neither a string nor empty
+     * @throws RouterException If the value is neither a string nor empty, or has a control
+     *                         character or a blank
      */
-    private static function baseUrl(mixed $value): ?string
+    private static function baseUrl(mixed $value, string $what = "Config 'baseUrl'"): ?string
     {
         if ($value === null || $value === false || $value === '' || $value === '0' || $value === 0) {
             return null;
         }
 
         if (!is_string($value)) {
-            throw new RouterException("Config 'baseUrl' must be a string, or empty for none");
+            throw new RouterException($what . ' must be a string, or empty for none');
+        }
+
+        if (preg_match('/[\x00-\x20\x7F]/', $value) === 1) {
+            throw new RouterException(
+                $what . ' must not contain a control character or a blank',
+                debugMessage: (string) json_encode($value, JSON_INVALID_UTF8_SUBSTITUTE),
+            );
         }
 
         return $value;
@@ -361,6 +371,10 @@ final class Router implements RouterInterface
 
             if ($key === 'basePath') {
                 self::normalizeBasePath($value, 'Environment variable ' . $variable);
+            }
+
+            if ($key === 'baseUrl') {
+                self::baseUrl($value, 'Environment variable ' . $variable);
             }
 
             $fromEnvironment[$key] = $value;

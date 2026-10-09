@@ -936,6 +936,56 @@ class RouterConfigTest extends TestCase
         }
     }
 
+    /**
+     * @return array<string, array{0: string}>
+     */
+    public static function baseUrlsNoAddressCanBeginWith(): array
+    {
+        return [
+            'line break' => ["https://x.example\r\nX-Evil: 1"],
+            'line feed at the end' => ["https://x.example\n"],
+            'NUL' => ["https://x.example\0"],
+            'DEL' => ["https://x.\x7Fexample"],
+            'tab' => ["https://x.example\t"],
+            'blank in front' => [' https://x.example'],
+            'blank inside' => ['https://x example'],
+        ];
+    }
+
+    /**
+     * Put in front of every absolute address as it is: a line break in it made each a
+     * Location header the response refuses, a blank an address that is none
+     */
+    #[DataProvider('baseUrlsNoAddressCanBeginWith')]
+    public function testBaseUrlWithAControlCharacterOrABlankIsRefused(string $value): void
+    {
+        $message = "Config 'baseUrl' must not contain a control character or a blank";
+
+        // From the environment, the message names the variable
+        $_ENV['APP_URL'] = $value;
+        try {
+            Router::fromEnv();
+            $this->fail('Accepted through APP_URL');
+        } catch (RouterException $e) {
+            $this->assertSame('Environment variable APP_URL must not contain a control character or a blank', $e->getMessage());
+        } finally {
+            unset($_ENV['APP_URL']);
+        }
+
+        foreach ([
+            'config' => fn () => Router::create(['baseUrl' => $value]),
+            'setBaseUrl' => fn () => Router::create()->setBaseUrl($value),
+            'config through fromEnv()' => fn () => Router::fromEnv(['baseUrl' => $value]),
+        ] as $way => $create) {
+            try {
+                $create();
+                $this->fail('Accepted through ' . $way);
+            } catch (RouterException $e) {
+                $this->assertSame($message, $e->getMessage(), $way);
+            }
+        }
+    }
+
     // ==================== emitChunkSize ====================
 
     /**
