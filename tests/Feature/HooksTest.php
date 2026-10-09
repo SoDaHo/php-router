@@ -113,12 +113,21 @@ class HooksTest extends TestCase
             $r->get('/test', fn ($req) => Response::success(['ok' => true]));
         });
 
-        $dispatcher->on('dispatch', function () {
-            throw new \RuntimeException('Hook crashed!');
+        $failure = new \RuntimeException('Hook crashed!');
+        $dispatcher->on('dispatch', function () use ($failure) {
+            throw $failure;
+        });
+
+        // The failure is told to the application (and nothing goes to stderr)
+        $reported = [];
+        $dispatcher->on('hookError', function (array $data) use (&$reported): void {
+            $reported[] = $data;
         });
 
         $request = new ServerRequest('GET', '/test');
         $response = $dispatcher->handle($request);
+
+        $this->assertSame([['event' => 'dispatch', 'exception' => $failure]], $reported);
 
         // Response should still be successful despite hook exception
         $this->assertSame(200, $response->getStatusCode());

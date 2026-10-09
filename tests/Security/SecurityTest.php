@@ -16,6 +16,18 @@ use Sodaho\Router\RouteDispatcher;
  */
 class SecurityTest extends TestCase
 {
+    private string $backtrackLimit;
+
+    protected function setUp(): void
+    {
+        $this->backtrackLimit = (string) ini_get('pcre.backtrack_limit');
+    }
+
+    protected function tearDown(): void
+    {
+        ini_set('pcre.backtrack_limit', $this->backtrackLimit);
+    }
+
     // ==================== Path Traversal ====================
 
     public function testRejectsPathTraversalAttempts(): void
@@ -210,25 +222,33 @@ class SecurityTest extends TestCase
 
     // ==================== Regex Denial of Service (ReDoS) ====================
 
-    public function testCustomPatternsAreNotVulnerableToReDoS(): void
+    /**
+     * Not a time limit, which depends on the machine: PCRE's own count of backtracking
+     * steps. Every built-in pattern decides a path of n characters within n steps and a few
+     * — what grows faster (nested quantifiers) runs into the limit, and the router throws
+     * instead of answering (see MatchFailureTest).
+     */
+    public function testBuiltInPatternsBacktrackAtMostOnceACharacter(): void
     {
+        $length = 2000;
         $collector = new RouteCollector();
-        // Potentially dangerous regex if not careful
-        $collector->get('/test/{slug:slug}', fn ($req, $slug) => Response::success(['slug' => $slug]));
-
+        foreach (array_keys($collector->getPatterns()) as $type) {
+            $collector->get("/{$type}/{v:{$type}}", fn ($req, $v) => Response::text('hit'));
+        }
         $dispatcher = new RouteDispatcher($collector->getData());
 
-        // Input designed to cause ReDoS on vulnerable regex
-        $maliciousInput = str_repeat('a', 50) . '!';
+        ini_set('pcre.backtrack_limit', (string) ($length + 16));
 
-        $start = microtime(true);
-        $response = $dispatcher->handle(new ServerRequest('GET', "/test/{$maliciousInput}"));
-        $duration = microtime(true) - $start;
+        foreach (array_keys($collector->getPatterns()) as $type) {
+            foreach (['a', 'A', 'f', '1', '-'] as $character) {
+                $input = str_repeat($character, $length) . '!';
 
-        // Should complete quickly (< 1 second) even with malicious input
-        $this->assertLessThan(1.0, $duration, 'Potential ReDoS vulnerability');
-        // Should be 404 since '!' doesn't match slug pattern
-        $this->assertSame(404, $response->getStatusCode());
+                // Throws when PCRE gives up: a dispatcher on its own has no error responder
+                $status = $dispatcher->handle(new ServerRequest('GET', "/{$type}/{$input}"))->getStatusCode();
+
+                $this->assertContains($status, [200, 400, 404], "{$type} with {$character}");
+            }
+        }
     }
 
     // ==================== Integer Overflow ====================

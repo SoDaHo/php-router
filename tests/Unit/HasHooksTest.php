@@ -92,10 +92,12 @@ class HasHooksTest extends TestCase
         };
 
         $secondCalled = false;
+        $reported = [];
 
         // First callback throws
-        $obj->on('test', function () {
-            throw new \RuntimeException('Hook crashed!');
+        $failure = new \RuntimeException('Hook crashed!');
+        $obj->on('test', function () use ($failure) {
+            throw $failure;
         });
 
         // Second callback should still be called
@@ -103,63 +105,57 @@ class HasHooksTest extends TestCase
             $secondCalled = true;
         });
 
+        // Told to the application, not to stderr
+        $obj->on('hookError', function (array $data) use (&$reported): void {
+            $reported[] = $data;
+        });
+
         $obj->fireEvent();
 
         $this->assertTrue($secondCalled);
+        $this->assertSame([['event' => 'test', 'exception' => $failure]], $reported);
     }
 
+    /**
+     * The line goes to the stderr of the process — read from the outside, in a process of
+     * its own
+     */
     public function testHandleHookExceptionUsesStderr(): void
     {
-        $obj = new class () {
-            use HasHooks;
+        $code = 'require ' . var_export(dirname(__DIR__, 2) . '/vendor/autoload.php', true) . ';'
+            . '$obj = new class () { use Sodaho\Router\Traits\HasHooks; public function fire(): void { $this->trigger("test", []); } };'
+            . '$obj->on("test", function (): void { throw new LogicException("not in the line"); });'
+            . '$obj->fire();'
+            . 'echo "went on";';
 
-            public function fireEvent(): void
-            {
-                $this->trigger('test', []);
-            }
-        };
+        $process = proc_open(
+            [PHP_BINARY, '-d', 'display_errors=stderr', '-d', 'error_log=', '-r', $code],
+            [1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
+            $pipes
+        );
+        $this->assertIsResource($process);
+        $stdout = (string) stream_get_contents($pipes[1]);
+        $stderr = (string) stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        proc_close($process);
 
-        $obj->on('test', function () {
-            throw new \Exception('Test exception');
-        });
-
-        // Capture STDERR output
-        ob_start();
-        $obj->fireEvent();
-        ob_end_clean();
-
-        // If we got here without fatal error, STDERR path worked
-        $this->assertTrue(true);
+        $this->assertSame('went on', $stdout);
+        $this->assertMatchesRegularExpression("#^\\[Router\\] Hook error in 'test': LogicException in .+:\\d+\\n\\z#", $stderr);
+        $this->assertStringNotContainsString('not in the line', $stderr);
     }
 
     public function testHandleHookExceptionFallsBackToErrorLog(): void
     {
-        // Simulate environment without STDERR (e.g., CGI/FPM)
-        $obj = new class () {
-            use HasHooks;
-
-            // Override the environment check
-            protected function hasStderr(): bool
-            {
-                return false;
-            }
-
-            public function fireEvent(): void
-            {
-                $this->trigger('test', []);
-            }
-        };
-
+        // Without STDERR (e.g. CGI/FPM) the line goes to error_log()
+        [$obj, $log] = $this->hookedObjectWithReadableLog();
         $obj->on('test', function () {
             throw new \Exception('Test exception for error_log');
         });
 
-        // error_log() is called instead of fwrite(STDERR)
-        // We can't easily capture error_log output, but if we get here
-        // without errors, the code path was executed (coverage)
-        $obj->fireEvent();
+        $written = $this->loggedWhile($log, fn () => $obj->fire('test'));
 
-        $this->assertTrue(true);
+        $this->assertSame(1, substr_count($written, "[Router] Hook error in 'test': Exception in " . __FILE__ . ':'));
     }
 
     public function testHookThatFailsWhereNothingCanBeWrittenStillDoesNotInterrupt(): void

@@ -32,7 +32,7 @@ class DispatcherTest extends TestCase
             [],
             ['GET' => [
                 [
-                    'regex' => '#^/users/(?P<id>[^/]+)$#',
+                    'regex' => '#^/users/(?P<id>[^/]+)\z#',
                     'route' => $route,
                     'casts' => [],
                 ],
@@ -76,7 +76,7 @@ class DispatcherTest extends TestCase
             [],
             ['GET' => [
                 [
-                    'regex' => '#^/users/(?P<id>\d+)$#',
+                    'regex' => '#^/users/(?P<id>\d+)\z#',
                     'route' => $route,
                     'casts' => ['id' => 'int'],
                 ],
@@ -95,7 +95,7 @@ class DispatcherTest extends TestCase
             [],
             ['GET' => [
                 [
-                    'regex' => '#^/users/(?P<id>[^/]+)$#',
+                    'regex' => '#^/users/(?P<id>[^/]+)\z#',
                     'route' => $route,
                     'casts' => [],
                 ],
@@ -117,12 +117,12 @@ class DispatcherTest extends TestCase
             [],
             ['GET' => [
                 [
-                    'regex' => '#^/users/(?P<id>\d+)$#',
+                    'regex' => '#^/users/(?P<id>\d+)\z#',
                     'route' => $route1,
                     'casts' => ['id' => 'int'],
                 ],
                 [
-                    'regex' => '#^/users/(?P<slug>[a-z-]+)$#',
+                    'regex' => '#^/users/(?P<slug>[a-z-]+)\z#',
                     'route' => $route2,
                     'casts' => [],
                 ],
@@ -144,7 +144,7 @@ class DispatcherTest extends TestCase
             [],
             ['GET' => [
                 [
-                    'regex' => '#^/users/(?P<id>[^/]+)$#',
+                    'regex' => '#^/users/(?P<id>[^/]+)\z#',
                     'route' => $route,
                     'casts' => [],
                 ],
@@ -165,7 +165,7 @@ class DispatcherTest extends TestCase
             [],
             ['GET' => [
                 [
-                    'regex' => '#^/test/(?P<param>[^/]+)$#',
+                    'regex' => '#^/test/(?P<param>[^/]+)\z#',
                     'route' => $route,
                     'casts' => [],
                 ],

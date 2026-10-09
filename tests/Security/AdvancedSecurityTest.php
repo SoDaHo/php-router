@@ -16,6 +16,18 @@ use Sodaho\Router\Router;
  */
 class AdvancedSecurityTest extends TestCase
 {
+    private string $backtrackLimit;
+
+    protected function setUp(): void
+    {
+        $this->backtrackLimit = (string) ini_get('pcre.backtrack_limit');
+    }
+
+    protected function tearDown(): void
+    {
+        ini_set('pcre.backtrack_limit', $this->backtrackLimit);
+    }
+
     /**
      * SCENARIO 1: Denial of Service via Massive URL.
      * Does the regex engine freeze if we send 1MB of garbage?
@@ -30,17 +42,14 @@ class AdvancedSecurityTest extends TestCase
         // 1MB URL string
         $massivePath = '/users/' . str_repeat('a', 1024 * 1024);
 
-        $start = microtime(true);
-
-        // It has to match, and quickly. (This test used to swallow every Throwable — and
-        // there was one on each run: the handler took no parameters.)
+        // It has to match without backtracking: a hundred steps of PCRE's own count for a
+        // megabyte, not a time limit that depends on the machine. (This test used to swallow
+        // every Throwable — and there was one on each run: the handler took no parameters.)
+        ini_set('pcre.backtrack_limit', '100');
         $response = $dispatcher->handle(new ServerRequest('GET', $massivePath));
-
-        $duration = microtime(true) - $start;
 
         $this->assertSame(200, $response->getStatusCode());
         $this->assertSame(1024 * 1024, json_decode((string) $response->getBody(), true)['data']['length']);
-        $this->assertLessThan(2.0, $duration, 'Router regex engine too slow on large input (Possible DoS vector)');
     }
 
     /**
@@ -72,30 +81,29 @@ class AdvancedSecurityTest extends TestCase
 
     /**
      * SCENARIO 3: ReDoS on Custom Patterns.
-     * If a dev defines a greedy pattern, can a user exploit it?
-     * We use a known "evil" regex pattern for testing: (a+)+$
+     * If a dev defines a greedy pattern, can a user exploit it? With the classic evil
+     * pattern (a+)+ and thirty letters, PCRE gives up long before it has an answer (2^30
+     * ways to split them). The router does not take that for "no match" and pass the
+     * request on to the catch-all: it throws (handle() of the Router: 500).
      */
     public function testReDoSOnPoorlyDefinedRoutes(): void
     {
         $collector = new RouteCollector();
-        // Dev makes a mistake and defines a vulnerable regex
-        // {bad:(a+)+} is a classic ReDoS pattern
-        // Note: We can't easily test if PCRE crashes, but we can test if our
-        // pre-compiled shorthands (alpha, alphanum) are safe.
-
-        $collector->get('/safe/{param:alphanum}', fn () => Response::success([]));
+        $collector->addPattern('evil', '(a+)+');
+        $collector->get('/bad/{param:evil}', fn () => Response::text('evil'));
+        $collector->get('/{path:any}', fn () => Response::text('catch-all'));
 
         $dispatcher = new RouteDispatcher($collector->getData());
 
-        // "aaaaaaaaaaaaaaaaaaaa!" - simple, but we check valid shorthands
-        $input = str_repeat('a', 10000) . '!';
+        // PHP's default, whatever the php.ini of the machine says
+        ini_set('pcre.backtrack_limit', '1000000');
 
-        $start = microtime(true);
-        $response = $dispatcher->handle(new ServerRequest('GET', "/safe/$input"));
-        $duration = microtime(true) - $start;
-
-        $this->assertLessThan(0.5, $duration, "Standard 'alphanum' shorthand susceptible to ReDoS");
-        $this->assertSame(404, $response->getStatusCode());
+        try {
+            $response = $dispatcher->handle(new ServerRequest('GET', '/bad/' . str_repeat('a', 30) . '!'));
+            $this->fail('Answered with ' . $response->getStatusCode() . ': ' . $response->getBody());
+        } catch (\Sodaho\Router\Exception\RouterException $e) {
+            $this->assertSame('Route pattern could not be matched: Backtrack limit exhausted', $e->getMessage());
+        }
     }
 
     /**

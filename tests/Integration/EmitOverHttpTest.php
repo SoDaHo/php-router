@@ -18,6 +18,26 @@ class EmitOverHttpTest extends TestCase
     /** The server answers /ping with this, so a foreign service on the port is not mistaken for ours. */
     private const PING = 'router-emit-test';
 
+    /**
+     * Fields that exist once per message: here the response replaces what the host set.
+     * Every name added to the router's list makes the response overrule the host for that
+     * field — right for these (RFC 9110), wrong for anything that is a list or protects
+     * something.
+     */
+    private const REPLACED = [
+        'Content-Type', 'Content-Length', 'Content-Range', 'Content-Location', 'Content-Disposition',
+        'Location', 'ETag', 'Last-Modified', 'Date', 'Expires', 'Age', 'Retry-After',
+        'Cross-Origin-Embedder-Policy', 'Cross-Origin-Embedder-Policy-Report-Only',
+        'Cross-Origin-Opener-Policy', 'Cross-Origin-Opener-Policy-Report-Only',
+        'Cross-Origin-Resource-Policy', 'Origin-Agent-Cluster',
+    ];
+
+    /** Fields whose lines add up — lists, and security fields a route must not weaken */
+    private const ADDED = [
+        'Vary', 'Cache-Control', 'Link', 'Content-Security-Policy', 'Content-Language', 'X-Custom',
+        'X-Frame-Options', 'Strict-Transport-Security', 'Access-Control-Allow-Origin',
+    ];
+
     /** @var resource|null */
     private static $server = null;
     private static int $port = 0;
@@ -30,6 +50,7 @@ class EmitOverHttpTest extends TestCase
 
         $autoload = var_export(dirname(__DIR__, 2) . '/vendor/autoload.php', true);
         $ping = var_export(self::PING, true);
+        $fields = var_export([...self::REPLACED, ...self::ADDED], true);
 
         file_put_contents(
             self::$docroot . '/routes.php',
@@ -56,6 +77,14 @@ class EmitOverHttpTest extends TestCase
                         ->withAddedHeader('Set-Cookie', 'b=2'));
                     \$r->match(['GET', 'HEAD'], '/page', fn() => Response::text('BODY')->withHeader('Content-Length', '4'));
                     \$r->get('/early', fn() => Response::text('never sent')->withHeader('X-Late', '1'));
+                    \$r->get('/fields', function () {
+                        \$response = Response::text('BODY');
+                        foreach ({$fields} as \$name) {
+                            \$response = \$response->withHeader(\$name, \$name === 'Content-Length' ? '4' : 'response-' . strtolower(\$name));
+                        }
+
+                        return \$response;
+                    });
                     \$r->get('/phrase-line-break', fn() => Response::forbidden()->withStatus(403, "Forbidden\\r\\nX-Injected: 1"));
                     \$r->get('/phrase-control', fn() => Response::text('teapot')->withStatus(418, "Bad\\x01Phrase"));
                     \$r->get('/phrase-beyond-ascii', fn() => Response::accepted(['job' => 7])->withStatus(202, 'Akzeptiert ä'));
@@ -88,6 +117,12 @@ class EmitOverHttpTest extends TestCase
                     header('Strict-Transport-Security: max-age=63072000');
                     header('Access-Control-Allow-Origin: https://app.example');
                     header('Set-Cookie: sess=1');
+                }
+
+                if (\$path === '/fields') {
+                    foreach ({$fields} as \$name) {
+                        header(\$name . ': host-' . strtolower(\$name), false);
+                    }
                 }
 
                 if (\$path === '/early' || \$path === '/early-broken' || \$path === '/early-emit') {
@@ -309,23 +344,25 @@ class EmitOverHttpTest extends TestCase
         $this->assertSame(['same-origin'], self::valuesOf($headers, 'Cross-Origin-Opener-Policy'));
     }
 
-    public function testListOfReplacedFieldsIsDeliberate(): void
+    /**
+     * What goes out, not how the router keeps its list: the host set every field, then the
+     * response set it again
+     */
+    public function testWhichFieldsTheResponseReplacesIsDeliberate(): void
     {
-        // Every name added here makes the response overrule the host for that field. That is
-        // right for fields that exist once per message (RFC 9110) — and wrong for anything
-        // that is a list or protects something; see the test above.
-        $list = new \ReflectionClassConstant(\Sodaho\Router\Router::class, 'SINGLETON_HEADERS')->getValue();
+        $response = $this->request('GET', '/fields');
 
-        $this->assertSame(
-            [
-                'content-type', 'content-length', 'content-range', 'content-location', 'content-disposition',
-                'location', 'etag', 'last-modified', 'date', 'expires', 'age', 'retry-after',
-                'cross-origin-embedder-policy', 'cross-origin-embedder-policy-report-only',
-                'cross-origin-opener-policy', 'cross-origin-opener-policy-report-only',
-                'cross-origin-resource-policy', 'origin-agent-cluster',
-            ],
-            array_keys($list)
-        );
+        $this->assertSame('HTTP/1.1 200 OK', $response['status']);
+        $this->assertSame('BODY', $response['body']);
+
+        foreach (self::REPLACED as $name) {
+            $expected = $name === 'Content-Length' ? '4' : 'response-' . strtolower($name);
+            $this->assertSame([$expected], self::valuesOf($response['headers'], $name), $name);
+        }
+
+        foreach (self::ADDED as $name) {
+            $this->assertSame(['host-' . strtolower($name), 'response-' . strtolower($name)], self::valuesOf($response['headers'], $name), $name);
+        }
     }
 
     public function testCookiesOfTheHostSurviveNextToThoseOfTheResponse(): void
