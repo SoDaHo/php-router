@@ -821,8 +821,9 @@ final class RouteDispatcher implements RequestHandlerInterface
      */
     private static function castInt(string $value, string $key): int
     {
-        // Accepts: 0, 5, -10. Rejects: 00, -0 (except literal 0), 01, 1e3, 5.0
-        if (!preg_match('/^-?(?:0|[1-9]\d*)$/', $value)) {
+        // Accepts: 0, 5, -10. Rejects: 00, -0, 01, 1e3, 5.0 — so that only an overflow is
+        // left for the check below
+        if (preg_match('/^(?:0|-?[1-9]\d*)$/D', $value) !== 1) {
             throw new \TypeError(
                 sprintf("Parameter '%s': expected integer", $key)
             );

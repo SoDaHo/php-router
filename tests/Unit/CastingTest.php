@@ -25,6 +25,9 @@ class CastingTest extends TestCase
     {
         return [
             'leading zero' => ['/int/01', "Parameter 'id': expected integer"],
+            // 1.x and 2.0 said "integer overflow" — it is no integer as the router writes one
+            'minus zero' => ['/int/-0', "Parameter 'id': expected integer"],
+            'minus zero with a leading zero' => ['/int/-00', "Parameter 'id': expected integer"],
             'integer overflow' => ['/int/99999999999999999999', "Parameter 'id': integer overflow"],
             'decimal without digits behind the point' => ['/float/5.', "Parameter 'value': expected decimal"],
             'decimal overflow' => ['/float/' . str_repeat('9', 400), "Parameter 'value': decimal overflow"],
