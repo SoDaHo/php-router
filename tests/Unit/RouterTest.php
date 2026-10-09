@@ -186,10 +186,6 @@ class RouterTest extends TestCase
 
     public function testConfigFromEnvironment(): void
     {
-        // Set environment variables
-        $_ENV['APP_DEBUG'] = 'true';
-        $_ENV['APP_URL'] = 'https://env.example.com';
-
         $this->createRoutesFile(
             <<<'PHP'
                 <?php
@@ -202,15 +198,21 @@ class RouterTest extends TestCase
                 PHP
         );
 
-        $router = Router::fromEnv()->loadRoutes($this->routesFile);
-        $response = $router->handle(new ServerRequest('GET', '/error'));
+        // Set environment variables — and take them away again even when an assertion
+        // fails, or every later test that reads the environment would run in debug mode
+        $_ENV['APP_DEBUG'] = 'true';
+        $_ENV['APP_URL'] = 'https://env.example.com';
 
-        // Should show debug info due to APP_DEBUG=true
-        $body = json_decode((string) $response->getBody(), true);
-        $this->assertArrayHasKey('exception', $body['error']['details']['debug']);
+        try {
+            $router = Router::fromEnv()->loadRoutes($this->routesFile);
+            $response = $router->handle(new ServerRequest('GET', '/error'));
 
-        // Clean up
-        unset($_ENV['APP_DEBUG'], $_ENV['APP_URL']);
+            // Should show debug info due to APP_DEBUG=true
+            $body = json_decode((string) $response->getBody(), true);
+            $this->assertArrayHasKey('exception', $body['error']['details']['debug']);
+        } finally {
+            unset($_ENV['APP_DEBUG'], $_ENV['APP_URL']);
+        }
     }
 
     public function testThrowsWithoutRoutes(): void
