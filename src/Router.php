@@ -71,7 +71,7 @@ final class Router implements RouterInterface
     /** @var array{debug: bool, basePath: string, baseUrl: ?string, trailingSlash: string, routesFile: ?string, urlEncoding: bool, implicitHead: bool, emitChunkSize: int} */
     private array $config;
 
-    /** @var array<int, string|object> Middleware for every request, outermost first */
+    /** @var array<string|object> Middleware for every request, outermost first (string keys as the application gave them) */
     private array $middleware = [];
 
     /** @var (\Closure(\Throwable, ServerRequestInterface): ?ResponseInterface)|null */
@@ -476,8 +476,9 @@ final class Router implements RouterInterface
      */
     public function middleware(string|array|object $middleware): self
     {
-        // A list, whatever keys the array came with: two calls add up, also under the same key
-        $this->middleware = [...$this->middleware, ...(is_array($middleware) ? array_values($middleware) : [$middleware])];
+        // array_merge(): numbered entries add up; one under a string key that is there
+        // already replaces it in its place
+        $this->middleware = array_merge($this->middleware, is_array($middleware) ? $middleware : [$middleware]);
         $this->dispatcher?->setMiddleware($this->middleware);
 
         return $this;

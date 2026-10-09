@@ -50,6 +50,11 @@ class PipelineTest extends TestCase
                     $r->get('/unresolvable', [NeverBuilt::class, 'show']);
                     $r->get('/returned-500', fn () => Response::serverError('returned, not thrown'));
                     $r->get('/tagged', fn () => Response::success('ok'))->middleware(new PipelineTag('route'));
+                    $r->middlewareGroup(['auth' => new PipelineTag('outer auth'), 'log' => new PipelineTag('log')], function ($r) {
+                        $r->middlewareGroup(['auth' => new PipelineTag('inner auth')], function ($r) {
+                            $r->get('/same-key', fn () => Response::success('ok'));
+                        });
+                    });
                     $r->middlewareGroup(new PipelineTag('outer group'), function ($r) {
                         $r->middlewareGroup(new PipelineTag('inner group'), function ($r) {
                             $r->get('/grouped', fn () => Response::success('ok'))->middleware(new PipelineTag('route'));
@@ -146,6 +151,32 @@ class PipelineTest extends TestCase
             ],
             PipelineTag::$log
         );
+    }
+
+    /**
+     * Middleware for every request under a string key: a later one under the same key
+     * replaces the earlier one in its place (array_merge(), as in 2.1.0)
+     */
+    public function testRouterMiddlewareUnderTheSameKeyReplacesTheEarlierOne(): void
+    {
+        $router = $this->router()
+            ->middleware(['auth' => new PipelineTag('first auth'), 'cors' => new PipelineTag('cors')])
+            ->middleware(['auth' => new PipelineTag('second auth')]);
+
+        $router->handle(new ServerRequest('GET', '/ok'));
+
+        $this->assertSame(['second auth in 1', 'cors in 1', 'cors out 200', 'second auth out 200'], PipelineTag::$log);
+    }
+
+    /**
+     * The same for nested groups: the inner group's middleware under a key of the outer
+     * one takes its place
+     */
+    public function testGroupMiddlewareUnderTheSameKeyReplacesTheOuterOne(): void
+    {
+        $this->router()->handle(new ServerRequest('GET', '/same-key'));
+
+        $this->assertSame(['inner auth in 1', 'log in 1', 'log out 200', 'inner auth out 200'], PipelineTag::$log);
     }
 
     public function testWithoutAnyNothingChanges(): void

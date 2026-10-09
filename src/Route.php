@@ -31,7 +31,8 @@ final class Route
      * @param string[] $methods HTTP methods (GET, POST, etc.)
      * @param string $pattern The route pattern (e.g., '/users/{id}')
      * @param mixed $handler Controller class, callable, or RequestHandler
-     * @param array<int, string|object> $middleware List of middleware class names/instances
+     * @param array<string|object> $middleware Middleware class names/instances, outermost first
+     *                                         (string keys as the application gave them)
      * @param string|null $name Optional route name for URL generation
      * @param array<string, mixed> $attributes Application-defined attributes
      */
@@ -53,9 +54,10 @@ final class Route
      */
     public function middleware(string|array|object $middleware): self
     {
-        // A list, whatever keys the array came with: two calls add up, also under the same key
-        $middleware = is_array($middleware) ? array_values($middleware) : [$middleware];
-        $this->middleware = [...$this->middleware, ...$middleware];
+        // array_merge(): numbered entries add up; one under a string key that is there
+        // already replaces it in its place
+        $middleware = is_array($middleware) ? $middleware : [$middleware];
+        $this->middleware = array_merge($this->middleware, $middleware);
         return $this;
     }
 

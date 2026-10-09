@@ -73,9 +73,6 @@
   control character or a blank. It is put in front of every absolute address as it is: a
   line break made each of them a `Location` header that the response refuses (a 500), a
   blank an address that is none. The message names `APP_URL` where the value came from it.
-- Middleware given as an array is kept as a list, whatever keys the array came with: two
-  calls of `middleware()` (route or router) or nested `middlewareGroup()`s with the same
-  string key add up — the second replaced the first.
 - `{id:int}` with the value `-0` is answered with "expected integer", not "integer overflow"
   (in debug mode); the status stays 400.
 - A request whose URI has no path at all (`new ServerRequest('GET', 'http://example.com')`,

@@ -25,7 +25,7 @@ final class RouteCollector
     /** @var string Current group prefix */
     private string $currentPrefix = '';
 
-    /** @var array<int, string|object> Current group middleware stack */
+    /** @var array<string|object> Current group middleware stack (string keys as the application gave them) */
     private array $currentMiddleware = [];
 
     /** @var array<string, mixed> Attributes of the groups a route is being registered in */
@@ -307,11 +307,12 @@ final class RouteCollector
             return;
         }
 
-        // A list, whatever keys the array came with: nested groups add up, also under the same key
-        $middleware = is_array($middleware) ? array_values($middleware) : [$middleware];
+        // array_merge(): nested groups add up; an inner one under a string key of an outer
+        // one replaces it in its place
+        $middleware = is_array($middleware) ? $middleware : [$middleware];
 
         $previousMiddleware = $this->currentMiddleware;
-        $this->currentMiddleware = [...$this->currentMiddleware, ...$middleware];
+        $this->currentMiddleware = array_merge($this->currentMiddleware, $middleware);
 
         try {
             $callback($this);

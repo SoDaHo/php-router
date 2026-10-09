@@ -38,7 +38,7 @@ final class RouteDispatcher implements RequestHandlerInterface
     private bool $debug;
     private bool $implicitHead = true;
 
-    /** @var array<int, string|object> Middleware for every request, outermost first */
+    /** @var array<string|object> Middleware for every request, outermost first */
     private array $middleware = [];
 
     /** @var (\Closure(\Throwable, ServerRequestInterface, \WeakMap<\Throwable, true>): ResponseInterface)|(\Closure(\Throwable, ServerRequestInterface): ResponseInterface)|null */
@@ -107,7 +107,7 @@ final class RouteDispatcher implements RequestHandlerInterface
     /**
      * Middleware that runs for every request — also for those that end in 404 or 405.
      *
-     * @param array<int, string|object> $middleware Class names or instances, outermost first
+     * @param array<string|object> $middleware Class names or instances, outermost first
      */
     public function setMiddleware(array $middleware): static
     {
