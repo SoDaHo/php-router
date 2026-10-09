@@ -56,6 +56,10 @@ class EmitOverHttpTest extends TestCase
                         ->withAddedHeader('Set-Cookie', 'b=2'));
                     \$r->match(['GET', 'HEAD'], '/page', fn() => Response::text('BODY')->withHeader('Content-Length', '4'));
                     \$r->get('/early', fn() => Response::text('never sent')->withHeader('X-Late', '1'));
+                    \$r->get('/phrase-line-break', fn() => Response::forbidden()->withStatus(403, "Forbidden\\r\\nX-Injected: 1"));
+                    \$r->get('/phrase-control', fn() => Response::text('teapot')->withStatus(418, "Bad\\x01Phrase"));
+                    \$r->get('/phrase-beyond-ascii', fn() => Response::accepted(['job' => 7])->withStatus(202, 'Akzeptiert ä'));
+                    \$r->get('/phrase-tab', fn() => Response::text('tab')->withStatus(200, "All\\tright"));
                     \$r->get('/early-broken', fn() => new class extends \\Nyholm\\Psr7\\Response {
                         public function getProtocolVersion(): string { throw new \\RuntimeException('protocol failed'); }
                     });
@@ -340,6 +344,46 @@ class EmitOverHttpTest extends TestCase
         $this->assertSame('HTTP/1.1 200 OK', $head['status']);
         $this->assertSame(['4'], self::valuesOf($head['headers'], 'Content-Length'));
         $this->assertSame('', $head['body']);
+    }
+
+    /**
+     * PHP drops a status line with a line break and sends its own 200 instead: a 403 went
+     * out as a 200, with a warning in the body and no report. Such a reason phrase is
+     * refused before anything is sent — a 500 can still go out.
+     */
+    public function testReasonPhraseWithAControlCharacterIsA500(): void
+    {
+        $phrases = [
+            '/phrase-line-break' => ['"Forbidden\r\nX-Injected: 1"', 'X-Injected'],
+            '/phrase-control' => ['"Bad\u0001Phrase"', null],
+        ];
+
+        foreach ($phrases as $path => [$debug, $injected]) {
+            @unlink(self::$docroot . '/error.log');
+
+            $response = $this->request('GET', $path);
+
+            $this->assertSame('HTTP/1.1 500 Internal Server Error', $response['status'], $path);
+            $this->assertSame('Internal Server Error', $response['body'], $path);
+            if ($injected !== null) {
+                $this->assertSame([], self::valuesOf($response['headers'], $injected));
+            }
+            $this->assertSame(
+                "-|Response reason phrase must not contain a control character other than a tab|{$debug}|500\n",
+                (string) file_get_contents(self::$docroot . '/error.log'),
+                $path
+            );
+        }
+    }
+
+    /**
+     * RFC 9112: reason-phrase = *( HTAB / SP / VCHAR / obs-text ) — text beyond ASCII and a
+     * tab go out as they are
+     */
+    public function testReasonPhraseOfVisibleTextGoesOutAsItIs(): void
+    {
+        $this->assertSame('HTTP/1.1 202 Akzeptiert ä', $this->request('GET', '/phrase-beyond-ascii')['status']);
+        $this->assertSame("HTTP/1.1 200 All\tright", $this->request('GET', '/phrase-tab')['status']);
     }
 
     public function testResponseThatCanNoLongerBeSentIsReported(): void

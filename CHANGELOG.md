@@ -11,6 +11,12 @@
   value `..`, `{path:any}` the value `../../etc/passwd`. Dots that are not a segment of
   their own (`/files/...`, `/files/.env`) still reach the route. See README, "Slashes in a
   Parameter".
+- `run()` and `emit()` refuse a reason phrase with a control character other than a tab
+  (`withStatus(403, "Forbidden\r\nX-Injected: 1")`) before anything is sent: `run()`
+  answers 500 and the `error` hook gets the `RouterException`, `emit()` throws it. PHP
+  dropped such a status line and sent its own 200 — a 403 went out as a 200, with PHP's
+  warning in the body and no report. Text beyond ASCII (`202 Akzeptiert ä`) and a tab go
+  out as before (RFC 9112).
 
 ### Fixed
 - A pattern of your own (`addPattern()`) that closes its group early (`'a)|(.*'`) is

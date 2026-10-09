@@ -1006,7 +1006,8 @@ final class Router implements RouterInterface
      * run() can still answer with a 500.
      *
      *
-     * @throws RouterException If the response body cannot be read (closed or detached)
+     * @throws RouterException If the response body cannot be read (closed or detached), or
+     *                         the reason phrase has a control character other than a tab
      *
      * @return array{status: string, headers: array<int|string, array<string>>, body: StreamInterface}
      */
@@ -1027,11 +1028,23 @@ final class Router implements RouterInterface
             throw new RouterException($unreadable);
         }
 
+        // RFC 9112: reason-phrase = *( HTAB / SP / VCHAR / obs-text ). The PSR-7 objects do
+        // not check it, and PHP drops a status line with a line break and sends its own 200
+        // instead — a 403 went out as a 200, with a warning in the body. Refused here, before
+        // anything is sent, so that run() can still answer with a 500.
+        $reasonPhrase = $response->getReasonPhrase();
+        if (preg_match('/[\x00-\x08\x0A-\x1F\x7F]/', $reasonPhrase) === 1) {
+            throw new RouterException(
+                'Response reason phrase must not contain a control character other than a tab',
+                debugMessage: (string) json_encode($reasonPhrase, JSON_INVALID_UTF8_SUBSTITUTE),
+            );
+        }
+
         $statusLine = sprintf(
             'HTTP/%s %d %s',
             $response->getProtocolVersion(),
             $response->getStatusCode(),
-            $response->getReasonPhrase()
+            $reasonPhrase
         );
 
         // For string bodies the emitted bytes are identical to the previous `echo
