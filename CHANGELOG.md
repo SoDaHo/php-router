@@ -35,7 +35,10 @@
   value in front of a slash — `redirect('/go/{a:bool}/{b}', '/{a}/{b}')` with
   `/go/false/evil.example` rendered `//evil.example`, another host. Checked as the address
   goes out (as a browser reads it): `handle()` answers 500 and the `error` hook gets a
-  `RouterException`, instead of sending the client elsewhere.
+  `RouterException`, instead of sending the client elsewhere. The check compares the
+  target as written with the rendered address, not with the host the request came to: an
+  empty value in front of a slash ends in a 500 also where the rendering would name the
+  application's own host.
 - The line written for a failing hook without a `hookError` callback names the event, the
   class of the exception and the file and line it was thrown at — no longer its message.
   A message may carry what a request sent, and a line break in it forged a second line in

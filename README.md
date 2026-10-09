@@ -494,7 +494,10 @@ cannot change scheme or host of an accepted target by what it contains. What it 
 as is checked once more when the redirect goes out: an address that would change scheme
 or host — an empty value in front of a slash, `'/{a}/{b}'` with `a` empty or `false`
 giving `//evil.example` — is not sent; the request ends in a 500 and the `error` hook gets
-the `RouterException`. Encoded as a whole, `redirect('/old/{path:any}', '/new/{path}')`
+the `RouterException`. The check compares the target as written with the address as
+rendered, not with the host the request came to: an empty value in front of a slash ends
+in a 500 also where the rendering would name the application's own host
+(`//app.example`). Encoded as a whole, `redirect('/old/{path:any}', '/new/{path}')`
 sends `/old/docs/intro` to `/new/docs%2Fintro` — a path this router answers with 404. For
 redirects that keep the segments of a path, use a route or a handler of your own.
 

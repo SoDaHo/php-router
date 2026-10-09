@@ -57,6 +57,26 @@ class RedirectHandlerTest extends TestCase
         $handler->handle($request);
     }
 
+    /**
+     * The check compares the target as written with the address as rendered — not with the
+     * host the request came to (that would trust its Host header). '//app.example' names
+     * another host than the target, even where the request came to app.example: not sent.
+     */
+    public function testEmptyValueInFrontOfASlashIsNotSentEvenWhenItWouldNameTheOwnHost(): void
+    {
+        $handler = new RedirectHandler('/{a}/{b}');
+        $request = new ServerRequest('GET', 'http://app.example/go//app.example')
+            ->withAttribute('_route_params', ['a' => '', 'b' => 'app.example']);
+
+        try {
+            $response = $handler->handle($request);
+            $this->fail('Sent with Location: ' . $response->getHeaderLine('Location'));
+        } catch (\Sodaho\Router\Exception\RouterException $e) {
+            $this->assertSame('Redirect not sent: its placeholders would change scheme or host of the target (an empty value in front of a slash)', $e->getMessage());
+            $this->assertSame('//app.example', $e->getDebugMessage());
+        }
+    }
+
     public function testSchemeOfTheTargetItselfIsSent(): void
     {
         $handler = new RedirectHandler('HTTPS://app.example/{b}');
