@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Security
+- A request path with a `.` or `..` segment has no route: `/files/..`, `/files/a/./b` and
+  the encoded forms (`/files/%2E%2E/etc/passwd`, `/files/.%2e`) are answered with 404
+  before the route table is asked, like a path with `%2F` or a control character; the
+  `notFound` hook gets the path as it came. A client resolves such segments before it
+  asks, but a request written by hand reached a placeholder with them — `{name}` took the
+  value `..`, `{path:any}` the value `../../etc/passwd`. Dots that are not a segment of
+  their own (`/files/...`, `/files/.env`) still reach the route. See README, "Slashes in a
+  Parameter".
+
 ## [2.1.0] - 2026-10-06
 
 ### Added

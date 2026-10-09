@@ -331,12 +331,19 @@ final class RouteDispatcher implements RequestHandlerInterface
      * - It carries a control character (%00 to %1F, %7F), encoded or not. No route pattern
      *   and no base path may contain one, so only a placeholder could take it — and hand a
      *   line break in an id to the handler.
+     * - It has a '.' or '..' segment, its dots encoded or not ('/a/..', '/a/%2E%2E/b'). A
+     *   client resolves those before it asks, and no route pattern or base path may contain
+     *   one: only a placeholder could take it — '{name}' the value '..', '{path:any}' a
+     *   value that climbs out of its folder ('../../etc/passwd').
+     *
+     * Looked at in the path as it came, before it is decoded: decoded, '%2F' and '%2E%2E'
+     * read like what they hide.
      *
      * @internal Also asked by AppFolder, which keeps the rule for a caller of its own
      */
     public static function hasNoRoute(string $requestPath): bool
     {
-        return preg_match('/%2f|%5c|\\\\|%[01][0-9a-f]|%7f|[\x00-\x1f\x7f]/i', $requestPath) === 1;
+        return preg_match('~%2f|%5c|\\\\|%[01][0-9a-f]|%7f|[\x00-\x1f\x7f]|(?:^|/)(?:\.|%2e){1,2}(?:/|\z)~i', $requestPath) === 1;
     }
 
     /**

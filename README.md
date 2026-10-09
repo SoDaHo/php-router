@@ -140,6 +140,13 @@ before an app folder. No route pattern and no base path may contain one, so only
 placeholder could take it — and hand a line break in an id to the handler. With URL
 encoding on, `url()` refuses a value with a control character for the same reason.
 
+**Nor has a `.` or `..` segment:** `/files/..`, `/files/a/./b` and the encoded forms
+(`/files/%2E%2E/etc/passwd`, `/files/.%2e`) are answered with 404 in the same way. A
+client resolves such segments before it asks, so what arrives with one was written by
+hand — and a placeholder would take it: `{name}` the value `..`, `{path:any}` a value
+that climbs out of its folder (`../../etc/passwd`). Dots that are not a segment of their
+own stay a name like any other: `/files/...`, `/files/..a`, `/files/.env`.
+
 ### Custom Patterns
 
 ```php
@@ -710,8 +717,8 @@ $router->on('hookError', function (array $data) {
 **`path` and `params` are request data.** In `dispatch` and `methodNotAllowed` they are
 already URL-decoded; a control character never gets there (such a path has no route), but
 other characters do (`%E2%80%A8`, bytes that are not UTF-8). In `notFound` a path refused
-for a [hidden separator or a control character](#slashes-in-a-parameter) arrives as it
-came, unchanged — `%0A` stays `%0A`, and a control character that a request object of
+for a [hidden separator, a control character or a dot segment](#slashes-in-a-parameter)
+arrives as it came, unchanged — `%0A` stays `%0A`, and a control character that a request object of
 another make handed over as it stands stays one —, base path included, also outside the
 base path; any other path arrives decoded. Encode all of them before they go into a
 line-based log.

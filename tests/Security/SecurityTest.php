@@ -25,36 +25,44 @@ class SecurityTest extends TestCase
 
         $dispatcher = new RouteDispatcher($collector->getData());
 
-        // Path traversal attempts should not match
+        // No handler gets a value with a '..' segment: such a path has no route
         $attacks = [
+            '/files/..',
+            '/files/.',
             '/files/../etc/passwd',
+            '/files/%2E%2E',
+            '/files/.%2e',
             '/files/..%2F..%2Fetc%2Fpasswd',
             '/files/....//....//etc/passwd',
         ];
 
         foreach ($attacks as $path) {
             $response = $dispatcher->handle(new ServerRequest('GET', $path));
-            // Either 404 (not found) or the literal string is captured (not traversed)
-            $this->assertTrue(
-                $response->getStatusCode() === 404 ||
-                str_contains((string) $response->getBody(), '..'),
-                "Path traversal attempt should be blocked or literal: {$path}"
-            );
+            $this->assertSame(404, $response->getStatusCode(), $path);
         }
+
+        // Dots that are no segment of their own are a name like any other
+        $response = $dispatcher->handle(new ServerRequest('GET', '/files/...'));
+        $this->assertSame(200, $response->getStatusCode());
+        $this->assertSame('...', json_decode((string) $response->getBody(), true)['data']['file']);
     }
 
-    public function testPathParametersAreNotInterpreted(): void
+    public function testPathParametersThatTakeSlashesGetNoDotSegment(): void
     {
         $collector = new RouteCollector();
-        $collector->get('/files/{path:any}', fn ($req, $path) => Response::success(['path' => $path]));
+        $reached = false;
+        $collector->get('/files/{path:any}', function ($req, $path) use (&$reached) {
+            $reached = true;
+
+            return Response::success(['path' => $path]);
+        });
 
         $dispatcher = new RouteDispatcher($collector->getData());
 
-        $response = $dispatcher->handle(new ServerRequest('GET', '/files/../../../etc/passwd'));
-
-        // The path should be captured as literal string, not interpreted
-        $body = json_decode((string) $response->getBody(), true);
-        $this->assertStringContainsString('..', $body['data']['path']);
+        foreach (['/files/../../../etc/passwd', '/files/%2e%2e/%2E%2E/etc/passwd', '/files/a/%2E%2E/y', '/files/a/.%2e/b', '/files/a/./b'] as $path) {
+            $this->assertSame(404, $dispatcher->handle(new ServerRequest('GET', $path))->getStatusCode(), $path);
+        }
+        $this->assertFalse($reached);
     }
 
     // ==================== Null Byte Injection ====================

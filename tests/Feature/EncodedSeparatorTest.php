@@ -19,7 +19,8 @@ use Sodaho\Router\Router;
 /**
  * A separator that is hidden in the path — %2F, %5C, a backslash — has no route: decoded
  * it would be two segments here and one for a proxy or the access rules of the web server
- * in front. And url() writes no address that the router refuses itself.
+ * in front. Nor has a control character or a '.'/'..' segment. And url() writes no
+ * address that the router refuses itself.
  */
 class EncodedSeparatorTest extends TestCase
 {
@@ -159,6 +160,70 @@ class EncodedSeparatorTest extends TestCase
             $this->assertStringContainsString('"code":"NOT_FOUND"', $this->body($response));
         }
         $this->assertSame([$path], $reported);
+    }
+
+    /**
+     * @return array<string, array{0: string, 1?: string}>
+     */
+    public static function pathsWithADotSegment(): array
+    {
+        return [
+            'parent segment in a one-segment parameter' => ['/tags/..'],
+            'current segment in a one-segment parameter' => ['/tags/.'],
+            'parent segment where the placeholder takes slashes' => ['/files/../../etc/passwd'],
+            'current segment where the placeholder takes slashes' => ['/files/a/./b'],
+            'parent segment at the end' => ['/files/a/..'],
+            'encoded dots' => ['/files/%2e%2e/%2E%2E/etc/passwd'],
+            'one dot encoded' => ['/tags/.%2E'],
+            'the other dot encoded' => ['/files/a/%2e./b'],
+            'current segment encoded' => ['/tags/%2e'],
+            'in front of a static route' => ['/a/./b'],
+            'HEAD' => ['/tags/..', 'HEAD'],
+            // Not a 405: the table is not asked at all
+            'method the path has a route for' => ['/tags/..', 'POST'],
+            'method the path has no route for' => ['/tags/..', 'DELETE'],
+        ];
+    }
+
+    /**
+     * A client resolves '.' and '..' before it asks — what arrives with one was written
+     * by hand, and a placeholder would hand the handler a value that climbs out of its folder
+     */
+    #[DataProvider('pathsWithADotSegment')]
+    public function testPathWithADotSegmentHasNoRoute(string $path, string $method = 'GET'): void
+    {
+        $router = $this->router();
+        $reached = false;
+        $reported = [];
+        $router->on('dispatch', function () use (&$reached): void {
+            $reached = true;
+        });
+        $router->on('notFound', function (array $data) use (&$reported): void {
+            $reported[] = $data['path'];
+        });
+
+        $response = $router->handle(new ServerRequest($method, $path));
+
+        $this->assertSame(404, $response->getStatusCode());
+        $this->assertFalse($response->hasHeader('Allow'));
+        $this->assertFalse($reached);
+        if ($method !== 'HEAD') {
+            $this->assertStringContainsString('"code":"NOT_FOUND"', $this->body($response));
+        }
+        // The hook gets the path as it came, like one with a hidden separator
+        $this->assertSame([$path], $reported);
+    }
+
+    public function testDotsThatAreNoSegmentOfTheirOwnStayAllowed(): void
+    {
+        $router = $this->router();
+
+        $this->assertSame('tag: ...', $this->body($router->handle(new ServerRequest('GET', '/tags/...'))));
+        $this->assertSame('tag: ...', $this->body($router->handle(new ServerRequest('GET', '/tags/%2e%2e%2e'))));
+        $this->assertSame('tag: ..a', $this->body($router->handle(new ServerRequest('GET', '/tags/..a'))));
+        $this->assertSame('tag: a..', $this->body($router->handle(new ServerRequest('GET', '/tags/a..'))));
+        $this->assertSame('files: a/.b/c.', $this->body($router->handle(new ServerRequest('GET', '/files/a/.b/c.'))));
+        $this->assertSame('dl: ..', $this->body($router->handle(new ServerRequest('GET', '/dl/...json'))));
     }
 
     public function testWhatIsNoControlCharacterStaysAllowed(): void
