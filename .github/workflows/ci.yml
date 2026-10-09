@@ -14,7 +14,7 @@ jobs:
   tests:
     runs-on: ubuntu-latest
     container: shivammathur/node:24.04
-    name: PHP ${{ matrix.php }}${{ matrix.preview && ' (preview, may fail)' || '' }}
+    name: PHP ${{ matrix.php }}${{ matrix.dependencies == 'lowest' && ' (lowest dependencies)' || '' }}${{ matrix.preview && ' (preview, may fail)' || '' }}
     # The preview of the next PHP version runs along and may turn red without blocking anything
     continue-on-error: ${{ matrix.preview || false }}
 
@@ -22,9 +22,14 @@ jobs:
       fail-fast: false
       matrix:
         php: ['8.5']
+        dependencies: [locked]
         include:
           - php: '8.6'
             preview: true
+          # The lower bounds of composer.json, tested: what a consumer may install. A job of
+          # its own: an include that overrides no matrix value would join the 8.5 job instead
+          - php: '8.5'
+            dependencies: lowest
 
     steps:
       - uses: actions/checkout@v6
@@ -44,11 +49,16 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ${{ steps.composer-cache.outputs.dir }}
-          key: ${{ runner.os }}-composer-${{ hashFiles('composer.json') }}
+          key: ${{ runner.os }}-composer-${{ hashFiles('composer.lock') }}
           restore-keys: ${{ runner.os }}-composer-
 
       - name: Install dependencies
+        if: ${{ matrix.dependencies != 'lowest' }}
         run: composer install --prefer-dist --no-progress ${{ matrix.preview && '--ignore-platform-req=php+' || '' }}
+
+      - name: Install the lowest dependencies
+        if: ${{ matrix.dependencies == 'lowest' }}
+        run: composer update --prefer-lowest --prefer-stable --prefer-dist --no-progress
 
       - name: Run tests
         run: composer test
@@ -75,8 +85,11 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ${{ steps.composer-cache.outputs.dir }}
-          key: ${{ runner.os }}-composer-${{ hashFiles('composer.json') }}
+          key: ${{ runner.os }}-composer-${{ hashFiles('composer.lock') }}
           restore-keys: ${{ runner.os }}-composer-
+
+      - name: Validate composer.json and composer.lock
+        run: composer validate --strict
 
       - name: Install dependencies
         run: composer install --prefer-dist --no-progress
@@ -106,7 +119,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ${{ steps.composer-cache.outputs.dir }}
-          key: ${{ runner.os }}-composer-${{ hashFiles('composer.json') }}
+          key: ${{ runner.os }}-composer-${{ hashFiles('composer.lock') }}
           restore-keys: ${{ runner.os }}-composer-
 
       - name: Install dependencies
