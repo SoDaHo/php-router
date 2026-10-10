@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-10-10
+
+What was wrong without a word is refused with a word now — where the routes are written or
+the table is built where that is possible, as a 500 with a report where only a request
+shows it. See "Upgrading from 2.1.1" at the end of this section for what that means for an
+application.
+
 ### Security
 - A route parameter never replaces an attribute the request carries already. Each
   parameter was also set as an attribute of its own name, over whatever was there: an auth
@@ -21,7 +28,15 @@
   such a value (`a//b`, `/a`) as one that does not lead back. A slash at the end of the
   value stays where the path ends with it (`/files/docs/` gives `docs/`), an empty value
   as well. The built-in pattern is `(?:[^/]+(?:/[^/]+)*(?:/(?=\z))?)?` instead of `.*`.
-
+- A web app folder (`Router::app()`) opens a file before it reads anything of it, and
+  checks the open file: its path still resolves to itself inside the folder, and the file
+  under that path is the one that was opened (device and file number). A writer of the
+  folder who put a link to a file outside in place of a file between the check (realpath)
+  and the open had that file sent — a race that a test with a second process swapping the
+  file wins about 150 times in 3000 requests against 2.1.1, and never against this. ETag,
+  length and body come from the one open file. What PHP cannot rule out (a directory on the
+  way swapped for a link and back between two checks) is in the README; the folder stays
+  trusted, writable for the deployment only.
 - A redirect is not sent where a value would be — or make, with the text around it — a `.`
   or `..` segment of the path: `redirect('/docs/{x}-z', '/docs/{x}/')` with `/docs/..-z`
   rendered `/docs/../`, which a client resolves to `/`; `'/a/%2e{x}'` with `.` rendered
@@ -34,68 +49,22 @@
   `{name}` or one where scheme or host belong (`'{a}:{b}'`, `'https:{path}'`,
   `'//{host}/x'`), and a status that is no 3xx status. A handler built by hand — a handler
   of a route of your own — got none of these checks; `'{a}:{b}'` was caught only as the
-  redirect went out.
-
-- A route handler `[$object, 'method']` is called on that object, as the callable it is.
-  It was taken for `[class name, method]` and ended in a `TypeError` (a 500) with and
-  without a container.
+  redirect went out. The scheme is read as RFC 3986 has it, in the constructor and where
+  the address goes out, by one function (`'1{x}:y'` is a path).
 - `run()` and `emit()` refuse a protocol version that is no version — a digit, and a dot
   and a digit for a minor one (`1.1`, `1.0`, `2`) — before anything is sent, as they refuse
   a reason phrase with a control character: `withProtocolVersion("1.1\r\nX-Injected: 1")`
   made PHP drop the status line and send its own 200, a 403 went out as a 200. `run()`
   answers 500 and the `error` hook gets the `RouterException`, `emit()` throws it.
 
-- A web app folder (`Router::app()`) opens a file before it reads anything of it, and
-  checks the open file: its path still resolves to itself inside the folder, and the file
-  under that path is the one that was opened (device and file number). A writer of the
-  folder who put a link to a file outside in place of a file between the check (realpath)
-  and the open had that file sent — a race that a test with a second process swapping the
-  file wins about 150 times in 3000 requests against 2.1.1, and never against this. ETag,
-  length and body come from the one open file. What PHP cannot rule out (a directory on the
-  way swapped for a link and back between two checks) is in the README; the folder stays
-  trusted, writable for the deployment only.
-- `Response::file()` takes `Content-Length` and the range from the file it opened
-  (`fstat()`), not from `filesize()` before it opens it: a file replaced in between went out
-  under the length of the other one — a corrupt download.
-
 ### Changed
-- In the trailing slash mode `strict`, `get('')` inside a group registers the group's own
-  address: `/api` in `group('/api', …)`, while `get('/')` stays `/api/`. Up to 2.1.1 both
-  registered `/api/` (the second was a duplicate), and `/api` could not be registered in
-  the group at all. **A route written as `get('')` in a group moves from `/api/` to `/api`**
-  — write `get('/')` to keep `/api/`. Outside a group and in the mode `ignore` nothing
-  changes.
-- `Response::redirect()` refuses a status that is no 3xx status with a `RouterException`
-  (`Redirect status must be a 3xx status`), as redirect routes do since 2.1.1: a `Location`
-  with a 200 is no redirect — the client shows the empty body. 2.0.0 promised a 3xx status
-  for both; a 201 with a `Location` is `Response::created()`.
-- `baseUrl` (config, `setBaseUrl()`, `APP_URL` through `fromEnv()`) has to be an address of
-  a host: `http://` or `https://`, the host, a path at most. `example.com` made every
-  absolute address relative (`example.com/users/5`), `//evil.example` or
-  `javascript:alert(1)` an address elsewhere, and a query or fragment put the path behind
-  it; such a value is refused with a `RouterException` when it is given (the message names
-  `APP_URL` where it came from there).
-- With `implicitHead` (the default) a static GET route wins over a dynamic HEAD route, as
-  a static route wins over a dynamic one for every method: `HEAD /users/me` is answered by
-  `get('/users/me')` like the GET, no longer by `head('/users/{id}')` with `id` = `me`.
-  A HEAD route still answers where no static GET route takes its path; without
-  `implicitHead` nothing changes. New: `Dispatcher::staticRoute()`.
-- Two routes with the same name are refused with a `DuplicateRouteException` when the route
-  table is built (and by `new UrlGenerator()` for a list of `Route` objects): the first
-  request is answered with 500 and reported, `url()` and `match()` throw. `url()` gave the
-  address of whichever route had the name last — `oauth.callback` could lead to a route
-  defined further down. A route renamed with a second `name()` is still one route.
-- README: two placeholders that take slashes in one route (`/{a:any}/{b:any}`) make the
-  work grow with the square of the path's segments — a path of some 800 segments reaches
-  PCRE's default backtrack limit and is answered with 500 (reported, never "no match"); a
-  test pins it.
 - URL encoding can no longer be turned off. `'urlEncoding' => false` (or `0`, `'off'`,
   `''`), `ROUTER_URL_ENCODING=false` (or empty) and `UrlGenerator::setEncodeParams(false)`
   throw a `RouterException` where they are given, instead of switching `url()` to writing
   values as they are: off took every check of `url()` along — a backslash, a control
   character, a `.` or `..` segment, an address that begins with `//` (another host for a
   client) went out unchecked. The key, the variable and `setEncodeParams(true)` are still
-  accepted with a value that means on; `setEncodeParams()` is deprecated.
+  accepted with a value that means on.
 - `addPattern()` refuses a fragment with a named group (`(?P<year>…)`, `(?<year>…)`,
   `(?'year'…)`) or a `(*…)` construct (`(*ACCEPT)`, `(*SKIP)`, `(*COMMIT)`, `(*UTF)`). A
   named group was a parameter of every route that used the pattern — handed to the handler
@@ -113,15 +82,6 @@
   and readable. Writing into one of the arrays in place (`$route->attributes['k'] = …`,
   `$route->middleware[] = …`) is an `Error` of PHP now, also before the table is built —
   the properties have a `set` hook; use the setters or assign the array as a whole.
-- `Route::$middleware` (and the constructor parameter) is documented as
-  `array<string|object>` since 2.1.1 (it said `array<int, string|object>` before, and 2.1.1
-  did not mention it): string keys are kept as the application gave them. Code that hands
-  it on as a `list` under PHPStan sees the wider type.
-- Middleware named by class: when the container has the name but returns something that
-  is no `MiddlewareInterface` (a factory closure registered in place of the instance), the
-  request ends in a 500 and the `error` hook gets a `RouterException`. The router used to
-  build the class itself with its constructor's defaults instead — a rate limit configured
-  with 5 ran with its default.
 - A middleware key given a second time is refused with a `RouterException` where it is
   written: a route's `->middleware(['auth' => …])` inside a group with an `'auth'`, an
   inner `middlewareGroup()` with a key of an outer one, a second `Router::middleware()` call
@@ -129,8 +89,37 @@
   place — `RequireAdmin` under the route's `'auth'` replaced the group's `RequireLogin`,
   and a check the route relied on no longer ran. Numbered entries and keys of their own
   add up as before.
-
-### Fixed
+- Middleware named by class: when the container has the name but returns something that
+  is no `MiddlewareInterface` (a factory closure registered in place of the instance), the
+  request ends in a 500 and the `error` hook gets a `RouterException`. The router used to
+  build the class itself with its constructor's defaults instead — a rate limit configured
+  with 5 ran with its default.
+- Two routes with the same name are refused with a `DuplicateRouteException` when the route
+  table is built (and by `new UrlGenerator()` for a list of `Route` objects): the first
+  request is answered with 500 and reported, `url()` and `match()` throw. `url()` gave the
+  address of whichever route had the name last — `oauth.callback` could lead to a route
+  defined further down. A route renamed with a second `name()` is still one route.
+- With `implicitHead` (the default) a static GET route wins over a dynamic HEAD route, as
+  a static route wins over a dynamic one for every method: `HEAD /users/me` is answered by
+  `get('/users/me')` like the GET, no longer by `head('/users/{id}')` with `id` = `me`.
+  A HEAD route still answers where no static GET route takes its path; without
+  `implicitHead` nothing changes.
+- In the trailing slash mode `strict`, `get('')` inside a group registers the group's own
+  address: `/api` in `group('/api', …)`, while `get('/')` stays `/api/`. Up to 2.1.1 both
+  registered `/api/` (the second was a duplicate), and `/api` could not be registered in
+  the group at all. **A route written as `get('')` in a group moves from `/api/` to `/api`**
+  — write `get('/')` to keep `/api/`. Outside a group and in the mode `ignore` nothing
+  changes.
+- `Response::redirect()` refuses a status that is no 3xx status with a `RouterException`
+  (`Redirect status must be a 3xx status`), as redirect routes do since 2.1.1: a `Location`
+  with a 200 is no redirect — the client shows the empty body. 2.0.0 promised a 3xx status
+  for both; a 201 with a `Location` is `Response::created()`.
+- `baseUrl` (config, `setBaseUrl()`, `APP_URL` through `fromEnv()`) has to be an address of
+  a host: `http://` or `https://`, the host, a path at most. `example.com` made every
+  absolute address relative (`example.com/users/5`), `//evil.example` or
+  `javascript:alert(1)` an address elsewhere, and a query or fragment put the path behind
+  it; such a value is refused with a `RouterException` when it is given (the message names
+  `APP_URL` where it came from there).
 - `RfcResponder`: the details of an error no longer replace `type`, `title` or `status` —
   RFC 9457 gives them a meaning of their own, and `Response::error('Bad', 400, details:
   ['status' => 200])` said in a 400 that the request went well. `type` comes from the error
@@ -138,6 +127,30 @@
   by `Response`); the three keys of the details are dropped, `detail`, `instance` and every
   other key are taken as before. An application that passed its own `status` in the details
   gets the response's.
+- `Route::$middleware` (and the constructor parameter) is documented as
+  `array<string|object>` since 2.1.1 (it said `array<int, string|object>` before, and 2.1.1
+  did not mention it): string keys are kept as the application gave them. Code that hands
+  it on as a `list` under PHPStan sees the wider type.
+
+### Added
+- `Dispatcher::staticRoute()`: the static route of a method for a path, without a pass over
+  the dynamic routes.
+
+### Deprecated
+- `UrlGenerator::setEncodeParams()`: encoding cannot be turned off; `true` changes nothing,
+  `false` throws.
+
+### Fixed
+- A route handler `[$object, 'method']` is called on that object, as the callable it is.
+  It was taken for `[class name, method]` and ended in a `TypeError` (a 500) with and
+  without a container.
+- `Response::file()` takes `Content-Length` and the range from the file it opened
+  (`fstat()`), not from `filesize()` before it opens it: a file replaced in between went out
+  under the length of the other one — a corrupt download.
+- README: two placeholders that take slashes in one route (`/{a:any}/{b:any}`) make the
+  work grow with the square of the path's segments — a path of some 800 segments reaches
+  PCRE's default backtrack limit and is answered with 500 (reported, never "no match"); a
+  test pins it.
 - README: a checklist for an authentication server (an `error` hook, rewriting middleware
   before a guard, identities under class-name keys, absolute links from `absoluteUrl()`
   because `run()` takes scheme and host from the client, CORS flags at 405, side effects of
@@ -156,6 +169,53 @@
   runs both): `src` stays on level max. Level max over `tests` asks for a type behind every
   value a test decodes from a response body — about 450 places, more than this release
   should carry; the tests' few ignores name their identifier and reason.
+- New public methods marked `@internal` (not part of the contract, used inside the
+  library): `Route::freeze()`, `Route::addMiddleware()`, `RouteCollector::assertNamesOnce()`,
+  `FileStream::fromHandle()`, `Response::fileFromHandle()`, `AppFolder::openWithin()`.
+
+### Upgrading from 2.1.1
+Most of what 2.2.0 refuses never worked as meant; it is refused now instead of doing the
+wrong thing quietly. What to look at:
+
+- **A refusal while the table is built is a 500 for every request.** A route the table
+  cannot take (a duplicate name, a fragment with a named group, a middleware key given
+  twice, a redirect target the handler refuses) ends the building of the table — the
+  application does not come up half-working, but it does not come up. Ask
+  `$router->match($request)` once in a test or a deploy check: it builds the table and
+  throws what is wrong.
+- **Placeholders named like attributes.** A placeholder whose name an attribute of the
+  request already has (set by a middleware for every request, or before `handle()`) ends
+  the request in a 500. Rename one of them; keep identities under class-name keys.
+- **`urlEncoding` off.** Remove `'urlEncoding' => false` and `ROUTER_URL_ENCODING=false`
+  (or an empty one), and `setEncodeParams(false)`. An address that must go out unchecked is
+  one to build yourself.
+- **`addPattern()` fragments.** Turn a named group into a group without a name or one that
+  does not capture (`(?:…)`), drop `(*…)` verbs; refer to other placeholders by name
+  (`(?P=other)`).
+- **Routes changed at runtime.** Code that calls `attribute()`, `middleware()` or `name()`
+  on a route after the table is built — in a middleware, a handler — throws now; keep what
+  belongs to one request in a request attribute. In the routes file, write the arrays
+  through the setters: `$route->attributes['k'] = …` is a PHP `Error`.
+- **Middleware keys.** Give middleware that should both run keys of their own; one that
+  should replace another is a group or route of its own.
+- **Middleware from the container.** Register the middleware instance (or let the
+  container build it), not a factory closure under its class name.
+- **Route names.** Give every route its own name.
+- **`{path:any}` and empty segments.** `/files//x` no longer reaches `/files/{path:any}`;
+  `url()` refuses values with an empty segment.
+- **Redirects.** A `RedirectHandler` built by hand with a target that leaves scheme or host
+  to a placeholder throws when it is built; a value that would make a `.` or `..` segment is
+  a 500 instead of a redirect.
+- **HEAD.** A dynamic `head()` route no longer answers for a path a static `get()` route
+  takes.
+- **`get('')` in a group** (trailing slash mode `strict`) is the group's own address now;
+  write `get('/')` for the address with the slash.
+- **`Response::redirect()`** takes a 3xx status only; use `Response::created()` for 201.
+- **`baseUrl` / `APP_URL`** has to be `http(s)://host[/path]`.
+- **`RfcResponder`**: `type`, `title` and `status` in the details are dropped.
+- **A response's protocol version** has to be a version (`1.1`, `2`).
+- **PHPStan:** `Route::$middleware` is `array<string|object>`; the three route properties
+  have `set` hooks (no writes into them in place).
 
 ## [2.1.1] - 2026-10-09
 
@@ -594,7 +654,9 @@ themselves (`handle()` plus their own emitter) are not affected.
 - **Configuration** via constructor array, environment variables, or fluent API.
 - **Strict parameter validation**: invalid types return 400 (not 500), controller TypeErrors bubble up as 500.
 
-[Unreleased]: https://github.com/sodaho/php-router/compare/v2.1.0...HEAD
+[Unreleased]: https://github.com/sodaho/php-router/compare/v2.2.0...HEAD
+[2.2.0]: https://github.com/sodaho/php-router/compare/v2.1.1...v2.2.0
+[2.1.1]: https://github.com/sodaho/php-router/compare/v2.1.0...v2.1.1
 [2.1.0]: https://github.com/sodaho/php-router/compare/v2.0.1...v2.1.0
 [2.0.1]: https://github.com/sodaho/php-router/compare/v2.0.0...v2.0.1
 [2.0.0]: https://github.com/sodaho/php-router/compare/v1.2.0...v2.0.0
