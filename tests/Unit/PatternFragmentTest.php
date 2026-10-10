@@ -51,6 +51,10 @@ class PatternFragmentTest extends TestCase
             // escapes nothing — the '(' behind it opens a group
             'named group behind \\c\\' => ['\c\(?<n>x)', self::NAMED],
             'verb behind \\c\\' => ['\c\(*ACCEPT)', self::VERB],
+            // '[:a[:]' is no POSIX class for PCRE — a '[' with the terminator behind it ends
+            // the lookalike —, so the class closes at the first ']', and what follows acts
+            'named group behind a POSIX lookalike' => ['[[:a[:](?<n>x)]', self::NAMED],
+            'verb behind a POSIX lookalike' => ['[[:a[:]a(*ACCEPT)]', self::VERB],
         ];
     }
 
@@ -83,6 +87,7 @@ class PatternFragmentTest extends TestCase
             'escaped parenthesis in front of letters' => ['\(?P<x>', '/x/(P<x>', '/x/P<y>'],
             'parenthesis in a character class' => ['[(?P<x>*]+', '/x/(P*', '/x/a'],
             'POSIX class inside a character class' => ['[[:digit:](*]+', '/x/1(*', '/x/a'],
+            'named group spelled in a class behind a POSIX class' => ['[[:digit:](?<n>x)]+', '/x/1(n', '/x/a'],
             'quoted text' => ['\Q(*ACCEPT)\E', '/x/(*ACCEPT)', '/x/a'],
             'reference to a placeholder by name' => ['(?P=a)', '/x/x', '/x/y'],
             // '\c]' in a class is one character: the class goes on to the next ']'

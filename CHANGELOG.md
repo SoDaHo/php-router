@@ -84,7 +84,8 @@ deliberate deviation from SemVer by the owner's decision of 2026-10-10. See "Upg
   Lookbehinds, groups that do not capture and groups without a name stay allowed — what
   those capture never reaches the parameters. The fragment is read as PCRE reads it: what is
   escaped (`\cX` with the character behind it — `\c[` is no class, `\c\` escapes nothing),
-  quoted (`\Q…\E`) or in a character class is no group.
+  quoted (`\Q…\E`) or in a character class is no group — and a class ends where PCRE ends
+  it: `[:a[:]` is no POSIX class there, so in `[[:a[:](?<n>x)]` the group is one.
 - A route is frozen once the route table is built from it (`RouteCollector::getData()`, so
   the first request, `match()` or `url()`): `attribute()`, `middleware()`, `name()` and
   assigning `$route->attributes`, `$route->middleware` or `$route->name` throw a

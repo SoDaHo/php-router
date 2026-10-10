@@ -199,7 +199,9 @@ final class RouteCollector
     /**
      * Where a character class that opens at $start ends (the position behind its ']'). A ']'
      * right behind '[' or '[^' is a member, an escaped one as well, and so is the ']' that
-     * closes a POSIX class ([:alpha:]) inside it.
+     * closes a POSIX class ([:alpha:]) inside it — taken as one only without '[' or ']' in
+     * it: for PCRE a ']' or a '[' with the terminator behind it ends the lookalike, so
+     * '[:a[:]' is none and the class ends at its ']' (a name with a '[' compiles nowhere).
      */
     private static function endOfClass(string $fragment, int $start): int
     {
@@ -221,7 +223,7 @@ final class RouteCollector
                 continue;
             }
 
-            if ($fragment[$i] === '[' && preg_match('/\G\[([:.=])[^]]*?\1\]/', $fragment, $match, 0, $i) === 1) {
+            if ($fragment[$i] === '[' && preg_match('/\G\[([:.=])[^][]*?\1\]/', $fragment, $match, 0, $i) === 1) {
                 $i += strlen($match[0]);
 
                 continue;
