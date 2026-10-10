@@ -52,11 +52,12 @@ from SemVer by the owner's decision of 2026-10-10. See "Upgrading from
   out as before.
 - `url()` and `absoluteUrl()` look for a `.` or `..` segment in the finished address, base
   path included. They looked in what the route made of its values only, and the base path
-  was put in front afterwards: a `UrlGenerator` built by hand with `setBasePath('/tenant/..')`
-  wrote `/tenant/../login` for `/login`, which a client reads as `/login` — outside the
-  base path a callback or logout address was meant to stay under (README and the class
-  promised no such segment). Such an address is refused with a `RouterException` now. The
-  router's `basePath` refused such a path where it is configured already.
+  was put in front afterwards: a `UrlGenerator` built by hand with
+  `setBasePath('/tenant/..')` wrote `/tenant/../login` for `/login`, which a client reads
+  as `/login` — outside the base path a callback or logout address was meant to stay under
+  (README and the class promised no such segment). Such an address is refused with a
+  `RouterException` now. The router's `basePath` refused such a path where it is
+  configured already.
 - `RedirectHandler` refuses in its constructor what `RouteCollector::redirect()` refused for
   it: a target with a control character other than a tab, a placeholder that is not
   `{name}` or one where scheme or host belong (`'{a}:{b}'`, `'https:{path}'`,
@@ -344,8 +345,9 @@ look at:
   application does not come up half-working, but it does not come up. Ask
   `$router->match($request)` once in a test or a deploy check: it builds the table and
   throws what is wrong. It does not run a request: what only a request shows — a
-  placeholder named like an attribute, a container entry that is no middleware — needs a
-  request through `handle()`, one per route, made as your middleware make it.
+  placeholder named like an attribute, a container entry that is no middleware or no
+  object of the controller class a route names — needs a request through `handle()`, one
+  per route, made as your middleware make it.
 - **Placeholders named like attributes.** A placeholder whose name an attribute of the
   request already has (set by a middleware for every request, or before `handle()`) ends
   the request in a 500. Rename one of them; keep identities under class-name keys.
@@ -387,10 +389,9 @@ look at:
   leaves scheme or host to a placeholder, has a control character other than a tab
   (`"/new\r\nX: 1"`), a placeholder that is not `{name}` (`'/new/{id:int}'`), or where its
   status is not 301, 302, 303, 307 or 308 — what `redirect()` refused for it already (a 300,
-  304 or 305 it took). A value that would
-  make a `.` or `..` segment is a 500 instead of a redirect, and so is a placeholder
-  without a value or route parameters that are no array of scalar values (it sent the
-  placeholder as it stood).
+  304 or 305 it took). A value that would make a `.` or `..` segment is a 500 instead of a
+  redirect, and so is a placeholder without a value or route parameters that are no array
+  of scalar values (it sent the placeholder as it stood).
 - **HEAD.** A dynamic `head()` route no longer answers for a path a static `get()` route
   takes — and no longer shields it: the GET handler runs for HEAD there, side effects
   included. Give such a route a static `head()` of its own, or turn `implicitHead` off.
@@ -421,21 +422,19 @@ look at:
 - **The answer to `HEAD` through `emit()`** needs `withBody: false`
   (`$router->emit($response, withBody: $request->getMethod() !== 'HEAD')`): it keeps the
   `Content-Length` of the `GET` with an empty body, which `emit($response)` refuses now
-  before anything is sent — the README showed `emit($response)` alone for it. `run()`
-  is not affected.
+  before anything is sent (2.1.1 sent it). `run()` is not affected.
 - **A response's protocol version** has to be a version (`1.1`, `2`), its status code from
   100 to 599, and every header line a token name and a value without control characters
   other than a tab — a response that breaks this gets the router's 500 from `run()`, an
-  exception from `emit()`. So does a
-  response with a `Transfer-Encoding` of its own, or a `Content-Length` that is not exactly
-  one value of digits: drop the `Transfer-Encoding` (the web server applies one where it
-  needs one) and set one `Content-Length` or none.
+  exception from `emit()`. So does a response with a `Transfer-Encoding` of its own, or a
+  `Content-Length` that is not exactly one value of digits: drop the `Transfer-Encoding`
+  (the web server applies one where it needs one) and set one `Content-Length` or none.
 - **Responses without content:** a 1xx, 204, 205 or 304 whose body is not empty (or does
   not know its size) is refused before anything is sent — `Response::noContent()` and the
-  router's own 304s have none; a body built for such a status is a mistake to drop. A 1xx
-  or 204 must not carry a `Content-Length` at all, **also not `Content-Length: 0`**, which
-  some middleware add to every response (let them skip these statuses); a 205 may carry
-  `0` only. A 304 keeps the length of its representation.
+  router's own 304s have none; drop a body built for such a status. A 1xx or 204 must not
+  carry a `Content-Length` at all, **also not `Content-Length: 0`**, which some middleware
+  add to every response (let them skip these statuses); a 205 may carry `0` only. A 304
+  keeps the length of its representation.
 - **Messages:** code that compared or parsed the message of a duplicate placeholder, a
   missing parameter of `url()`, parameters that do not fit their route or a controller that
   needs constructor parameters finds the name in `getDebugMessage()` now.
