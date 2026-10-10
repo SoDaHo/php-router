@@ -219,8 +219,9 @@ final class RouteDispatcher implements RequestHandlerInterface
      * route (hasNoRoute()) is refused before anything else, then the base path, then the
      * table. With implicitHead a HEAD goes to the GET route of the path where it has no
      * route of its own — or only a dynamic one where a static GET route takes the path, as
-     * a static route wins over a dynamic one for every method. Read once: the path that
-     * was checked is the path that is looked up.
+     * a static route wins over a dynamic one for every method (the static routes of both
+     * are asked before any dynamic one). Read once: the path that was checked is the path
+     * that is looked up.
      */
     private function lookup(ServerRequestInterface $request): RouteMatch
     {
@@ -243,26 +244,33 @@ final class RouteDispatcher implements RequestHandlerInterface
             return $this->issue($match, $requestPath);
         }
 
-        $result = $this->dispatcher->dispatch($method, $path);
         $viaGet = false;
         $implicitHead = $this->implicitHead;
 
-        if ($result[0] !== Dispatcher::FOUND && $method === 'HEAD' && $this->implicitHead) {
-            $asGet = $this->dispatcher->dispatch('GET', $path);
-            if ($asGet[0] === Dispatcher::FOUND) {
-                $result = $asGet;
-                $viaGet = true;
+        if ($method === 'HEAD' && $implicitHead) {
+            // A static route wins over a dynamic one — for HEAD as for GET: HEAD's own static
+            // route, then GET's, and only then the dynamic ones. A HEAD to /users/me is
+            // answered like the GET to it, and the expression of a dynamic HEAD route
+            // /users/{id} is not even asked (it might be one PCRE gives up on: a 500).
+            $headRoute = $this->dispatcher->staticRoute('HEAD', $path);
+            $getRoute = $headRoute === null ? $this->dispatcher->staticRoute('GET', $path) : null;
+
+            if ($headRoute !== null || $getRoute !== null) {
+                $result = [Dispatcher::FOUND, $headRoute ?? $getRoute, [], []];
+                $viaGet = $headRoute === null;
+            } else {
+                $result = $this->dispatcher->dispatch('HEAD', $path);
+
+                if ($result[0] !== Dispatcher::FOUND) {
+                    $asGet = $this->dispatcher->dispatch('GET', $path);
+                    if ($asGet[0] === Dispatcher::FOUND) {
+                        $result = $asGet;
+                        $viaGet = true;
+                    }
+                }
             }
-        } elseif ($result[0] === Dispatcher::FOUND && $method === 'HEAD' && $this->implicitHead
-            && str_contains($this->ensureRoute($result[1])->pattern, '{')) {
-            // A static route wins over a dynamic one — for HEAD as for GET: a HEAD to
-            // /users/me is answered like the GET to it, by the static GET route, not by a
-            // dynamic HEAD route /users/{id} with id 'me'
-            $static = $this->dispatcher->staticRoute('GET', $path);
-            if ($static !== null) {
-                $result = [Dispatcher::FOUND, $static, [], []];
-                $viaGet = true;
-            }
+        } else {
+            $result = $this->dispatcher->dispatch($method, $path);
         }
 
         $match = match ($result[0]) {

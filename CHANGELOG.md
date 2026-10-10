@@ -111,6 +111,8 @@ application.
 - With `implicitHead` (the default) a static GET route wins over a dynamic HEAD route, as
   a static route wins over a dynamic one for every method: `HEAD /users/me` is answered by
   `get('/users/me')` like the GET, no longer by `head('/users/{id}')` with `id` = `me`.
+  The static routes of HEAD and GET are asked before any dynamic one, so the expression of
+  such a dynamic HEAD route is not even asked (one PCRE gives up on made the HEAD a 500).
   A HEAD route still answers where no static GET route takes its path; without
   `implicitHead` nothing changes.
 - In the trailing slash mode `strict`, `get('')` inside a group registers the group's own

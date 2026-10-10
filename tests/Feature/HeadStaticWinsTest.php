@@ -57,6 +57,36 @@ class HeadStaticWinsTest extends TestCase
         $this->assertSame('dynamic HEAD', $dispatcher->handle(new ServerRequest('HEAD', '/docs/a'))->getHeaderLine('X-Route'));
     }
 
+    /**
+     * The static routes of HEAD and GET are asked before any dynamic one: a dynamic HEAD
+     * route whose expression PCRE gives up on (nested quantifiers) no longer turns a HEAD
+     * to a path that a static GET route takes into a 500 — its expression is not asked.
+     */
+    public function testStaticGetRouteIsFoundBeforeTheExpressionOfADynamicHeadRouteIsAsked(): void
+    {
+        $limit = (string) ini_get('pcre.backtrack_limit');
+        ini_set('pcre.backtrack_limit', '1000');
+
+        try {
+            $path = '/r/' . str_repeat('a', 20) . 'c';
+            $collector = new RouteCollector();
+            $collector->addPattern('bomb', '(?:a+)+b|[a-z]*c');
+            $collector->get($path, fn () => Response::text('static')->withHeader('X-Route', 'static GET'));
+            $collector->head('/r/{x:bomb}', fn ($request, string $x) => Response::text('')->withHeader('X-Route', 'bomb'));
+            $dispatcher = new RouteDispatcher($collector->getData());
+
+            // The bomb really goes off where it is asked
+            $this->assertFalse(@preg_match('#^/r/(?P<x>(?:a+)+b|[a-z]*c)\z#', $path));
+
+            $response = $dispatcher->handle(new ServerRequest('HEAD', $path));
+
+            $this->assertSame(200, $response->getStatusCode());
+            $this->assertSame('static GET', $response->getHeaderLine('X-Route'));
+        } finally {
+            ini_set('pcre.backtrack_limit', $limit);
+        }
+    }
+
     public function testWithoutImplicitHeadEveryMethodKeepsItsOwnRoutes(): void
     {
         $dispatcher = $this->dispatcher(false);
