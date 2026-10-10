@@ -226,13 +226,28 @@ public function show(ServerRequestInterface $request, int $id): ResponseInterfac
 // one fails with "Unknown named parameter".
 public function show(ServerRequestInterface $request, int $id): ResponseInterface
 {
-    $id === $request->getAttribute('id');   // same value
+    $id === $request->getAttribute('id');                  // same value
+    $request->getAttribute('_route_params');               // ['id' => 5]: all of them, cast
 }
 ```
 
 The first parameter of a handler receives the request, whatever it is called. A
 placeholder must not have that name (`/x/{request}` with `fn ($request) => ...`): the
 request ends in a 500, and the `RouterException` behind it names the placeholder.
+
+**A parameter never replaces an attribute the request carries already.** An auth
+middleware for every request sets `user_id` from the token; the route
+`/users/{user_id}/sessions` would put what the client wrote into the path under the same
+name — and a route middleware that compares the two would compare the path with itself.
+Such a request ends in a 500 before the route's middleware runs, and the `error` hook gets
+a `RouterException` that names the placeholder (`{user_id} in /users/{user_id}/sessions`,
+in `getDebugMessage()`). That holds for every attribute the request has when the route is
+found — set by a middleware for every request, or by the code that called `handle()` —
+also for one whose value is `null`. Keep what a middleware learned under a key no
+placeholder can have: a placeholder name is made of ASCII letters, digits and
+underscores, so `Identity::class` (`App\Auth\Identity`) never collides. The parameters
+stay complete in `_route_params` and in `RouteMatch::$params`; `_route_params` itself is
+the router's and is set anew for each route that is found.
 
 ## Route Groups
 
@@ -307,12 +322,22 @@ class OwnershipMiddleware implements MiddlewareInterface
 {
     public function process($request, $handler): ResponseInterface
     {
-        $orderId = $request->getAttribute('id');  // Available!
-        // ... ownership check
+        $orderId = $request->getAttribute('id');              // from the path: what the client wrote
+        $user = $request->getAttribute(Identity::class);      // from your auth middleware: who it is
+
+        if (!$this->orders->belongsTo($orderId, $user)) {
+            return Response::forbidden();
+        }
+
         return $handler->handle($request);
     }
 }
 ```
+
+The identity comes from an attribute your auth middleware set under a class name, never
+from a placeholder: a route parameter cannot take the place of an attribute that is set
+already (see [Accessing Parameters](#accessing-parameters)), and a placeholder cannot be
+named like a class.
 
 ### Middleware for Every Request
 

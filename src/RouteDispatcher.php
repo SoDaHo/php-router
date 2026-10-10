@@ -659,9 +659,21 @@ final class RouteDispatcher implements RequestHandlerInterface
     ): ResponseInterface {
         // 1. Inject parameters into Request (BEFORE Middleware!)
         // Store route params separately for handler invocation. Each parameter is also an
-        // attribute of its own name — and replaces an attribute of that name that a
-        // middleware for every request set before (a placeholder {client_id} beats the
-        // client_id of a token). Name placeholders so that they do not collide.
+        // attribute of its own name — but never in place of one the request carries
+        // already: a middleware for every request may have set user_id from a token, and
+        // the value of a placeholder {user_id} there would be what the client wrote into
+        // the path. Refused before the route's middleware runs (a 500 through handle()).
+        // array_key_exists(): an attribute that is null is there all the same.
+        $attributes = $request->getAttributes();
+        foreach ($params as $key => $value) {
+            if (array_key_exists($key, $attributes)) {
+                throw new RouterException(
+                    'Route parameter has the name of an attribute the request already carries: rename the placeholder or the attribute',
+                    debugMessage: sprintf('{%s} in %s', $key, $route->pattern),
+                );
+            }
+        }
+
         $request = $request->withAttribute('_route_params', $params);
         foreach ($params as $key => $value) {
             $request = $request->withAttribute($key, $value);

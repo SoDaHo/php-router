@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### Security
+- A route parameter never replaces an attribute the request carries already. Each
+  parameter was also set as an attribute of its own name, over whatever was there: an auth
+  middleware for every request set `user_id` from the token, the route
+  `/users/{user_id}/sessions` put the value from the path in its place, and a route
+  middleware that compared the two compared the path with itself. Such a request now ends
+  in a 500 before the route's middleware and handler run, and the `error` hook gets a
+  `RouterException` (`getDebugMessage()`: `{user_id} in /users/{user_id}/sessions`) — also
+  where the attribute is `null`, and also for an attribute the request brought into
+  `handle()`. `_route_params` and `RouteMatch::$params` stay complete; `match()` is not
+  touched. See README, "Accessing Parameters".
+
 ## [2.1.1] - 2026-10-09
 
 ### Security
