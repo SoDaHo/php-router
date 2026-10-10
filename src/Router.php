@@ -498,12 +498,13 @@ final class Router implements RouterInterface
      * of the route lookup as attribute RouteMatch::class.
      *
      * @param string|array<string|object>|object $middleware Middleware class name(s) or instance(s)
+     *
+     * @throws RouterException When a string key is taken already (see Route::addMiddleware())
      */
     public function middleware(string|array|object $middleware): self
     {
-        // array_merge(): numbered entries add up; one under a string key that is there
-        // already replaces it in its place
-        $this->middleware = array_merge($this->middleware, is_array($middleware) ? $middleware : [$middleware]);
+        // Numbered entries add up; a string key that is there already is refused (Route::addMiddleware())
+        $this->middleware = Route::addMiddleware($this->middleware, is_array($middleware) ? $middleware : [$middleware]);
         $this->dispatcher?->setMiddleware($this->middleware);
 
         return $this;

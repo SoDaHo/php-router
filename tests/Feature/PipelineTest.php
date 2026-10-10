@@ -12,6 +12,7 @@ use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Server\MiddlewareInterface;
 use Psr\Http\Server\RequestHandlerInterface;
+use Sodaho\Router\Exception\RouterException;
 use Sodaho\Router\Response;
 use Sodaho\Router\RouteCollector;
 use Sodaho\Router\RouteDispatcher;
@@ -50,11 +51,6 @@ class PipelineTest extends TestCase
                     $r->get('/unresolvable', [NeverBuilt::class, 'show']);
                     $r->get('/returned-500', fn () => Response::serverError('returned, not thrown'));
                     $r->get('/tagged', fn () => Response::success('ok'))->middleware(new PipelineTag('route'));
-                    $r->middlewareGroup(['auth' => new PipelineTag('outer auth'), 'log' => new PipelineTag('log')], function ($r) {
-                        $r->middlewareGroup(['auth' => new PipelineTag('inner auth')], function ($r) {
-                            $r->get('/same-key', fn () => Response::success('ok'));
-                        });
-                    });
                     $r->middlewareGroup(new PipelineTag('outer group'), function ($r) {
                         $r->middlewareGroup(new PipelineTag('inner group'), function ($r) {
                             $r->get('/grouped', fn () => Response::success('ok'))->middleware(new PipelineTag('route'));
@@ -154,29 +150,26 @@ class PipelineTest extends TestCase
     }
 
     /**
-     * Middleware for every request under a string key: a later one under the same key
-     * replaces the earlier one in its place (array_merge(), as in 2.1.0)
+     * Middleware for every request under a string key: up to 2.1.1 a later one under the
+     * same key replaced the earlier one in its place. A key names one middleware; the
+     * second is refused where it is given, and the first one stays.
      */
-    public function testRouterMiddlewareUnderTheSameKeyReplacesTheEarlierOne(): void
+    public function testRouterMiddlewareUnderATakenKeyIsRefused(): void
     {
         $router = $this->router()
-            ->middleware(['auth' => new PipelineTag('first auth'), 'cors' => new PipelineTag('cors')])
-            ->middleware(['auth' => new PipelineTag('second auth')]);
+            ->middleware(['auth' => new PipelineTag('first auth'), 'cors' => new PipelineTag('cors')]);
+
+        try {
+            $router->middleware(['auth' => new PipelineTag('second auth')]);
+            $this->fail('The key was given twice');
+        } catch (RouterException $e) {
+            $this->assertSame('Middleware key is taken already: a string key names one middleware, give the other one a key of its own', $e->getMessage());
+            $this->assertSame('auth', $e->getDebugMessage());
+        }
 
         $router->handle(new ServerRequest('GET', '/ok'));
 
-        $this->assertSame(['second auth in 1', 'cors in 1', 'cors out 200', 'second auth out 200'], PipelineTag::$log);
-    }
-
-    /**
-     * The same for nested groups: the inner group's middleware under a key of the outer
-     * one takes its place
-     */
-    public function testGroupMiddlewareUnderTheSameKeyReplacesTheOuterOne(): void
-    {
-        $this->router()->handle(new ServerRequest('GET', '/same-key'));
-
-        $this->assertSame(['inner auth in 1', 'log in 1', 'log out 200', 'inner auth out 200'], PipelineTag::$log);
+        $this->assertSame(['first auth in 1', 'cors in 1', 'cors out 200', 'first auth out 200'], PipelineTag::$log);
     }
 
     public function testWithoutAnyNothingChanges(): void

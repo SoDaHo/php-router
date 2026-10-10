@@ -76,15 +76,43 @@ final class Route
      *
      * @param string|array<string|object>|object $middleware Middleware class name(s) or instance(s)
      *
-     * @throws RouterException When the route table is built already
+     * @throws RouterException When the route table is built already, or a string key is
+     *                         taken already (see addMiddleware())
      */
     public function middleware(string|array|object $middleware): self
     {
-        // array_merge(): numbered entries add up; one under a string key that is there
-        // already replaces it in its place
-        $middleware = is_array($middleware) ? $middleware : [$middleware];
-        $this->middleware = array_merge($this->middleware, $middleware);
+        $this->middleware = self::addMiddleware($this->middleware, is_array($middleware) ? $middleware : [$middleware]);
         return $this;
+    }
+
+    /**
+     * A middleware list with more middleware behind it — the one rule for a route, nested
+     * groups and the router's own list. Numbered entries add up. A string key names one
+     * middleware: given a second time it would replace the first one in its place (as up
+     * to 2.1.1), and an 'auth' of a route quietly took the place of the 'auth' of its
+     * group — a check that the route's own one relied on no longer ran. Refused instead.
+     *
+     * @internal
+     *
+     * @param array<string|object> $list
+     * @param array<string|object> $more
+     *
+     * @throws RouterException When a string key of $more is in $list already
+     *
+     * @return array<string|object>
+     */
+    public static function addMiddleware(array $list, array $more): array
+    {
+        foreach (array_keys($more) as $key) {
+            if (is_string($key) && array_key_exists($key, $list)) {
+                throw new RouterException(
+                    'Middleware key is taken already: a string key names one middleware, give the other one a key of its own',
+                    debugMessage: $key,
+                );
+            }
+        }
+
+        return array_merge($list, $more);
     }
 
     /**

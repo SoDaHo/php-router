@@ -48,6 +48,13 @@
   request ends in a 500 and the `error` hook gets a `RouterException`. The router used to
   build the class itself with its constructor's defaults instead — a rate limit configured
   with 5 ran with its default.
+- A middleware key given a second time is refused with a `RouterException` where it is
+  written: a route's `->middleware(['auth' => …])` inside a group with an `'auth'`, an
+  inner `middlewareGroup()` with a key of an outer one, a second `Router::middleware()` call
+  with a key of the first. Up to 2.1.1 the second one took the place of the first, in its
+  place — `RequireAdmin` under the route's `'auth'` replaced the group's `RequireLogin`,
+  and a check the route relied on no longer ran. Numbered entries and keys of their own
+  add up as before.
 
 ## [2.1.1] - 2026-10-09
 

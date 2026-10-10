@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Sodaho\Router\Tests\Unit;
 
 use PHPUnit\Framework\TestCase;
+use Sodaho\Router\Exception\RouterException;
 use Sodaho\Router\Route;
 
 class RouteTest extends TestCase
@@ -66,13 +67,24 @@ class RouteTest extends TestCase
         $this->assertSame(['First', 'Second'], $route->middleware);
     }
 
-    public function testMiddlewareUnderTheSameKeyReplacesTheEarlierOne(): void
+    public function testMiddlewareUnderATakenKeyIsRefused(): void
     {
-        // As array_merge() has it: the later one wins, in the place of the earlier one
+        // Up to 2.1.1 the later one took the place of the earlier one (array_merge())
         $route = new Route(['GET'], '/test', 'Handler');
-        $route->middleware(['auth' => 'First', 'log' => 'Log'])->middleware(['auth' => 'Second']);
+        $route->middleware(['auth' => 'First', 'log' => 'Log']);
 
-        $this->assertSame(['auth' => 'Second', 'log' => 'Log'], $route->middleware);
+        try {
+            $route->middleware(['auth' => 'Second']);
+            $this->fail('The key was given twice');
+        } catch (RouterException $e) {
+            $this->assertSame('auth', $e->getDebugMessage());
+        }
+
+        $this->assertSame(['auth' => 'First', 'log' => 'Log'], $route->middleware);
+
+        // Numbered entries add up, keys of their own as well
+        $route->middleware(['Third', 'cors' => 'Cors']);
+        $this->assertSame(['auth' => 'First', 'log' => 'Log', 0 => 'Third', 'cors' => 'Cors'], $route->middleware);
     }
 
     public function testFluentName(): void

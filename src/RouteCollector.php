@@ -407,10 +407,14 @@ final class RouteCollector
      * Group routes with common middleware — and, if given, common attributes: the same as
      * an attributeGroup() around the middlewareGroup(), with the same rules (nested groups
      * add up, the inner group wins per key, Route::attribute() wins over every group).
+     * Middleware of nested groups adds up; a string key of an outer group is not given a
+     * second time (see Route::addMiddleware()).
      *
      * @param string|array<string|object>|object $middleware Middleware class name(s) or instance(s)
      * @param callable $callback Receives RouteCollector instance
      * @param array<string, mixed> $attributes Attribute name => value
+     *
+     * @throws RouterException When a string key of the middleware is taken by an outer group
      */
     public function middlewareGroup(string|array|object $middleware, callable $callback, array $attributes = []): void
     {
@@ -420,12 +424,11 @@ final class RouteCollector
             return;
         }
 
-        // array_merge(): nested groups add up; an inner one under a string key of an outer
-        // one replaces it in its place
+        // Nested groups add up; a string key of an outer group is refused (Route::addMiddleware())
         $middleware = is_array($middleware) ? $middleware : [$middleware];
 
         $previousMiddleware = $this->currentMiddleware;
-        $this->currentMiddleware = array_merge($this->currentMiddleware, $middleware);
+        $this->currentMiddleware = Route::addMiddleware($this->currentMiddleware, $middleware);
 
         try {
             $callback($this);

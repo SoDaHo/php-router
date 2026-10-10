@@ -331,6 +331,15 @@ $r->middlewareGroup([AuthMiddleware::class], function ($r) {
 }, ['format' => 'envelope']);
 ```
 
+Lists add up: the router's own list (`$router->middleware()`), nested groups and a route's
+`->middleware()`, each call behind the one before. An entry may have a string key
+(`['auth' => AuthMiddleware::class]`); a key names one middleware, and giving it a second
+time — a route's `'auth'` inside a group with an `'auth'`, an inner group, a second
+`$router->middleware()` call — is refused with a `RouterException` where it is written.
+(Up to 2.1.1 the second one took the place of the first, and a check the route relied on
+no longer ran.) The router's own list and a route's list are kept apart: a key in both is
+two middleware, the router's runs first.
+
 **Route parameters are available in middleware:**
 ```php
 class OwnershipMiddleware implements MiddlewareInterface
