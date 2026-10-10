@@ -84,7 +84,9 @@ class EmitLongBodyTest extends TestCase
 
     public function testNoLengthIsHeldAgainstA304(): void
     {
-        $this->assertSame(['abc', null], $this->emit(new Psr7Response(304, ['Content-Length' => '1'], 'abc')));
+        // The length of the representation it stands for; a 304 has no body to hold to it
+        // (one that has is refused, see EmitBodilessTest)
+        $this->assertSame(['', null], $this->emit(new Psr7Response(304, ['Content-Length' => '1'])));
     }
 
     public function testRunReportsABodyLongerThanItsContentLength(): void

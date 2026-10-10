@@ -1115,11 +1115,13 @@ final class Router implements RouterInterface
      *                         character other than a tab, the protocol version is no
      *                         version, a header line is none, the response carries a
      *                         Transfer-Encoding, a Content-Length that is not one value of
-     *                         digits, or one above 0 for a body that is empty — before
-     *                         anything is sent; and after the headers, when the body gives
-     *                         no byte for 'emitIdleTimeout' seconds before its end, ends
-     *                         short of its Content-Length, or goes beyond it (what goes
-     *                         beyond is not sent)
+     *                         digits, or one above 0 for a body that is empty, or a 1xx,
+     *                         204, 205 or 304 has a Content-Length its status rules out or
+     *                         a body that is not empty — before anything is sent (the body
+     *                         of such a status is never read); and after the headers, when
+     *                         the body gives no byte for 'emitIdleTimeout' seconds before
+     *                         its end, ends short of its Content-Length, or goes beyond it
+     *                         (what goes beyond is not sent)
      */
     public function emit(ResponseInterface $response, bool $withBody = true): void
     {
@@ -1176,7 +1178,9 @@ final class Router implements RouterInterface
      *                         header has a name that is no token or a value with a control
      *                         character other than a tab, or the framing fields say nothing
      *                         one can rely on (see framing()), or a Content-Length above 0
-     *                         stands in front of a body that is empty
+     *                         stands in front of a body that is empty, or a 1xx, 204, 205
+     *                         or 304 has a Content-Length its status rules out or a body
+     *                         that is not empty (or of unknown size)
      *
      * @return array{status: string, code: int, headers: array<int|string, array<string>>, body: StreamInterface, length: ?int}
      */
@@ -1250,13 +1254,44 @@ final class Router implements RouterInterface
 
         $length = self::framing($headers);
         $code = $response->getStatusCode();
+        $bodiless = self::bodiless($code);
+
+        // A response without content says so in its framing as well (RFC 9110, 8.6): a 1xx
+        // or 204 carries no Content-Length at all, a 205 none but 0 (it has no content, and
+        // a client that reads to the end of the connection would wait for one). A 304 may
+        // carry the length of the representation it stands for.
+        if ($length !== null && ($code < 200 || $code === 204)) {
+            throw new RouterException(
+                'Response with status 1xx or 204 must not carry a Content-Length',
+                debugMessage: sprintf('status %d, Content-Length %d', $code, $length),
+            );
+        }
+
+        if ($length !== null && $length !== 0 && $code === 205) {
+            throw new RouterException(
+                'Response with status 205 has no content: its Content-Length can only be 0',
+                debugMessage: sprintf('Content-Length %d', $length),
+            );
+        }
+
+        // … and in its body: what a 1xx, 204, 205 or 304 sent after its headers, a kept-alive
+        // client read as the start of the next response. Refused, not dropped — a body there
+        // is a mistake of the application. Only its size is asked, the body is never read:
+        // a size of 0 goes out without a body, one that is not known counts as not empty.
+        $size = $withBody ? $body->getSize() : null;
+        if ($withBody && $bodiless && $size !== 0) {
+            throw new RouterException(
+                'Response with status 1xx, 204, 205 or 304 must not have a body: its body is not empty, or of a size it does not know',
+                debugMessage: sprintf('status %d, body size %s', $code, $size ?? 'unknown'),
+            );
+        }
 
         // A Content-Length above 0 in front of a body that is empty promises bytes that
         // never come — a kept-alive client waits for them, or reads the next response as
         // this one's body. Known before anything is sent where the body knows its size (a
         // body of unknown size is held to it while it is sent, see transmit()). The answer to
         // HEAD keeps the GET's Content-Length: it goes out with $withBody false.
-        if ($withBody && $length !== null && $length > 0 && !self::bodiless($code) && $body->getSize() === 0) {
+        if ($withBody && $length !== null && $length > 0 && !$bodiless && $size === 0) {
             throw new RouterException(
                 'Response body is empty, but its Content-Length is not (an answer to HEAD is emitted with withBody false)',
                 debugMessage: sprintf('Content-Length %d', $length),
@@ -1265,8 +1300,9 @@ final class Router implements RouterInterface
 
         // For string bodies the emitted bytes are identical to the previous `echo
         // $response->getBody()`: Nyholm's __toString() rewound the stream and returned
-        // everything, which is exactly what transmit() does piecewise.
-        if ($withBody && $body->isSeekable()) {
+        // everything, which is exactly what transmit() does piecewise. A body that does not
+        // go out is not touched at all.
+        if ($withBody && !$bodiless && $body->isSeekable()) {
             $body->rewind();
         }
 
@@ -1325,12 +1361,13 @@ final class Router implements RouterInterface
     }
 
     /**
-     * Whether a response of this status has no content, whatever its headers say (RFC 9110,
-     * 6.4.1): a 1xx, 204 or 304.
+     * Whether a response of this status has no content, whatever its headers say: a 1xx,
+     * 204 or 304 (RFC 9110, 6.4.1), and a 205, for which a server must not generate any
+     * (15.3.6).
      */
     private static function bodiless(int $code): bool
     {
-        return $code < 200 || $code === 204 || $code === 304;
+        return $code < 200 || $code === 204 || $code === 205 || $code === 304;
     }
 
     /**
@@ -1365,8 +1402,9 @@ final class Router implements RouterInterface
         header($prepared['status']);
 
         // HEAD: PHP discards the output anyway, so do not read the body at all — for a
-        // Response::file() that would be the whole file.
-        if (!$withBody) {
+        // Response::file() that would be the whole file. Nor that of a 1xx, 204, 205 or 304:
+        // prepare() made sure it is empty, and it is not touched.
+        if (!$withBody || self::bodiless($prepared['code'])) {
             return;
         }
 
@@ -1383,9 +1421,6 @@ final class Router implements RouterInterface
         // then said: the client got less than the response promised, which must not look
         // like an answer that went out whole.
         $expected = $prepared['length'];
-        // A 1xx, 204 or 304 has no body whatever its Content-Length says (RFC 9110, 8.6): no
-        // length is held against what such a response sends
-        $bodiless = self::bodiless($prepared['code']);
         $sent = 0;
         $pause = 0;
         // When the wait for the next byte ends, in seconds of the monotonic clock: set by the
@@ -1422,7 +1457,7 @@ final class Router implements RouterInterface
 
             // Never more than the Content-Length: on a kept-alive connection the client reads
             // what goes beyond it as the start of the next response. Sent up to it, then said
-            if ($expected !== null && !$bodiless && strlen($chunk) > $expected - $sent) {
+            if ($expected !== null && strlen($chunk) > $expected - $sent) {
                 echo substr($chunk, 0, $expected - $sent);
 
                 throw new RouterException(
@@ -1438,7 +1473,7 @@ final class Router implements RouterInterface
         // So must a body that ended short of its Content-Length — also one that sent no byte
         // at all: a body of unknown size that turns out empty is no answer without a body
         // (an answer to HEAD is emitted with $withBody false, see prepare())
-        if ($expected !== null && $sent < $expected && !$bodiless) {
+        if ($expected !== null && $sent < $expected) {
             throw new RouterException(
                 'Response body ended before its Content-Length',
                 debugMessage: sprintf('%d of %d bytes sent', $sent, $expected),

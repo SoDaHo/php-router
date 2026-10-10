@@ -6,7 +6,6 @@ namespace Sodaho\Router\Tests\Integration;
 
 use Nyholm\Psr7\Response as Psr7Response;
 use Nyholm\Psr7\ServerRequest;
-use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 use PHPUnit\Framework\TestCase;
 use Psr\Http\Message\ResponseInterface;
@@ -18,9 +17,10 @@ use Sodaho\Router\Router;
  * A body that has not ended may give '' while its next bytes are on their way (PSR-7).
  * 2.1.1 stopped silently at the third empty read in a row, and the first 2.2.0 candidate
  * threw there — both cut 'A', '', '', '', 'B' short. emit() waits now, with a growing pause,
- * and gives up only after 'emitIdleTimeout' seconds without a byte. The body of a 1xx, 204
- * or 304 is no short body whatever its Content-Length says; a body that sends no byte is
- * one (see EmitFramingTest), and the answer to HEAD goes out with withBody false.
+ * and gives up only after 'emitIdleTimeout' seconds without a byte. A 304 is held to no
+ * Content-Length (a 1xx, 204 or 205 must not have one, see EmitBodilessTest); a body that
+ * sends no byte is a short one (see EmitFramingTest), and the answer to HEAD goes out with
+ * withBody false.
  */
 #[RunTestsInSeparateProcesses]
 class EmitIdleTimeoutTest extends TestCase
@@ -170,22 +170,11 @@ class EmitIdleTimeoutTest extends TestCase
         $this->assertSame('0 bytes sent', $reported[0]->getDebugMessage());
     }
 
-    /**
-     * @return array<string, array{int, string}>
-     */
-    public static function responsesThatAreNoShortBody(): array
+    public function testA304IsNoShortBody(): void
     {
-        return [
-            '304 with a body object' => [304, 'abc'],
-            '204 with a body object' => [204, 'abc'],
-            '1xx with a body object' => [103, 'abc'],
-        ];
-    }
-
-    #[DataProvider('responsesThatAreNoShortBody')]
-    public function testResponseWithoutABodyIsNoShortBody(int $status, string $body): void
-    {
-        $this->assertSame($body, $this->emitted(new Psr7Response($status, ['Content-Length' => '10'], $body)));
+        // Its Content-Length is that of the representation it stands for: no body is sent,
+        // and none is missing
+        $this->assertSame('', $this->emitted(new Psr7Response(304, ['Content-Length' => '10'])));
     }
 
     public function testAnswerToHeadGoesOutThroughEmit(): void

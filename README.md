@@ -937,8 +937,11 @@ the status a 302). So are the fields that say where the body ends, where they sa
 one can rely on: a `Content-Length` that is not exactly one value of digits (`abc`, `3, 3`,
 two of them) and any `Transfer-Encoding` — the emitter applies no transfer coding, the body
 goes out as it is (the web server frames it). A `Content-Length` above 0 in front of a body
-whose size is 0 is refused too. `run()` answers 500 then (the `error`
-hook gets the `RouterException`), `emit()` throws it. A read that gives `''` before the end
+whose size is 0 is refused too. A 1xx, 204, 205 or 304 has no content (RFC 9110): its body
+is never read — one whose size is 0 goes out without it, any other one (also one of unknown
+size) is refused, and so is a `Content-Length` on a 1xx or 204 (also `0`) or one other than
+`0` on a 205; a 304 keeps the length of its representation. `run()` answers 500 then (the
+`error` hook gets the `RouterException`), `emit()` throws it. A read that gives `''` before the end
 of the body is waited past (PSR-7 allows it while the next bytes are on their way), with a
 pause that grows to 50 ms and never reaches past the deadline; a body that gives no byte
 for `emitIdleTimeout` seconds (30) — counted from the first read that gave nothing; a byte
@@ -949,9 +952,8 @@ status that went out), `emit()` throws it — the client got less than the respo
 A body longer than its `Content-Length` is sent up to it, never beyond (a kept-alive client
 would read the rest as the next response), and ends the same way. The answer to `HEAD`
 keeps the `Content-Length` of the `GET` without a body: `run()` sends it without reading the
-body, `emit()` with `withBody: false` as above. The body of a 1xx, 204 or 304 is no short
-one. If output has already started, nothing can be sent any more: the `error` hook is
-called with `type: 'emit'`.
+body, `emit()` with `withBody: false` as above. If output has already started, nothing can
+be sent any more: the `error` hook is called with `type: 'emit'`.
 
 ## Dependency Injection
 
@@ -1045,7 +1047,7 @@ where the log is yours alone; show neither to a client.
 
 | Exception | When |
 |-----------|------|
-| `RouterException` | Everything the router refuses: a route, pattern, fragment of `addPattern()`, middleware key or redirect target where it is written; a config value; a change to a route once the table is built; a placeholder named like an attribute of the request, a container entry that is no middleware, a redirect rendering that would change scheme or host or make a dot segment, a status line or header line that is none, a `Transfer-Encoding` or a `Content-Length` that is not one value of digits, a body that gives no byte for `emitIdleTimeout` seconds, ends short of its `Content-Length` or goes beyond it — while a request is handled each of these goes to the `error` hook, as a 500 where nothing was sent yet |
+| `RouterException` | Everything the router refuses: a route, pattern, fragment of `addPattern()`, middleware key or redirect target where it is written; a config value; a change to a route once the table is built; a placeholder named like an attribute of the request, a container entry that is no middleware, a redirect rendering that would change scheme or host or make a dot segment, a status line or header line that is none, a `Transfer-Encoding` or a `Content-Length` that is not one value of digits, a body or `Content-Length` a 1xx, 204, 205 or 304 must not have, a body that gives no byte for `emitIdleTimeout` seconds, ends short of its `Content-Length` or goes beyond it — while a request is handled each of these goes to the `error` hook, as a 500 where nothing was sent yet |
 | `NotFoundException` | Never thrown by the router (it answers 404 itself); for your own code |
 | `MethodNotAllowedException` | Never thrown by the router (it answers 405 itself); for your own code |
 | `RouteNotFoundException` | Named route doesn't exist (URL generation); `getDebugMessage()` lists every route name |

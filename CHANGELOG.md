@@ -79,6 +79,13 @@ from SemVer by the owner's decision of 2026-10-10. See "Upgrading from
   bytes: a kept-alive client or a proxy could read the rest as the next response. A
   `Content-Length` above 0 in front of a body that is empty is refused as well (see
   "Changed").
+- A 1xx, 204, 205 or 304 goes out without content. The emitter read and sent their bodies
+  all the same (a 304 with `abc` sent `abc`) — bytes a kept-alive client reads as the
+  start of the next response. Such a body is not read now, not even rewound: one whose
+  `getSize()` is 0 goes out without it, any other one — also one that does not know its
+  size — is refused before anything is sent (`run()` answers 500). So is a
+  `Content-Length` the status rules out (RFC 9110, 8.6): any on a 1xx or 204 (also `0`),
+  one other than `0` on a 205. A 304 keeps the length of the representation it stands for.
 
 ### Changed
 - URL encoding can no longer be turned off. `'urlEncoding' => false` (or `0`, `'off'`,
@@ -198,10 +205,10 @@ from SemVer by the owner's decision of 2026-10-10. See "Upgrading from
   one too — refused before anything is sent where the body says its size is 0 (`run()`
   answers 500 then). So the answer to `HEAD`, which keeps the `Content-Length` of the `GET`,
   goes out through `emit($response, withBody: false)` — `emit()` cannot tell it from a body
-  that is missing; `run()` does this itself. The body of a 1xx, 204 or 304 is no short body (RFC 9110, 8.6).
-  A body longer than its `Content-Length` went out whole — a kept-alive client read the
-  rest as the start of the next response; it is sent up to the length now, never beyond,
-  and ends the same way.
+  that is missing; `run()` does this itself. A 1xx, 204, 205 or 304 sends no body at all
+  (see "Security"). A body longer than its `Content-Length` went out whole — a kept-alive
+  client read the rest as the start of the next response; it is sent up to the length now,
+  never beyond, and ends the same way.
 
 - `basePath` and `routesFile` in the config take a string (or `null` for their default;
   `basePath` also `false`, what `getenv()` gives without the variable, as `baseUrl` does);
@@ -376,6 +383,12 @@ look at:
   response with a `Transfer-Encoding` of its own, or a `Content-Length` that is not exactly
   one value of digits: drop the `Transfer-Encoding` (the web server applies one where it
   needs one) and set one `Content-Length` or none.
+- **Responses without content:** a 1xx, 204, 205 or 304 whose body is not empty (or does
+  not know its size) is refused before anything is sent — `Response::noContent()` and the
+  router's own 304s have none; a body built for such a status is a mistake to drop. A 1xx
+  or 204 must not carry a `Content-Length` at all, **also not `Content-Length: 0`**, which
+  some middleware add to every response (let them skip these statuses); a 205 may carry
+  `0` only. A 304 keeps the length of its representation.
 - **PHPStan:** `Route::$middleware` is `array<string|object>`; the three route properties
   have `set` hooks (no writes into them in place).
 
