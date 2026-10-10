@@ -99,6 +99,7 @@ class AppFolderSwapTest extends TestCase
             'file' => $this->root . '/file.txt',
             'secret' => $this->base . '/outside/secret.txt',
             'stop' => $this->base . '/stop',
+            'ready' => $this->base . '/ready',
         ]);
         $process = proc_open(
             [PHP_BINARY, '-r', self::SWAPPER, $swapper],
@@ -109,11 +110,14 @@ class AppFolderSwapTest extends TestCase
         $this->assertIsResource($process);
 
         try {
-            // The swapper is a process of its own: wait until it has put the link in place
-            // once (a slow machine starts it late), so that the requests run while it swaps
+            // The swapper is a process of its own: wait for its signal (a slow machine starts
+            // it late), so that the requests run while it swaps — without it nothing is raced
             $deadline = microtime(true) + 20;
-            while (!file_exists($this->root . '/file.txt.inside') && !is_link($this->root . '/file.txt') && microtime(true) < $deadline) {
+            while (!file_exists($this->base . '/ready') && microtime(true) < $deadline) {
                 usleep(1000);
+            }
+            if (!file_exists($this->base . '/ready')) {
+                $this->markTestSkipped('The swapper did not start within 20 seconds');
             }
 
             $app = new AppFolder('/', $this->root);
@@ -132,6 +136,12 @@ class AppFolderSwapTest extends TestCase
 
         $this->assertSame(0, $seen['SECRET'], 'what lies outside the folder went out: ' . json_encode($seen));
         $this->assertGreaterThan(0, $seen['INSIDE'], 'the file itself never went out: ' . json_encode($seen));
+
+        // A green run says something only where requests met the link in place: each of
+        // those was refused ('none'). Without one, no race was measured.
+        if ($seen['none'] === 0) {
+            $this->markTestSkipped('No request met the link in place: no race was measured');
+        }
     }
 
     /** Swaps file.txt for a link to the secret and back (rename() is atomic) until told to stop */
@@ -140,6 +150,7 @@ class AppFolderSwapTest extends TestCase
         $file = $paths['file'];
         $inside = $file . '.inside';
         $link = $file . '.link';
+        touch($paths['ready']);
         for ($i = 0; !file_exists($paths['stop']) && $i < 2000000; $i++) {
             @file_put_contents($inside, 'INSIDE');
             @symlink($paths['secret'], $link);
@@ -148,5 +159,6 @@ class AppFolderSwapTest extends TestCase
         }
         @unlink($inside);
         @unlink($link);
+        @unlink($paths['ready']);
         PHP;
 }

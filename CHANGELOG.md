@@ -199,6 +199,9 @@ application.
   value a test decodes from a response body — about 450 places, more than this release
   should carry. Every ignore in the tests names its identifier and its reason; the ones
   without a reason that matched nothing on this level are gone.
+- The two race tests (web app folder, `Response::file()`) start a second process that swaps
+  the file; they wait for its signal (or the first swap), give it no pipe it could fill and
+  block on, and are skipped — not passed — where it did not start or no request met a swap.
 - New public methods marked `@internal` (not part of the contract, used inside the
   library): `Route::freeze()`, `Route::addMiddleware()`, `RouteCollector::assertNamesOnce()`,
   `FileStream::fromHandle()`, `Response::fileFromHandle()`, `AppFolder::openWithin()`.
