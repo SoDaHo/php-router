@@ -215,11 +215,34 @@ class StreamedDownloadTest extends TestCase
         $this->assertSame('hello world', $this->serve('/consumed'));
     }
 
+    /**
+     * @return array{0: string, 1: list<\Throwable>} What went out, and what the error hook got
+     */
+    private function serveReporting(string $uri): array
+    {
+        $_SERVER['REQUEST_METHOD'] = 'GET';
+        $_SERVER['REQUEST_URI'] = $uri;
+        $_SERVER['SERVER_PROTOCOL'] = 'HTTP/1.1';
+
+        $reported = [];
+        $router = Router::create()->loadRoutes($this->routesFile);
+        $router->on('error', function (array $data) use (&$reported): void {
+            $reported[] = $data['exception'];
+        });
+
+        ob_start();
+        $router->run();
+
+        return [(string) ob_get_clean(), $reported];
+    }
+
     #[RunInSeparateProcess]
-    public function testStalledBodyTerminatesInsteadOfSpinningForever(): void
+    public function testStalledBodyIsGivenUpOnAfterThreeEmptyReadsAndReported(): void
     {
         // A stream that never reports eof and never returns bytes must not pin the worker
-        // until max_execution_time — the empty-read limit is the brake.
+        // until max_execution_time — the empty-read limit is the brake. And the client got
+        // less than the response promised: that is reported, not passed off as a whole answer.
+        $GLOBALS['stalled_reads'] = 0;
         $this->createRoutes(
             <<<'PHP'
                 <?php
@@ -245,9 +268,8 @@ class StreamedDownloadTest extends TestCase
                             // Self-limiting: with the brake in place emit() gives up long
                             // before this. Without it, the test FAILS loudly instead of
                             // hanging the suite until someone kills CI.
-                            private int $reads = 0;
                             public function read(int $length): string {
-                                if (++$this->reads > 100) {
+                                if (++$GLOBALS['stalled_reads'] > 100) {
                                     throw new RuntimeException('emit() kept reading a stalled body');
                                 }
                                 return '';
@@ -261,7 +283,61 @@ class StreamedDownloadTest extends TestCase
                 PHP
         );
 
-        $this->assertSame('', $this->serve('/stall'));
+        [$sent, $reported] = $this->serveReporting('/stall');
+
+        $this->assertSame('', $sent);
+        $this->assertSame(3, $GLOBALS['stalled_reads'], 'three empty reads, then the brake');
+        $this->assertCount(1, $reported);
+        $this->assertInstanceOf(RouterException::class, $reported[0]);
+        $this->assertSame('Response body stalled before its end: three reads in a row gave nothing', $reported[0]->getMessage());
+        $this->assertSame('0 bytes sent', $reported[0]->getDebugMessage());
+    }
+
+    #[RunInSeparateProcess]
+    public function testBodyThatEndsShortOfItsContentLengthIsReported(): void
+    {
+        $this->createRoutes(
+            <<<'PHP'
+                <?php
+                use Sodaho\Router\RouteCollector;
+                use Sodaho\Router\Response;
+
+                return function (RouteCollector $r) {
+                    $r->get('/short', fn () => Response::text('abc')->withHeader('Content-Length', '10'));
+                    $r->get('/whole', fn () => Response::text('abc')->withHeader('Content-Length', '3'));
+                };
+                PHP
+        );
+
+        [$sent, $reported] = $this->serveReporting('/short');
+
+        $this->assertSame('abc', $sent);
+        $this->assertCount(1, $reported);
+        $this->assertInstanceOf(RouterException::class, $reported[0]);
+        $this->assertSame('Response body ended before its Content-Length', $reported[0]->getMessage());
+        $this->assertSame('3 of 10 bytes sent', $reported[0]->getDebugMessage());
+
+        [$sent, $reported] = $this->serveReporting('/whole');
+        $this->assertSame('abc', $sent);
+        $this->assertSame([], $reported);
+    }
+
+    #[RunInSeparateProcess]
+    public function testEmitThrowsForABodyThatEndsShortOfItsContentLength(): void
+    {
+        $level = ob_get_level();
+        ob_start();
+
+        try {
+            Router::create()->emit(Response::text('abc')->withHeader('Content-Length', '10'));
+            $this->fail('emit() passed a short body off as a whole one');
+        } catch (RouterException $e) {
+            $this->assertSame('Response body ended before its Content-Length', $e->getMessage());
+        } finally {
+            while (ob_get_level() > $level) {
+                ob_end_clean();
+            }
+        }
     }
 
     #[RunInSeparateProcess]

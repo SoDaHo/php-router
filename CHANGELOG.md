@@ -148,6 +148,13 @@ application.
   did not mention it): string keys are kept as the application gave them. Code that hands
   it on as a `list` under PHPStan sees the wider type.
 
+- `run()` and `emit()` say so when a response body does not arrive whole: a body that gives
+  nothing three reads in a row before its end (the brake against a stream that never
+  reports its end) and one that ends short of its `Content-Length` end in a
+  `RouterException` — `run()` reports it to the `error` hook with the status that went out,
+  `emit()` throws it. Up to 2.1.1 the emitter stopped without a word, and the client got
+  less than the response promised.
+
 ### Added
 - `Dispatcher::staticRoute()`: the static route of a method for a path, without a pass over
   the dynamic routes.
@@ -231,6 +238,8 @@ wrong thing quietly. What to look at:
 - **`baseUrl` / `APP_URL`** has to be `http(s)://host[:port][/path]`, the host written as a
   browser reads it, without user information or backslash.
 - **`RfcResponder`**: `type`, `title` and `status` in the details are dropped.
+- **`emit()`** can throw after the headers went out: when the body stalls or ends short of
+  its `Content-Length` (`run()` reports it instead).
 - **A response's protocol version** has to be a version (`1.1`, `2`), and every header line
   a token name and a value without control characters other than a tab — a response that
   breaks this gets the router's 500 from `run()`, an exception from `emit()`.

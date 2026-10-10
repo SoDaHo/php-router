@@ -909,7 +909,10 @@ name that is no token (RFC 9110) and a header value with a control character oth
 tab are refused — PHP would drop such a status line and send its own 200, and refuse such a
 header line only after the lines in front of it went out (a `Location` among them makes
 the status a 302). `run()` answers 500 then (the `error`
-hook gets the `RouterException`), `emit()` throws it. If output has already started,
+hook gets the `RouterException`), `emit()` throws it. A body that gives nothing three
+reads in a row before its end, or ends short of its `Content-Length`, is given up on with a
+`RouterException` once the headers are out: `run()` reports it to the `error` hook (with the
+status that went out), `emit()` throws it — the client got less than the response promised. If output has already started,
 nothing can be sent any more: the `error` hook is called with `type: 'emit'`.
 
 ## Dependency Injection

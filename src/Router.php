@@ -1064,7 +1064,9 @@ final class Router implements RouterInterface
      *
      * @throws RouterException If the body cannot be read, the reason phrase has a control
      *                         character other than a tab, the protocol version is no
-     *                         version, or a header line is none — before anything is sent
+     *                         version, or a header line is none — before anything is sent;
+     *                         and after the headers, when the body stalls before its end
+     *                         or ends short of its Content-Length
      */
     public function emit(ResponseInterface $response, bool $withBody = true): void
     {
@@ -1244,21 +1246,53 @@ final class Router implements RouterInterface
 
         // An empty read does not mean "done" — pump/append streams return '' transiently
         // while eof() is still false, and breaking on the first one would truncate the body
-        // (the old getContents() looped until eof). Bail out only after several in a row,
-        // which still guards against a stream that never reports eof at all.
+        // (the old getContents() looped until eof). Give up only after several in a row,
+        // which still guards against a stream that never reports eof at all — and say so:
+        // the client got less than the response promised, which must not look like an
+        // answer that went out whole. So must a body that ends short of its Content-Length.
+        $expected = self::contentLength($prepared['headers']);
+        $sent = 0;
         $emptyReads = 0;
         while (!$body->eof()) {
             $chunk = $body->read($this->config['emitChunkSize']);
             if ($chunk === '') {
                 if (++$emptyReads >= self::EMIT_EMPTY_READ_LIMIT) {
-                    break;
+                    throw new RouterException(
+                        'Response body stalled before its end: three reads in a row gave nothing',
+                        debugMessage: sprintf('%d bytes sent', $sent),
+                    );
                 }
 
                 continue;
             }
 
             $emptyReads = 0;
+            $sent += strlen($chunk);
             echo $chunk;
         }
+
+        if ($expected !== null && $sent < $expected) {
+            throw new RouterException(
+                'Response body ended before its Content-Length',
+                debugMessage: sprintf('%d of %d bytes sent', $sent, $expected),
+            );
+        }
+    }
+
+    /**
+     * The Content-Length a response names — one value of digits — or null for none (or one
+     * that is no length: the body decides then).
+     *
+     * @param array<int|string, array<string>> $headers
+     */
+    private static function contentLength(array $headers): ?int
+    {
+        foreach ($headers as $name => $values) {
+            if (strtolower((string) $name) === 'content-length' && count($values) === 1 && ctype_digit($values[0])) {
+                return (int) $values[0];
+            }
+        }
+
+        return null;
     }
 }
