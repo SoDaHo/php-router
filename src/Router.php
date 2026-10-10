@@ -120,7 +120,7 @@ final class Router implements RouterInterface
      * Only what $config says counts: the constructor does not look at the environment
      * (fromEnv() does). A key that is missing or null takes its default.
      *
-     * @param array{debug?: bool|int|string|null, basePath?: string|null, baseUrl?: string|false|0|null, trailingSlash?: string|null, routesFile?: string|null, urlEncoding?: bool|int|string|null, implicitHead?: bool|int|string|null, emitChunkSize?: int|string|null, emitIdleTimeout?: int|float|string|null} $config
+     * @param array{debug?: bool|int|string|null, basePath?: string|false|null, baseUrl?: string|false|0|null, trailingSlash?: string|null, routesFile?: string|null, urlEncoding?: bool|int|string|null, implicitHead?: bool|int|string|null, emitChunkSize?: int|string|null, emitIdleTimeout?: int|float|string|null} $config
      *
      * @throws RouterException If $config has a key the router does not know, if 'debug',
      *                         'urlEncoding' or 'implicitHead' is neither a boolean nor
@@ -128,8 +128,9 @@ final class Router implements RouterInterface
      *                         default), if 'urlEncoding' is off, if 'emitChunkSize' is not
      *                         an integer (or a string of digits) from 1024 to 16777216, if
      *                         'emitIdleTimeout' is no number of seconds above 0 and up to
-     *                         3600, if 'baseUrl' is neither a string nor empty, or if
-     *                         'basePath' or 'routesFile' is given and no string
+     *                         3600, if 'baseUrl' is neither a string nor empty, if
+     *                         'basePath' is neither a string nor null or false, or if
+     *                         'routesFile' is given and no string
      */
     public function __construct(array $config = [])
     {
@@ -147,7 +148,7 @@ final class Router implements RouterInterface
 
         $this->config = [
             'debug' => self::flag('debug', $config['debug'] ?? false),
-            'basePath' => self::normalizeBasePath(self::text('basePath', $config['basePath'] ?? '')),
+            'basePath' => self::normalizeBasePath(self::basePath($config['basePath'] ?? null)),
             'baseUrl' => self::baseUrl($config['baseUrl'] ?? null),
             'trailingSlash' => self::trailingSlash($config['trailingSlash'] ?? 'strict'),
             'routesFile' => isset($config['routesFile']) ? self::text('routesFile', $config['routesFile']) : null,
@@ -255,6 +256,18 @@ final class Router implements RouterInterface
         UrlGenerator::checkBaseUrl($value, $what);
 
         return $value;
+    }
+
+    /**
+     * The base path from the config: null and, as for 'baseUrl', false mean none — false is
+     * what 'basePath' => getenv('ROUTER_BASE_PATH') gives without the variable. Anything else
+     * has to be a string (see text()).
+     *
+     * @throws RouterException If the value is neither of these
+     */
+    private static function basePath(mixed $value): string
+    {
+        return $value === null || $value === false ? '' : self::text('basePath', $value);
     }
 
     /**
@@ -395,7 +408,7 @@ final class Router implements RouterInterface
      * Factory method for fluent creation. Like the constructor it does not look at the
      * environment.
      *
-     * @param array{debug?: bool|int|string|null, basePath?: string|null, baseUrl?: string|false|0|null, trailingSlash?: string|null, routesFile?: string|null, urlEncoding?: bool|int|string|null, implicitHead?: bool|int|string|null, emitChunkSize?: int|string|null, emitIdleTimeout?: int|float|string|null} $config
+     * @param array{debug?: bool|int|string|null, basePath?: string|false|null, baseUrl?: string|false|0|null, trailingSlash?: string|null, routesFile?: string|null, urlEncoding?: bool|int|string|null, implicitHead?: bool|int|string|null, emitChunkSize?: int|string|null, emitIdleTimeout?: int|float|string|null} $config
      */
     public static function create(array $config = []): self
     {
@@ -410,7 +423,7 @@ final class Router implements RouterInterface
      * ROUTER_URL_ENCODING (urlEncoding). A key that $config contains wins over its variable —
      * also with null, false or an empty value.
      *
-     * @param array{debug?: bool|int|string|null, basePath?: string|null, baseUrl?: string|false|0|null, trailingSlash?: string|null, routesFile?: string|null, urlEncoding?: bool|int|string|null, implicitHead?: bool|int|string|null, emitChunkSize?: int|string|null, emitIdleTimeout?: int|float|string|null} $config Values that take precedence
+     * @param array{debug?: bool|int|string|null, basePath?: string|false|null, baseUrl?: string|false|0|null, trailingSlash?: string|null, routesFile?: string|null, urlEncoding?: bool|int|string|null, implicitHead?: bool|int|string|null, emitChunkSize?: int|string|null, emitIdleTimeout?: int|float|string|null} $config Values that take precedence
      *
      * @throws RouterException As the constructor; and if APP_DEBUG or ROUTER_URL_ENCODING is
      *                         read and its value is not boolean-like (APP_DEBUG=maybe), or
@@ -469,7 +482,7 @@ final class Router implements RouterInterface
      * Quick boot: create, load routes, and run. Reads no environment either — for that:
      * Router::fromEnv()->loadRoutes($routesFile)->run().
      *
-     * @param array{debug?: bool|int|string|null, basePath?: string|null, baseUrl?: string|false|0|null, trailingSlash?: string|null, routesFile?: string|null, urlEncoding?: bool|int|string|null, implicitHead?: bool|int|string|null, emitChunkSize?: int|string|null, emitIdleTimeout?: int|float|string|null} $config
+     * @param array{debug?: bool|int|string|null, basePath?: string|false|null, baseUrl?: string|false|0|null, trailingSlash?: string|null, routesFile?: string|null, urlEncoding?: bool|int|string|null, implicitHead?: bool|int|string|null, emitChunkSize?: int|string|null, emitIdleTimeout?: int|float|string|null} $config
      * @param string $routesFile Path to routes file
      */
     public static function boot(array $config, string $routesFile): void

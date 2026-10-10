@@ -920,6 +920,10 @@ class RouterConfigTest extends TestCase
         $router = Router::create(['basePath' => null, 'routesFile' => null])->loadRoutes($this->routesFile);
 
         $this->assertSame(200, $router->handle(new ServerRequest('GET', '/users'))->getStatusCode());
+
+        // As for baseUrl: false is what getenv() gives without the variable — no base path
+        $router = Router::create(['basePath' => false])->loadRoutes($this->routesFile);
+        $this->assertSame(200, $router->handle(new ServerRequest('GET', '/users'))->getStatusCode());
         $this->assertSame(200, Router::create(['routesFile' => $this->routesFile])->handle(new ServerRequest('GET', '/users'))->getStatusCode());
     }
 

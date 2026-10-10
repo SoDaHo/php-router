@@ -182,7 +182,8 @@ from SemVer by the owner's decision of 2026-10-10. See "Upgrading from
   `Content-Length` went out whole — a kept-alive client read the rest as the start of the
   next response; it is sent up to the length now, never beyond, and ends the same way.
 
-- `basePath` and `routesFile` in the config take a string (or `null` for their default);
+- `basePath` and `routesFile` in the config take a string (or `null` for their default;
+  `basePath` also `false`, what `getenv()` gives without the variable, as `baseUrl` does);
   another type is refused with a `RouterException` when the router is built. `basePath`
   was cast (`true` became `'1'`, an array `'Array'` with a warning), a `routesFile` that is
   no string failed only when the table was built, with a `TypeError` of PHP.
@@ -317,10 +318,10 @@ look at:
 - **Redirect statuses:** `Response::redirect()`, `redirect()` routes and `RedirectHandler`
   take 301, 302, 303, 307 or 308 only (a 300, 304 or 305 redirect route was accepted by
   2.1.1); use `Response::created()` for 201.
-- **`basePath` and `routesFile`** in the config take a string or `null`; `true`, `false`, a
-  number or an array are refused when the router is built — also the `false` of
-  `'basePath' => getenv('ROUTER_BASE_PATH')` without the variable (2.1.1 cast it to `''`):
-  write `getenv(…) ?: null`, or let `Router::fromEnv()` read the variable.
+- **`basePath` and `routesFile`** in the config take a string or `null`; `true`, a number
+  or an array are refused when the router is built. `basePath` takes `false` as well, as
+  none — `'basePath' => getenv('ROUTER_BASE_PATH')` without the variable works as in
+  2.1.1; for `routesFile` `false` is refused.
 - **`baseUrl` / `APP_URL`** has to be `http(s)://host[:port][/path]`: a host the browser's
   parser takes, a port of digits (not an empty one), no user information or backslash —
   also for `UrlGenerator::setBaseUrl()` on a generator built by hand.
