@@ -254,8 +254,10 @@ What to look at:
 - **HEAD.** A dynamic `head()` route no longer answers for a path a static `get()` route
   takes.
 - **`get('')` in a group** (trailing slash mode `strict`) is the group's own address now;
-  write `get('/')` for the address with the slash.
+  write `get('/')` for the address with the slash (a pattern of blanks alone stays there).
 - **`Response::redirect()`** takes a 3xx status only; use `Response::created()` for 201.
+- **`basePath` and `routesFile`** in the config take a string or `null`; `true`, a number
+  or an array are refused when the router is built.
 - **`baseUrl` / `APP_URL`** has to be `http(s)://host[:port][/path]`, the host written as a
   browser reads it, without user information or backslash.
 - **`RfcResponder`**: `type`, `title` and `status` in the details are dropped.
