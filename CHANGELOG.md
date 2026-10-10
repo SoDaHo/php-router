@@ -36,6 +36,9 @@
   of a route of your own — got none of these checks; `'{a}:{b}'` was caught only as the
   redirect went out.
 
+- A route handler `[$object, 'method']` is called on that object, as the callable it is.
+  It was taken for `[class name, method]` and ended in a `TypeError` (a 500) with and
+  without a container.
 - `run()` and `emit()` refuse a protocol version that is no version — a digit, and a dot
   and a digit for a minor one (`1.1`, `1.0`, `2`) — before anything is sent, as they refuse
   a reason phrase with a control character: `withProtocolVersion("1.1\r\nX-Injected: 1")`

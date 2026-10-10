@@ -73,6 +73,10 @@ class UserController
 Every method a route names has to exist: a missing one is a 500, and without an `error`
 hook nothing tells you why (see [Hooks](#hooks-logging)).
 
+A handler is `[ControllerClass::class, 'method']` (built through the container where it
+has the class, otherwise with `new`), any callable — a closure, `[$controller, 'method']`
+on an object you built, an invokable object — or a PSR-15 `RequestHandlerInterface`.
+
 ## HTTP Methods
 
 ```php

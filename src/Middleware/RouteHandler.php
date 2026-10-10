@@ -20,7 +20,8 @@ final class RouteHandler implements RequestHandlerInterface
     /**
      * Create a new RouteHandler instance.
      *
-     * @param mixed $handler Controller class, callable, or RequestHandler
+     * @param mixed $handler Controller [class name, method], a callable ([$object, 'method']
+     *                       included), or a RequestHandler
      * @param ContainerInterface|null $container PSR-11 container for dependency injection
      */
     public function __construct(
@@ -48,8 +49,10 @@ final class RouteHandler implements RequestHandlerInterface
             return $this->handler->handle($request);
         }
 
-        // Controller class + method
-        if (is_array($this->handler) && count($this->handler) === 2) {
+        // Controller class + method. A class name only: [$object, 'method'] is a callable
+        // and is called on that object below — taken for a class name, it was a TypeError
+        // (a 500) or, without a container, a call on a new object of its class
+        if (is_array($this->handler) && count($this->handler) === 2 && is_string($this->handler[0] ?? null)) {
             [$class, $method] = $this->handler;
 
             // Resolve from container or instantiate directly
