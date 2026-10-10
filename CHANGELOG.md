@@ -30,6 +30,19 @@
   the match of the whole route (`'a(*ACCEPT)'` matched `/files/abcd` with the value `a`).
   Lookbehinds, groups that do not capture and groups without a name stay allowed — what
   those capture never reaches the parameters.
+- A route is frozen once the route table is built from it (`RouteCollector::getData()`, so
+  the first request, `match()` or `url()`): `attribute()`, `middleware()`, `name()` and
+  assigning `$route->attributes`, `$route->middleware` or `$route->name` throw a
+  `RouterException`. The same `Route` object serves every request afterwards; in a worker
+  process a value one request wrote onto it (`$request->getAttribute(Route::class)
+  ->attribute('role', …)`) was what the next request read. The three properties stay public
+  and readable. Writing into one of the arrays in place (`$route->attributes['k'] = …`,
+  `$route->middleware[] = …`) is an `Error` of PHP now, also before the table is built —
+  the properties have a `set` hook; use the setters or assign the array as a whole.
+- `Route::$middleware` (and the constructor parameter) is documented as
+  `array<string|object>` since 2.1.1 (it said `array<int, string|object>` before, and 2.1.1
+  did not mention it): string keys are kept as the application gave them. Code that hands
+  it on as a `list` under PHPStan sees the wider type.
 
 ## [2.1.1] - 2026-10-09
 

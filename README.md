@@ -297,6 +297,15 @@ group. A `middlewareGroup()` takes attributes as its third argument, for routes 
 both (see [Middleware](#middleware)). See [Looking a Route Up](#looking-a-route-up) for
 where the route comes from.
 
+A route is set up in the routes file and read afterwards. Once the route table is built
+(the first request, `match()` or `url()`), it is frozen: `attribute()`, `middleware()`,
+`name()` and assigning `$route->attributes`, `$route->middleware` or `$route->name` throw a
+`RouterException`. The same `Route` object serves every request after that — in a worker
+process (RoadRunner, FrankenPHP, `handle()` in a loop) a value one request wrote onto it was
+what the next request read. Keep what belongs to one request in a request attribute. The
+arrays are never written in place (`$route->attributes['k'] = …`, `$route->middleware[] =
+…`): PHP refuses that with an `Error`, also in the routes file — use the setters.
+
 ## Middleware
 
 ```php

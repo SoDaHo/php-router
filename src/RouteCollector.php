@@ -748,7 +748,8 @@ final class RouteCollector
     }
 
     /**
-     * Compile routes for the Dispatcher.
+     * Compile routes for the Dispatcher — and freeze them (see Route): from here on a route
+     * serves requests and cannot be changed any more.
      *
      * @return array{0: array<string, array<string, Route>>, 1: array<string, array<int, array{regex: string, route: Route, casts: array<string, string>}>>} [staticRoutes, dynamicRoutes]
      */
@@ -788,6 +789,12 @@ final class RouteCollector
                     'casts' => $casts,
                 ];
             }
+        }
+
+        // From here on each route serves requests: what one of them changed on it would
+        // hold for every request after it. Frozen only once the whole table could be built.
+        foreach ($this->routes as $route) {
+            $route->freeze();
         }
 
         return [$staticRoutes, $dynamicRoutes];
