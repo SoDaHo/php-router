@@ -356,7 +356,7 @@ class EmitStatusTest extends TestCase
      * A header PHP would refuse (a line break in the value; the PSR-7 object of an
      * application may not check), behind a Location: up to 2.1.1 the Location went out
      * first and made PHP's status a 302, then header() failed. It is refused before
-     * anything is sent now (A11): no Location, no 302, the router's 500 instead.
+     * anything is sent: no Location, no 302, the router's 500 instead.
      */
     public function testHeaderLineThatIsNoneIsRefusedBeforeAnythingIsSent(): void
     {

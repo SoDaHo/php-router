@@ -15,9 +15,9 @@ use Sodaho\Router\Router;
 /**
  * A request that came in as a POST and that a middleware passed on as HEAD is answered as
  * HEAD (implicitHead): the dispatcher cuts the body and keeps the GET's Content-Length.
- * run() has to send that answer as one to HEAD as well — a candidate of 2.2.0 decided by
- * the method the request came in with, sent it with its body, and refused the empty body
- * under a Content-Length above 0 with a 500. What the web server sends is checked in
+ * run() has to send that answer as one to HEAD as well — deciding by the method the request
+ * came in with, it would send it with its body and refuse the empty body under a
+ * Content-Length above 0 with a 500. What the web server sends is checked in
  * EmitOverHttpTest.
  */
 #[RunTestsInSeparateProcesses]

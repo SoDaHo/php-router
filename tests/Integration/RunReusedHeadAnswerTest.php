@@ -12,10 +12,10 @@ use Sodaho\Router\Router;
 /**
  * Whether run() sends an answer without its body is decided for the one call that made it:
  * a response the dispatcher once cut for HEAD is an ordinary answer when a POST handler
- * returns it again. A candidate of 2.2.0 marked the cut response object for good — a POST
- * handler that returned it (an earlier HEAD answer kept, a HEAD sub-request's answer) had
- * it sent without a body, and its empty body under a Content-Length above 0 went out as a
- * 200 instead of being refused with a 500. RunRewrittenToHeadTest pins the POST a
+ * returns it again. Marked on the response object for good, the cut would send such an
+ * answer (an earlier HEAD answer kept, a HEAD sub-request's answer) without a body, and its
+ * empty body under a Content-Length above 0 would go out as a 200 instead of being refused
+ * with a 500. RunRewrittenToHeadTest pins the POST a
  * middleware passes on as HEAD, which is still sent without its body.
  */
 #[RunTestsInSeparateProcesses]

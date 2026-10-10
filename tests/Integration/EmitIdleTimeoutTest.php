@@ -15,9 +15,9 @@ use Sodaho\Router\Router;
 
 /**
  * A body that has not ended may give '' while its next bytes are on their way (PSR-7).
- * 2.1.1 stopped silently at the third empty read in a row, and the first 2.2.0 candidate
- * threw there — both cut 'A', '', '', '', 'B' short. emit() waits now, with a growing pause,
- * and gives up only after 'emitIdleTimeout' seconds without a byte. A 304 is held to no
+ * Stopping silently at the third empty read in a row, or throwing there, would cut 'A', '',
+ * '', '', 'B' short. emit() waits, with a growing pause, and gives up only after
+ * 'emitIdleTimeout' seconds without a byte. A 304 is held to no
  * Content-Length (a 1xx or 204 must not have one, a 205 none but 0, see
  * EmitBodilessTest); a body that sends no byte is a short one (see EmitFramingTest), and
  * the answer to HEAD goes out with withBody false.
@@ -83,8 +83,8 @@ class EmitIdleTimeoutTest extends TestCase
     public function testByteThatAReadGivesOnlyAfterTheDeadlineIsRefused(): void
     {
         // The read itself takes 0.4 seconds longer than the idle timeout: what it gives came
-        // too late. Up to the first 2.2.0 candidate a byte that came after the deadline this
-        // way (or after a pause) was taken, and wound the clock back
+        // too late. Taking a byte that came after the deadline this way (or after a pause)
+        // would wind the clock back
         $this->assertStalledAfterOneByte(new BlockingBody(0.9));
     }
 

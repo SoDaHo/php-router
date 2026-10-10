@@ -155,7 +155,7 @@ class RfcResponderTest extends TestCase
 
     /**
      * "type", "title" and "status" are the responder's and the response's: what the details
-     * say under those names does not replace them (A10). "status" is added by Response.
+     * say under those names does not replace them. "status" is added by Response.
      *
      * @param array<string, mixed> $details
      */

@@ -13,8 +13,8 @@ use Sodaho\Router\UrlGenerator;
 /**
  * The base URL rule lives in the URL generator, which puts the value in front of every
  * absolute address: a generator built by hand gets it as well as the router's config.
- * Up to 2.1.1 (and in the first 2.2.0 candidate) UrlGenerator::setBaseUrl() took anything —
- * 'javascript:alert(1)//' made every absolute address a script.
+ * Without the rule in UrlGenerator::setBaseUrl(), 'javascript:alert(1)//' would make every
+ * absolute address a script.
  */
 class UrlGeneratorBaseUrlTest extends TestCase
 {

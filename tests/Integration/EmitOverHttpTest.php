@@ -427,8 +427,8 @@ class EmitOverHttpTest extends TestCase
 
     /**
      * A POST a middleware passed on as HEAD gets what HEAD gets: the headers with the GET's
-     * Content-Length, without the body — a candidate of 2.2.0 sent a 500 for it (see
-     * RunRewrittenToHeadTest).
+     * Content-Length, without the body — deciding by the POST, run() would answer the empty
+     * body with a 500 (see RunRewrittenToHeadTest).
      */
     public function testPostPassedOnAsHeadGetsTheHeadersWithoutTheBody(): void
     {

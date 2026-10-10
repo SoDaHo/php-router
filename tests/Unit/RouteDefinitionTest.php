@@ -523,7 +523,7 @@ class RouteDefinitionTest extends TestCase
     {
         $collector = new RouteCollector();
 
-        // 300, 304, 305 and 399 were taken up to the first 2.2.0 candidate: no client follows them
+        // 300, 304, 305 and 399 are no redirect statuses: no client follows them
         foreach ([200, 201, 299, 300, 304, 305, 306, 399, 400, 0, 1000] as $status) {
             try {
                 $collector->redirect('/old', '/new', $status);
