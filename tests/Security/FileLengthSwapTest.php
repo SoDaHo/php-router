@@ -47,11 +47,19 @@ class FileLengthSwapTest extends TestCase
         try {
             // The swapper is a process of its own: wait until it has replaced the file once
             // (a slow machine starts it late), so that the loop below runs while it swaps
+            // (one look decides: the swapper writes 10 and 20 bytes in turn, so a second look
+            // may find 10 again although it runs)
+            $started = false;
             $deadline = microtime(true) + 20;
-            while (self::sizeOf($this->dir . '/file.bin') === 10 && microtime(true) < $deadline) {
+            while (microtime(true) < $deadline) {
+                if (self::sizeOf($this->dir . '/file.bin') !== 10) {
+                    $started = true;
+
+                    break;
+                }
                 usleep(1000);
             }
-            if (self::sizeOf($this->dir . '/file.bin') === 10) {
+            if (!$started) {
                 $this->markTestSkipped('The swapper did not start within 20 seconds');
             }
 
