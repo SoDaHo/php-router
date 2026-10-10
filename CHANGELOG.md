@@ -229,6 +229,9 @@ application.
 - The two race tests (web app folder, `Response::file()`) start a second process that swaps
   the file; they wait for its signal (or the first swap), give it no pipe it could fill and
   block on, and are skipped — not passed — where it did not start or no request met a swap.
+- The "header injection" test of the security suite checked a fixed target against
+  itself; it checks what refuses a line break now — the registration of a target with one,
+  and a value with one (no route).
 - New public methods marked `@internal` (not part of the contract, used inside the
   library): `Route::freeze()`, `Route::addMiddleware()`, `RouteCollector::assertNamesOnce()`,
   `FileStream::fromHandle()`, `Response::fileFromHandle()`, `AppFolder::openWithin()`.

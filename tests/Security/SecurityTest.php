@@ -158,21 +158,27 @@ class SecurityTest extends TestCase
 
     // ==================== Header Injection ====================
 
-    public function testRedirectHeaderInjection(): void
+    /**
+     * A line break never reaches a Location: a target with one is refused where the route is
+     * written, and a value cannot bring one either — a path with one has no route
+     */
+    public function testRedirectHeaderInjectionIsRefusedWhereTheRouteIsWritten(): void
     {
         $collector = new RouteCollector();
-        $collector->redirect('/old', '/new');
 
+        try {
+            $collector->redirect('/old', "/new\r\nX-Injected: 1");
+            $this->fail('The redirect was registered');
+        } catch (\Sodaho\Router\Exception\RouterException $e) {
+            $this->assertSame('Redirect target must not contain a control character', $e->getMessage());
+        }
+        $this->assertSame([], $collector->getRoutes());
+
+        $collector->redirect('/go/{x}', '/to/{x}');
         $dispatcher = new RouteDispatcher($collector->getData());
 
-        $response = $dispatcher->handle(new ServerRequest('GET', '/old'));
-
-        // Location header should be exactly what we specified
-        $this->assertSame('/new', $response->getHeaderLine('Location'));
-
-        // No CRLF injection possible since target is fixed
-        $this->assertStringNotContainsString("\r", $response->getHeaderLine('Location'));
-        $this->assertStringNotContainsString("\n", $response->getHeaderLine('Location'));
+        $this->assertSame(404, $dispatcher->handle(new ServerRequest('GET', '/go/a%0D%0AX-Injected:%201'))->getStatusCode());
+        $this->assertSame('/to/a%20b', $dispatcher->handle(new ServerRequest('GET', '/go/a%20b'))->getHeaderLine('Location'));
     }
 
     // ==================== Large Input ====================
