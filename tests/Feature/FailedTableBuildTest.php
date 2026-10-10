@@ -17,7 +17,8 @@ use Sodaho\Router\Router;
  * A routes file may register middleware, apps and hooks on the router itself. When the
  * table cannot be built, the next request runs the file again — and failed at the
  * middleware key (or app prefix) the first attempt had taken, so that every report after
- * the first named that instead of why the table cannot be built.
+ * the first named that instead of why the table cannot be built. A hook the attempt
+ * registered goes with it as well.
  */
 class FailedTableBuildTest extends TestCase
 {
@@ -40,8 +41,10 @@ class FailedTableBuildTest extends TestCase
                 return function (Sodaho\Router\RouteCollector $r) {
                     $this->middleware(['cors' => new PassThrough()]);
                     $this->app('/app', %s);
-                    $this->on('dispatch', function (): void {
-                        $GLOBALS['failed_build_hook'] = ($GLOBALS['failed_build_hook'] ?? 0) + 1;
+                    // Belongs to the attempt as well: were it kept, it would hear the report
+                    // of the very failure that dropped it
+                    $this->on('error', function (): void {
+                        $GLOBALS['failed_build_error_hook'] = ($GLOBALS['failed_build_error_hook'] ?? 0) + 1;
                     });
                     $r->get('/a', fn () => Response::text('a'))->name('same');
                     $r->get('/b', fn () => Response::text('b'))->name('same');
@@ -56,7 +59,7 @@ class FailedTableBuildTest extends TestCase
         unlink($this->routesFile);
         unlink($this->appDir . '/index.html');
         rmdir($this->appDir);
-        unset($GLOBALS['failed_build_hook']);
+        unset($GLOBALS['failed_build_error_hook']);
     }
 
     public function testEveryAttemptReportsWhyTheTableCannotBeBuilt(): void
@@ -76,6 +79,9 @@ class FailedTableBuildTest extends TestCase
             $this->assertInstanceOf(DuplicateRouteException::class, $exception, 'attempt ' . ($i + 1));
             $this->assertSame('same: /a and /b', $exception->getDebugMessage());
         }
+
+        // The hook the routes file registered went with each failed attempt
+        $this->assertSame(0, $GLOBALS['failed_build_error_hook'] ?? 0);
     }
 }
 
