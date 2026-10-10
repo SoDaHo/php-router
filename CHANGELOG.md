@@ -126,6 +126,10 @@
   URL generator, `RouteDispatcher::lookup()` and `resolveMiddleware()` say why they do what
   they do.
 
+### Development
+- CI pins its actions to a commit and its container image to a digest (the comment names
+  the version): a tag can be moved to other code.
+
 ## [2.1.1] - 2026-10-09
 
 ### Security

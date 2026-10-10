@@ -10,10 +10,13 @@ on:
 permissions:
   contents: read
 
+# Actions and the container image are pinned to a commit and a digest: a tag can be moved
+# to other code. The comment names the version; update both together.
+
 jobs:
   tests:
     runs-on: ubuntu-latest
-    container: shivammathur/node:24.04
+    container: shivammathur/node:24.04@sha256:ee402d3448af7d680cc697f0cd76f62b04598a527044e38dc4cf1c3404b13071
     name: PHP ${{ matrix.php }}${{ matrix.dependencies == 'lowest' && ' (lowest dependencies)' || '' }}${{ matrix.preview && ' (preview, may fail)' || '' }}
     # The preview of the next PHP version runs along and may turn red without blocking anything
     continue-on-error: ${{ matrix.preview || false }}
@@ -32,10 +35,10 @@ jobs:
             dependencies: lowest
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
 
       - name: Setup PHP
-        uses: shivammathur/setup-php@v2
+        uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
         with:
           php-version: ${{ matrix.php }}
           extensions: mbstring
@@ -46,7 +49,7 @@ jobs:
         run: echo "dir=$(composer config cache-files-dir)" >> $GITHUB_OUTPUT
 
       - name: Cache Composer dependencies
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
         with:
           path: ${{ steps.composer-cache.outputs.dir }}
           key: ${{ runner.os }}-composer-${{ hashFiles('composer.lock') }}
@@ -65,14 +68,14 @@ jobs:
 
   analyse:
     runs-on: ubuntu-latest
-    container: shivammathur/node:24.04
+    container: shivammathur/node:24.04@sha256:ee402d3448af7d680cc697f0cd76f62b04598a527044e38dc4cf1c3404b13071
     name: Static Analysis
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
 
       - name: Setup PHP
-        uses: shivammathur/setup-php@v2
+        uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
         with:
           php-version: '8.5'
           coverage: none
@@ -82,7 +85,7 @@ jobs:
         run: echo "dir=$(composer config cache-files-dir)" >> $GITHUB_OUTPUT
 
       - name: Cache Composer dependencies
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
         with:
           path: ${{ steps.composer-cache.outputs.dir }}
           key: ${{ runner.os }}-composer-${{ hashFiles('composer.lock') }}
@@ -99,14 +102,14 @@ jobs:
 
   code-style:
     runs-on: ubuntu-latest
-    container: shivammathur/node:24.04
+    container: shivammathur/node:24.04@sha256:ee402d3448af7d680cc697f0cd76f62b04598a527044e38dc4cf1c3404b13071
     name: Code Style
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
 
       - name: Setup PHP
-        uses: shivammathur/setup-php@v2
+        uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
         with:
           php-version: '8.5'
           coverage: none
@@ -116,7 +119,7 @@ jobs:
         run: echo "dir=$(composer config cache-files-dir)" >> $GITHUB_OUTPUT
 
       - name: Cache Composer dependencies
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
         with:
           path: ${{ steps.composer-cache.outputs.dir }}
           key: ${{ runner.os }}-composer-${{ hashFiles('composer.lock') }}
