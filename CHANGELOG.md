@@ -237,7 +237,8 @@ deliberate deviation from SemVer by the owner's decision of 2026-10-10. See "Upg
   and a value with one (no route).
 - New public methods marked `@internal` (not part of the contract, used inside the
   library): `Route::freeze()`, `Route::addMiddleware()`, `RouteCollector::assertNamesOnce()`,
-  `FileStream::fromHandle()`, `Response::fileFromHandle()`, `AppFolder::openWithin()`.
+  `FileStream::fromHandle()`, `Response::fileFromHandle()`, `AppFolder::openWithin()`,
+  `AppFolder::below()`, `AppFolder::visibleBelow()`.
 
 ### Upgrading from 2.1.1
 Much of what 2.2.0 refuses never worked as meant and is refused now instead of doing the

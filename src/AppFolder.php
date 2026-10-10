@@ -533,16 +533,11 @@ final class AppFolder
             }
         }
 
-        // A file that cannot be read is treated like one that must not be served: 404, not 500
-        if (!str_starts_with($target, $base) || !is_file($target) || !is_readable($target)) {
+        // The resolved way counts, not the path asked for: a link must not lead out of the
+        // folder or to something hidden. A file that cannot be read is treated like one that
+        // must not be served: 404, not 500
+        if (!self::visibleBelow($root, $target) || !is_file($target) || !is_readable($target)) {
             return false;
-        }
-
-        // The resolved way counts as well: a link must not lead to something hidden
-        foreach (explode(DIRECTORY_SEPARATOR, substr($target, strlen($base))) as $segment) {
-            if (str_starts_with($segment, '.')) {
-                return false;
-            }
         }
 
         return $target;
@@ -552,10 +547,42 @@ final class AppFolder
      * The folder as the prefix of what lies below it: with one separator at its end — also
      * where it is the root of the file system ('/', 'C:\'), which has one already: '//' as a
      * prefix matched nothing, and such a folder served no file at all.
+     *
+     * @internal Public for its tests: a root like 'C:\' exists on Windows only
+     *
+     * @param non-empty-string $separator
      */
-    private static function below(string $root): string
+    public static function below(string $root, string $separator = DIRECTORY_SEPARATOR): string
     {
-        return rtrim($root, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
+        return rtrim($root, $separator) . $separator;
+    }
+
+    /**
+     * Whether a resolved path lies below the folder and its way there has no hidden segment.
+     * The way is counted from the prefix (below()), not from the folder and one separator
+     * more: at the root of the file system, which ends in a separator already, that would
+     * cut off the first character, and '/.hidden/x' would go through as 'hidden/x'.
+     *
+     * @internal Public for its tests: a root like 'C:\' exists on Windows only
+     *
+     * @param string $root The folder, resolved
+     * @param string $target A path, resolved
+     * @param non-empty-string $separator
+     */
+    public static function visibleBelow(string $root, string $target, string $separator = DIRECTORY_SEPARATOR): bool
+    {
+        $base = self::below($root, $separator);
+        if (!str_starts_with($target, $base)) {
+            return false;
+        }
+
+        foreach (explode($separator, substr($target, strlen($base))) as $segment) {
+            if (str_starts_with($segment, '.')) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /**
