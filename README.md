@@ -612,7 +612,11 @@ segments of a path, use a route or a handler of your own.
 
 The rules belong to `RedirectHandler` itself: one built by hand (`new RedirectHandler($to,
 $status)`, as a handler of a route of your own) refuses the same targets in its
-constructor, and checks what it renders in the same way.
+constructor, and checks what it renders in the same way. Where `redirect()` makes sure at
+registration that the route has every placeholder of the target, a handler built by hand
+finds out when it renders: a placeholder without a value in `_route_params`, or route
+parameters that are no array of scalar values, end the request in a 500 with a
+`RouterException` instead of a `Location: /go/{id}`.
 
 ## Response Helpers
 

@@ -63,7 +63,11 @@ from SemVer by the owner's decision of 2026-10-10. See "Upgrading from
   `'//{host}/x'`), and a status a client does not follow (see below). A handler built by
   hand — a handler of a route of your own — got none of these checks; `'{a}:{b}'` was
   caught only as the redirect went out. The scheme is read as RFC 3986 has it, in the
-  constructor and where the address goes out, by one function (`'1{x}:y'` is a path).
+  constructor and where the address goes out, by one function (`'1{x}:y'` is a path). Where
+  the redirect goes out, it checks what it was given: route parameters that are no array
+  of scalar values, and a placeholder of the target without a value, end the request in a
+  500 — `new RedirectHandler('/go/{id}')` without a value for `{id}` sent
+  `Location: /go/{id}`, and an array as a value became `Array` with a warning.
 - `run()` and `emit()` refuse a protocol version that is no version — a digit, and a dot
   and a digit for a minor one (`1.1`, `1.0`, `2`) — before anything is sent, as they refuse
   a reason phrase with a control character: `withProtocolVersion("1.1\r\nX-Injected: 1")`
@@ -370,7 +374,9 @@ look at:
   (`"/new\r\nX: 1"`), a placeholder that is not `{name}` (`'/new/{id:int}'`), or where its
   status is not 301, 302, 303, 307 or 308 — what `redirect()` refused for it already (a 300,
   304 or 305 it took). A value that would
-  make a `.` or `..` segment is a 500 instead of a redirect.
+  make a `.` or `..` segment is a 500 instead of a redirect, and so is a placeholder
+  without a value or route parameters that are no array of scalar values (it sent the
+  placeholder as it stood).
 - **HEAD.** A dynamic `head()` route no longer answers for a path a static `get()` route
   takes — and no longer shields it: the GET handler runs for HEAD there, side effects
   included. Give such a route a static `head()` of its own, or turn `implicitHead` off.

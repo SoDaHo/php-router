@@ -18,7 +18,8 @@ use Sodaho\Router\Response;
  * rules: the target is refused when it is written if it could never go out (a control
  * character, a status that is no redirect, a placeholder that is not {name}) or if it
  * leaves scheme or host to a placeholder. What a request's values render is checked again
- * where the redirect goes out: no other scheme or host, no '.' or '..' segment of their own.
+ * where the redirect goes out: a value for every placeholder, no other scheme or host, no
+ * '.' or '..' segment of their own.
  */
 final class RedirectHandler implements RequestHandlerInterface
 {
@@ -71,8 +72,10 @@ final class RedirectHandler implements RequestHandlerInterface
      *
      * @param ServerRequestInterface $request PSR-7 request
      *
-     * @throws RouterException When the values would change scheme or host of the target, or
-     *                         make a '.' or '..' segment
+     * @throws RouterException When the route parameters are no array of scalar values, a
+     *                         placeholder of the target has no value, or the values would
+     *                         change scheme or host of the target or make a '.' or '..'
+     *                         segment
      *
      * @return ResponseInterface Redirect response
      */
@@ -80,12 +83,37 @@ final class RedirectHandler implements RequestHandlerInterface
     {
         // Replace ONLY route parameters (not all attributes) with URL encoding
         $target = $this->target;
-        /** @var array<string, scalar> $params */
         $params = $request->getAttribute('_route_params', []);
 
+        // What the router hands over is a list of values by name; a handler built by hand
+        // may be given anything under that attribute — what is no such list, or a value that
+        // is no scalar (an array became 'Array' with a warning), is no value of the target
+        if (!is_array($params)) {
+            throw new RouterException(
+                'Redirect not sent: the route parameters (_route_params) are no array of values',
+                debugMessage: get_debug_type($params),
+            );
+        }
+
         foreach ($params as $key => $value) {
+            if (!is_scalar($value) || (is_float($value) && !is_finite($value))) {
+                throw new RouterException(
+                    'Redirect not sent: a route parameter is no scalar value',
+                    debugMessage: sprintf('%s: %s', $key, get_debug_type($value)),
+                );
+            }
+
             // Always encode parameter values to prevent injection attacks
             $target = str_replace('{' . $key . '}', rawurlencode((string) $value), $target);
+        }
+
+        // A placeholder no value took went out as it stands ('/go/{id}' as the address): a
+        // value brings no brace of its own (encoded), so what is left is one of the target's
+        if (preg_match('/\{[A-Za-z0-9_]+\}/', $target) === 1) {
+            throw new RouterException(
+                'Redirect not sent: a placeholder of the target has no value',
+                debugMessage: $target,
+            );
         }
 
         // Encoded, a value brings no '/', ':' or '\' of its own — but it may be empty: in
