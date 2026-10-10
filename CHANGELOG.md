@@ -93,7 +93,7 @@ from SemVer by the owner's decision of 2026-10-10. See "Upgrading from
   which is not supported in a fragment: an option setting that turns `x` or `xx` on
   (`(?x)`, `(?xx)`, `(?xx:…)`, `(?ix)`) is refused, as PCRE ignores blanks from there on —
   under `xx` in a class as well, where `(?xx)[ ](?<n>x)]` is one class. Other options
-  (`(?i)`, `(?s)`, `(?m)`, `(?u)`, `(?n)`, `(?J)` …) and turning `x` off stay allowed.
+  (`(?i)`, `(?s)`, `(?m)`, `(?n)`, `(?J)`, `(?U)` …) and turning `x` off stay allowed.
 - A route is frozen once the route table is built from it (`RouteCollector::getData()`, so
   the first request, `match()` or `url()`): `attribute()`, `middleware()`, `name()` and
   assigning `$route->attributes`, `$route->middleware` or `$route->name` throw a
