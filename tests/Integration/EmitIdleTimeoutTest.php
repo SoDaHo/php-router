@@ -18,9 +18,9 @@ use Sodaho\Router\Router;
  * 2.1.1 stopped silently at the third empty read in a row, and the first 2.2.0 candidate
  * threw there — both cut 'A', '', '', '', 'B' short. emit() waits now, with a growing pause,
  * and gives up only after 'emitIdleTimeout' seconds without a byte. A 304 is held to no
- * Content-Length (a 1xx, 204 or 205 must not have one, see EmitBodilessTest); a body that
- * sends no byte is a short one (see EmitFramingTest), and the answer to HEAD goes out with
- * withBody false.
+ * Content-Length (a 1xx or 204 must not have one, a 205 none but 0, see
+ * EmitBodilessTest); a body that sends no byte is a short one (see EmitFramingTest), and
+ * the answer to HEAD goes out with withBody false.
  */
 #[RunTestsInSeparateProcesses]
 class EmitIdleTimeoutTest extends TestCase
