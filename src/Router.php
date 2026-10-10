@@ -220,10 +220,13 @@ final class Router implements RouterInterface
      * as in 1.x, false ('baseUrl' => getenv('APP_URL') without the variable), 0 and '0'.
      * Any other string is put in front of the address as it is (a slash at its end is
      * dropped) — so it has to be what an address can begin with: http or https, '://' and
-     * a host, then a path at most. No control character or blank (a line break made every
-     * absolute address a Location header the response refuses), no query or fragment (the
-     * path would land behind them), not 'example.com' (that made every address relative,
-     * 'example.com/users/5') and no other scheme. Anything else is refused.
+     * a host, then a port and a path at most. No control character or blank (a line break
+     * made every absolute address a Location header the response refuses), no query or
+     * fragment (the path would land behind them), not 'example.com' (that made every
+     * address relative, 'example.com/users/5') and no other scheme. And read as a browser
+     * reads it (WHATWG URL), it names the host it is written with: no user information, no
+     * backslash ('https://evil\@trusted.example' is the host 'evil' for a browser), no
+     * authority that is no host ('https://:443', 'https://[::1'). Anything else is refused.
      *
      * @throws RouterException If the value is neither a string nor empty, has a control
      *                         character or a blank, or is no http(s) address of a host
@@ -245,14 +248,42 @@ final class Router implements RouterInterface
             );
         }
 
-        if (preg_match('~^https?://[^/?#]+(?:/[^?#]*)?\z~i', $value) !== 1) {
+        if (!self::isAddressOfAHost($value)) {
             throw new RouterException(
-                $what . ' must be an address of a host: http:// or https://, the host, a path at most — no query or fragment',
+                $what . ' must be an address of a host: http:// or https://, the host, a port and a path at most — no user information, query or fragment',
                 debugMessage: $value,
             );
         }
 
         return $value;
+    }
+
+    /**
+     * Whether a base URL is an http(s) address of a host, as written and as a browser reads
+     * it: http or https, '://', an authority without user information or backslash, a path
+     * at most — and the WHATWG parser of PHP finds in it the host the text names (in its
+     * ASCII or its Unicode form), on a port from 1 to 65535 if one is given.
+     */
+    private static function isAddressOfAHost(string $value): bool
+    {
+        if (preg_match('~^https?://([^/?#\\\\@]+)(?:/[^?#\\\\]*)?\z~i', $value, $written) !== 1) {
+            return false;
+        }
+
+        $url = \Uri\WhatWg\Url::parse($value);
+        if ($url === null) {
+            return false;
+        }
+
+        $port = $url->getPort();
+        if ($port !== null && ($port < 1 || $port > 65535)) {
+            return false;
+        }
+
+        // The host as written: the authority without a port (an IPv6 host keeps its brackets)
+        $host = (string) preg_replace('~:\d*\z~', '', $written[1]);
+
+        return $url->getAsciiHost() === strtolower($host) || $url->getUnicodeHost() === $host;
     }
 
     /**

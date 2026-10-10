@@ -122,11 +122,16 @@ application.
   with a 200 is no redirect — the client shows the empty body. 2.0.0 promised a 3xx status
   for both; a 201 with a `Location` is `Response::created()`.
 - `baseUrl` (config, `setBaseUrl()`, `APP_URL` through `fromEnv()`) has to be an address of
-  a host: `http://` or `https://`, the host, a path at most. `example.com` made every
-  absolute address relative (`example.com/users/5`), `//evil.example` or
-  `javascript:alert(1)` an address elsewhere, and a query or fragment put the path behind
-  it; such a value is refused with a `RouterException` when it is given (the message names
-  `APP_URL` where it came from there).
+  a host: `http://` or `https://`, the host, a port and a path at most — and read as a
+  browser reads it (PHP's WHATWG parser, `Uri\WhatWg\Url`) it has to name the host it is
+  written with. `example.com` made every absolute address relative (`example.com/users/5`),
+  `//evil.example` or `javascript:alert(1)` an address elsewhere, a query or fragment put the
+  path behind it, and `https://evil\@trusted.example/base` is the host `evil` for a browser.
+  Refused as well: user information, a backslash, an authority that is no host
+  (`https://:443`, `https://[::1`, `https://@`), a port that is no number or outside
+  1–65535, an IPv4 address the parser writes otherwise (`https://127.1`). Such a value is
+  refused with a `RouterException` when it is given (the message names `APP_URL` where it
+  came from there). A `UrlGenerator` built by hand still takes its base URL unchecked.
 - `RfcResponder`: the details of an error no longer replace `type`, `title` or `status` —
   RFC 9457 gives them a meaning of their own, and `Response::error('Bad', 400, details:
   ['status' => 200])` said in a 400 that the request went well. `type` comes from the error
@@ -219,7 +224,8 @@ wrong thing quietly. What to look at:
 - **`get('')` in a group** (trailing slash mode `strict`) is the group's own address now;
   write `get('/')` for the address with the slash.
 - **`Response::redirect()`** takes a 3xx status only; use `Response::created()` for 201.
-- **`baseUrl` / `APP_URL`** has to be `http(s)://host[/path]`.
+- **`baseUrl` / `APP_URL`** has to be `http(s)://host[:port][/path]`, the host written as a
+  browser reads it, without user information or backslash.
 - **`RfcResponder`**: `type`, `title` and `status` in the details are dropped.
 - **A response's protocol version** has to be a version (`1.1`, `2`), and every header line
   a token name and a value without control characters other than a tab — a response that
