@@ -104,6 +104,27 @@ class ResponseTest extends TestCase
         $this->assertSame('/new-location', $response->getHeaderLine('Location'));
     }
 
+    /**
+     * A redirect is a 3xx status. Up to 2.1.1 a 200 with a Location went out (the client
+     * showed the empty body), although 2.0.0 already promised a 3xx for redirects.
+     */
+    public function testRedirectIsA3xxStatus(): void
+    {
+        foreach ([300, 303, 307, 308, 399] as $status) {
+            $this->assertSame($status, Response::redirect('/new', $status)->getStatusCode());
+        }
+
+        foreach ([200, 201, 299, 400, 500] as $status) {
+            try {
+                Response::redirect('/new', $status);
+                $this->fail("A redirect with {$status} was made");
+            } catch (\Sodaho\Router\Exception\RouterException $e) {
+                $this->assertSame('Redirect status must be a 3xx status', $e->getMessage());
+                $this->assertSame((string) $status, $e->getDebugMessage());
+            }
+        }
+    }
+
     public function testHtmlResponse(): void
     {
         $response = Response::html('<h1>Hello</h1>');

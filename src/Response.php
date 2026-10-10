@@ -347,13 +347,20 @@ final class Response
     }
 
     /**
-     * Redirect response.
+     * Redirect response — a 3xx status: a Location with a 200 is no redirect, the client
+     * shows the empty body (a 201 with a Location is Response::created()).
      *
      * @param string $url Target URL
-     * @param int $status HTTP status code (default: 302)
+     * @param int $status HTTP status code (default: 302), a 3xx status
+     *
+     * @throws RouterException When the status is no 3xx status
      */
     public static function redirect(string $url, int $status = 302): ResponseInterface
     {
+        if ($status < 300 || $status > 399) {
+            throw new RouterException('Redirect status must be a 3xx status', debugMessage: (string) $status);
+        }
+
         return new Psr7Response($status, ['Location' => $url]);
     }
 

@@ -59,6 +59,10 @@
   under the length of the other one — a corrupt download.
 
 ### Changed
+- `Response::redirect()` refuses a status that is no 3xx status with a `RouterException`
+  (`Redirect status must be a 3xx status`), as redirect routes do since 2.1.1: a `Location`
+  with a 200 is no redirect — the client shows the empty body. 2.0.0 promised a 3xx status
+  for both; a 201 with a `Location` is `Response::created()`.
 - `baseUrl` (config, `setBaseUrl()`, `APP_URL` through `fromEnv()`) has to be an address of
   a host: `http://` or `https://`, the host, a path at most. `example.com` made every
   absolute address relative (`example.com/users/5`), `//evil.example` or

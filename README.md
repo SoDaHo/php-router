@@ -631,7 +631,7 @@ Response::html($content);                                // text/html
 Response::html($content, 404);                           // text/html with status
 Response::text($content);                                // text/plain
 Response::redirect('/new-url');                          // 302
-Response::redirect('/new-url', 301);                     // 301
+Response::redirect('/new-url', 301);                     // 301 — a 3xx status, or a RouterException
 Response::download($content, 'file.pdf');                // Attachment (in-memory string, filename sanitized)
 Response::download($content, 'file.pdf', 'application/pdf');
 Response::download($png, 'avatar.png', 'image/png', inline: true);  // shown, not saved
