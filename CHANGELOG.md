@@ -8,8 +8,9 @@ What was wrong without a word is refused with a word now — where the routes ar
 the table is built where that is possible, as a 500 with a report where only a request
 shows it. 2.2.0 also changes behaviour 2.1.1 documented or pinned in its tests (`get('')`
 in a group, a middleware key that replaced another, a `status` taken from the details of an
-`RfcResponder` error, `urlEncoding` off, writing into a route's arrays in place); that is a
-deliberate deviation from SemVer by the owner's decision of 2026-10-10. See "Upgrading from
+`RfcResponder` error, `urlEncoding` off, writing into a route's arrays in place, a redirect
+with a 3xx status other than 301, 302, 303, 307 and 308); that is a deliberate deviation
+from SemVer by the owner's decision of 2026-10-10. See "Upgrading from
 2.1.1" at the end of this section for what all of it means for an application.
 
 ### Security
@@ -121,13 +122,14 @@ deliberate deviation from SemVer by the owner's decision of 2026-10-10. See "Upg
   such a dynamic HEAD route is not even asked (one PCRE gives up on made the HEAD a 500).
   A HEAD route still answers where no static GET route takes its path; without
   `implicitHead` nothing changes.
-- In the trailing slash mode `strict`, `get('')` inside a group registers the group's own
-  address: `/api` in `group('/api', …)`, while `get('/')` stays `/api/`. Up to 2.1.1 both
-  registered `/api/` (the second was a duplicate), and `/api` could not be registered in
-  the group at all. **A route written as `get('')` in a group moves from `/api/` to `/api`**
-  — write `get('/')` to keep `/api/`. Only the empty string itself: a pattern of blanks
-  alone (`get('   ')`) stays `/api/`. Outside a group and in the mode `ignore` nothing
-  changes.
+- In the trailing slash mode `strict`, an empty pattern inside a group registers the
+  group's own address, for every method (`get('')`, `post('')`, `match([…], '')`,
+  `redirect('')`): `/api` in `group('/api', …)`, while `get('/')` stays `/api/`. Up to
+  2.1.1 both registered `/api/` (the second was a duplicate), and `/api` could not be
+  registered in the group at all. **A route written as `get('')`, `post('')` or
+  `redirect('')` in a group moves from `/api/` to `/api`** — write `'/'` to keep `/api/`.
+  Only the empty string itself: a pattern of blanks alone (`get('   ')`) stays `/api/`.
+  Outside a group and in the mode `ignore` nothing changes.
 - A redirect has a status a client follows: 301, 302, 303, 307 or 308
   (`Response::REDIRECT_STATUSES`). `Response::redirect()` refuses any other with a
   `RouterException` (`Redirect status must be 301, 302, 303, 307 or 308`) — it took any
@@ -238,16 +240,18 @@ deliberate deviation from SemVer by the owner's decision of 2026-10-10. See "Upg
 - The "header injection" test of the security suite checked a fixed target against
   itself; it checks what refuses a line break now — the registration of a target with one,
   and a value with one (no route).
-- New public methods marked `@internal` (not part of the contract, used inside the
-  library): `Route::freeze()`, `Route::addMiddleware()`, `RouteCollector::assertNamesOnce()`,
-  `FileStream::fromHandle()`, `Response::fileFromHandle()`, `AppFolder::openWithin()`,
-  `AppFolder::below()`, `AppFolder::visibleBelow()`, `UrlGenerator::checkBaseUrl()`.
+- New public methods and a constant marked `@internal` (not part of the contract, used
+  inside the library): `Route::freeze()`, `Route::addMiddleware()`,
+  `RouteCollector::assertNamesOnce()`, `RouteCollector::TOKEN_CHARACTERS` (private in
+  2.1.1), `FileStream::fromHandle()`, `Response::fileFromHandle()`,
+  `AppFolder::openWithin()`, `AppFolder::below()`, `AppFolder::visibleBelow()`,
+  `UrlGenerator::checkBaseUrl()`.
 
 ### Upgrading from 2.1.1
 Much of what 2.2.0 refuses never worked as meant and is refused now instead of doing the
-wrong thing quietly; five changes break what 2.1.1 documented (see the top of this
-section). Under strict SemVer several of these changes would be a major release; this
-version follows the decision of the owner of 10 October 2026 to ship them as 2.2.0. What to
+wrong thing quietly; several changes break what 2.1.1 documented (see the top of this
+section). Under strict SemVer they would make a major release; this version follows the
+decision of the owner of 10 October 2026 to ship them as 2.2.0. What to
 look at:
 
 - **A refusal while the table is built is a 500 for every request.** A route the table
@@ -255,10 +259,16 @@ look at:
   twice, a redirect target the handler refuses) ends the building of the table — the
   application does not come up half-working, but it does not come up. Ask
   `$router->match($request)` once in a test or a deploy check: it builds the table and
-  throws what is wrong.
+  throws what is wrong. It does not run a request: what only a request shows — a
+  placeholder named like an attribute, a container entry that is no middleware — needs a
+  request through `handle()`, one per route, made as your middleware make it.
 - **Placeholders named like attributes.** A placeholder whose name an attribute of the
   request already has (set by a middleware for every request, or before `handle()`) ends
   the request in a 500. Rename one of them; keep identities under class-name keys.
+  `match()` does not find this: send the request through `handle()` with the attributes
+  your middleware set — a logged-in one where they set some only then. A handler that
+  hands the incoming request on (`$router->handle($request->withUri(…))`) carries its
+  attributes into the second route: build a fresh request.
 - **`urlEncoding` off.** Remove `'urlEncoding' => false` and `ROUTER_URL_ENCODING=false`
   (or an empty one), and `setEncodeParams(false)`. An address that must go out unchecked is
   one to build yourself.
@@ -286,14 +296,17 @@ look at:
 - **HEAD.** A dynamic `head()` route no longer answers for a path a static `get()` route
   takes — and no longer shields it: the GET handler runs for HEAD there, side effects
   included. Give such a route a static `head()` of its own, or turn `implicitHead` off.
-- **`get('')` in a group** (trailing slash mode `strict`) is the group's own address now;
-  write `get('/')` for the address with the slash (a pattern of blanks alone stays there).
+- **An empty pattern in a group** (`get('')`, `post('')`, `redirect('')` — every method;
+  trailing slash mode `strict`) is the group's own address now; write `'/'` for the
+  address with the slash (a pattern of blanks alone stays there).
 - **`Response::tooManyRequests()`** takes 0 or more seconds.
 - **Redirect statuses:** `Response::redirect()`, `redirect()` routes and `RedirectHandler`
   take 301, 302, 303, 307 or 308 only (a 300, 304 or 305 redirect route was accepted by
   2.1.1); use `Response::created()` for 201.
-- **`basePath` and `routesFile`** in the config take a string or `null`; `true`, a number
-  or an array are refused when the router is built.
+- **`basePath` and `routesFile`** in the config take a string or `null`; `true`, `false`, a
+  number or an array are refused when the router is built — also the `false` of
+  `'basePath' => getenv('ROUTER_BASE_PATH')` without the variable (2.1.1 cast it to `''`):
+  write `getenv(…) ?: null`, or let `Router::fromEnv()` read the variable.
 - **`baseUrl` / `APP_URL`** has to be `http(s)://host[:port][/path]`: a host the browser's
   parser takes, a port of digits (not an empty one), no user information or backslash —
   also for `UrlGenerator::setBaseUrl()` on a generator built by hand.
