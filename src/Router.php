@@ -1097,8 +1097,9 @@ final class Router implements RouterInterface
      *                         character other than a tab, the protocol version is no
      *                         version, or a header line is none — before anything is sent;
      *                         and after the headers, when the body gives no byte for
-     *                         'emitIdleTimeout' seconds before its end, or ends short of its
-     *                         Content-Length after a first byte
+     *                         'emitIdleTimeout' seconds before its end, ends short of its
+     *                         Content-Length after a first byte, or goes beyond it (what
+     *                         goes beyond is not sent)
      */
     public function emit(ResponseInterface $response, bool $withBody = true): void
     {
@@ -1285,6 +1286,10 @@ final class Router implements RouterInterface
         // then said: the client got less than the response promised, which must not look
         // like an answer that went out whole.
         $expected = self::contentLength($prepared['headers']);
+        // A 1xx, 204 or 304 has no body whatever its Content-Length says (RFC 9110, 8.6): no
+        // length is held against what such a response sends
+        $code = $prepared['code'];
+        $bodiless = $code < 200 || $code === 204 || $code === 304;
         $sent = 0;
         $pause = 0;
         // When the wait for the next byte ends, in seconds of the monotonic clock: set by the
@@ -1318,16 +1323,25 @@ final class Router implements RouterInterface
 
             $pause = 0;
             $deadline = null;
+
+            // Never more than the Content-Length: on a kept-alive connection the client reads
+            // what goes beyond it as the start of the next response. Sent up to it, then said
+            if ($expected !== null && !$bodiless && strlen($chunk) > $expected - $sent) {
+                echo substr($chunk, 0, $expected - $sent);
+
+                throw new RouterException(
+                    'Response body is longer than its Content-Length',
+                    debugMessage: sprintf('%d bytes sent, more followed', $expected),
+                );
+            }
+
             $sent += strlen($chunk);
             echo $chunk;
         }
 
         // So must a body that ended short of its Content-Length — once it sent a byte: one
         // that sent none is a response without a body (the answer to HEAD keeps the
-        // Content-Length of the GET, and emit() cannot know it answers HEAD), and a 1xx,
-        // 204 or 304 has none whatever its Content-Length says (RFC 9110, 8.6)
-        $code = $prepared['code'];
-        $bodiless = $code < 200 || $code === 204 || $code === 304;
+        // Content-Length of the GET, and emit() cannot know it answers HEAD)
         if ($expected !== null && $sent > 0 && $sent < $expected && !$bodiless) {
             throw new RouterException(
                 'Response body ended before its Content-Length',

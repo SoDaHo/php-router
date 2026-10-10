@@ -178,7 +178,9 @@ from SemVer by the owner's decision of 2026-10-10. See "Upgrading from
   `RouterException`: `run()` reports it to the `error` hook with the status that went out,
   `emit()` throws it. A body that sent no byte (the answer to `HEAD`, which keeps the
   `Content-Length` of the `GET`, also through `emit()` without `withBody: false`) and the
-  body of a 1xx, 204 or 304 are no short bodies (RFC 9110, 8.6).
+  body of a 1xx, 204 or 304 are no short bodies (RFC 9110, 8.6). A body longer than its
+  `Content-Length` went out whole — a kept-alive client read the rest as the start of the
+  next response; it is sent up to the length now, never beyond, and ends the same way.
 
 - `basePath` and `routesFile` in the config take a string (or `null` for their default);
   another type is refused with a `RouterException` when the router is built. `basePath`
@@ -323,8 +325,8 @@ look at:
   also for `UrlGenerator::setBaseUrl()` on a generator built by hand.
 - **`RfcResponder`**: `type`, `title` and `status` in the details are dropped.
 - **`emit()`** can throw after the headers went out: when the body gives no byte for
-  `emitIdleTimeout` seconds (30) or ends short of its `Content-Length` after a first byte
-  (`run()` reports it instead). 2.1.1 stopped silently at the third empty read in a row; a
+  `emitIdleTimeout` seconds (30), ends short of its `Content-Length` after a first byte, or
+  is longer than it — sent up to it, not beyond (`run()` reports it instead). 2.1.1 stopped silently at the third empty read in a row; a
   body that pauses longer than 30 seconds needs a higher `emitIdleTimeout`.
 - **A response's protocol version** has to be a version (`1.1`, `2`), and every header line
   a token name and a value without control characters other than a tab — a response that
