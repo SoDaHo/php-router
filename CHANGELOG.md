@@ -260,6 +260,10 @@ from SemVer by the owner's decision of 2026-10-10. See "Upgrading from
 - The two race tests (web app folder, `Response::file()`) start a second process that swaps
   the file; they wait for its signal (or the first swap), give it no pipe it could fill and
   block on, and are skipped — not passed — where it did not start or no request met a swap.
+- The tests of `emitIdleTimeout` keep 0.2 seconds or more between a byte and the deadline
+  (timeout 0.5), so that a busy CI machine does not decide them, and their bodies throw at
+  the 10,000th read or 5 seconds after the first instead of hanging the suite where a
+  deadline is broken — without a PHPUnit time limit, which needs pcntl.
 - The "header injection" test of the security suite checked a fixed target against
   itself; it checks what refuses a line break now — the registration of a target with one,
   and a value with one (no route).

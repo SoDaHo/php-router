@@ -59,26 +59,32 @@ class EmitIdleTimeoutTest extends TestCase
         $this->assertLessThan(30, $body->reads);
     }
 
+    // The times of the next three tests are 0.2 seconds or more apart from the idle timeout
+    // of 0.5, so that a busy CI machine — a pause that sleeps longer than asked, a process
+    // that waits for the CPU — does not decide them. A byte within the last 50 ms before
+    // the deadline (what the pause of half the time left is for) is too close to pin.
+
     public function testByteThatComesBeforeTheDeadlineIsTaken(): void
     {
-        // Ready 30 ms before the deadline, inside what could be the last 50 ms pause: a pause
-        // takes half the time left at most, so a read still comes before the deadline
-        $body = new LateBody(0.17);
+        // Ready 0.2 seconds before the deadline: the wait takes it
+        $body = new LateBody(0.3);
 
-        $this->assertSame('AB', $this->emitted(new Psr7Response(200, [], $body), ['emitIdleTimeout' => 0.2]));
+        $this->assertSame('AB', $this->emitted(new Psr7Response(200, [], $body), ['emitIdleTimeout' => 0.5]));
     }
 
     public function testByteThatComesAfterTheDeadlineIsRefused(): void
     {
-        // Ready 30 ms after the deadline: up to the first 2.2.0 candidate a byte that came
-        // after a pause was taken, and wound the clock back
-        $this->assertStalledAfterOneByte(new LateBody(0.23));
+        // Ready 0.3 seconds after the deadline: emit() gives up at the deadline, it does not
+        // wait for a byte that would still come
+        $this->assertStalledAfterOneByte(new LateBody(0.8));
     }
 
     public function testByteThatAReadGivesOnlyAfterTheDeadlineIsRefused(): void
     {
-        // The read itself takes longer than the idle timeout: what it gives came too late
-        $this->assertStalledAfterOneByte(new BlockingBody(0.3));
+        // The read itself takes 0.4 seconds longer than the idle timeout: what it gives came
+        // too late. Up to the first 2.2.0 candidate a byte that came after the deadline this
+        // way (or after a pause) was taken, and wound the clock back
+        $this->assertStalledAfterOneByte(new BlockingBody(0.9));
     }
 
     private function assertStalledAfterOneByte(StreamInterface $body): void
@@ -87,7 +93,7 @@ class EmitIdleTimeoutTest extends TestCase
         ob_start();
 
         try {
-            Router::create(['emitIdleTimeout' => 0.2])->emit(new Psr7Response(200, [], $body));
+            Router::create(['emitIdleTimeout' => 0.5])->emit(new Psr7Response(200, [], $body));
             $this->fail('emit() took a byte that came after the deadline');
         } catch (RouterException $e) {
             $this->assertSame('Response body stalled before its end: no byte within emitIdleTimeout', $e->getMessage());
@@ -108,7 +114,7 @@ class EmitIdleTimeoutTest extends TestCase
         $start = hrtime(true);
 
         try {
-            Router::create(['emitIdleTimeout' => 0.2])->emit(new Psr7Response(200, [], $body));
+            Router::create(['emitIdleTimeout' => 0.5])->emit(new Psr7Response(200, [], $body));
             $this->fail('emit() passed a stalled body off as a whole one');
         } catch (RouterException $e) {
             $this->assertSame('Response body stalled before its end: no byte within emitIdleTimeout', $e->getMessage());
@@ -121,8 +127,8 @@ class EmitIdleTimeoutTest extends TestCase
         }
 
         $elapsed = (hrtime(true) - $start) / 1e9;
-        $this->assertGreaterThanOrEqual(0.2, $elapsed);
-        $this->assertLessThan(2.0, $elapsed);
+        $this->assertGreaterThanOrEqual(0.5, $elapsed);
+        $this->assertLessThan(2.5, $elapsed);
         $this->assertGreaterThan(3, $body->reads, 'more than the three reads 2.1.1 gave it');
     }
 
@@ -218,11 +224,37 @@ class EmitIdleTimeoutTest extends TestCase
 }
 
 /**
+ * What keeps a broken deadline from hanging the suite: a body of these tests throws at its
+ * 10,000th read or 5 seconds after its first one — far beyond what a test asks of it (a
+ * few dozen reads, under a second) and far short of what reads with a pause of 50 ms
+ * would take to reach a read limit alone (some 80 minutes for 100,000). A PHPUnit time
+ * limit would need pcntl, which not every PHP has.
+ */
+trait GivesUpOnAHangingEmit
+{
+    private int $guardedReads = 0;
+    private ?float $firstReadAt = null;
+
+    /** Called first in every read(): throws once the limit of reads or of time is passed. */
+    private function guard(): void
+    {
+        $now = hrtime(true) / 1e9;
+        $this->firstReadAt ??= $now;
+
+        if (++$this->guardedReads > 10_000 || $now - $this->firstReadAt > 5.0) {
+            throw new \RuntimeException('emit() kept reading a body the test gave up on');
+        }
+    }
+}
+
+/**
  * A body that hands out its parts one read at a time — '' for a read that finds nothing
  * yet — and ends after the last one, or never.
  */
 final class ScriptedBody implements StreamInterface
 {
+    use GivesUpOnAHangingEmit;
+
     public int $reads = 0;
 
     /**
@@ -234,10 +266,8 @@ final class ScriptedBody implements StreamInterface
 
     public function read(int $length): string
     {
-        // Fails loudly instead of hanging the suite where nothing gives up
-        if (++$this->reads > 100_000) {
-            throw new \RuntimeException('emit() kept reading a stalled body');
-        }
+        $this->guard();
+        $this->reads++;
 
         return array_shift($this->parts) ?? '';
     }
@@ -317,6 +347,8 @@ final class ScriptedBody implements StreamInterface
  */
 final class LateBody implements StreamInterface
 {
+    use GivesUpOnAHangingEmit;
+
     public int $reads = 0;
     private int $step = 0;
     private ?float $readyAt = null;
@@ -327,6 +359,7 @@ final class LateBody implements StreamInterface
 
     public function read(int $length): string
     {
+        $this->guard();
         $this->reads++;
         if ($this->step === 0) {
             $this->step = 1;
@@ -419,6 +452,8 @@ final class LateBody implements StreamInterface
  */
 final class BlockingBody implements StreamInterface
 {
+    use GivesUpOnAHangingEmit;
+
     private int $step = 0;
 
     public function __construct(private float $seconds)
@@ -427,6 +462,7 @@ final class BlockingBody implements StreamInterface
 
     public function read(int $length): string
     {
+        $this->guard();
         $this->step++;
 
         return match ($this->step) {
