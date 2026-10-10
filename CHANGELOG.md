@@ -57,6 +57,13 @@ application.
   made PHP drop the status line and send its own 200, a 403 went out as a 200. `run()`
   answers 500 and the `error` hook gets the `RouterException`, `emit()` throws it.
 
+- `run()` and `emit()` check every header line before anything is sent: a name that is no
+  token of RFC 9110 and a value with a control character other than a tab are refused with
+  a `RouterException` (`run()` answers 500, `emit()` throws). Such a line — from a PSR-7
+  object that does not check, Nyholm's does — failed only in `header()`, after the lines in
+  front of it went out: a `Location` there had made PHP's status a 302, and an intended 403
+  was lost.
+
 ### Changed
 - URL encoding can no longer be turned off. `'urlEncoding' => false` (or `0`, `'off'`,
   `''`), `ROUTER_URL_ENCODING=false` (or empty) and `UrlGenerator::setEncodeParams(false)`
@@ -214,7 +221,9 @@ wrong thing quietly. What to look at:
 - **`Response::redirect()`** takes a 3xx status only; use `Response::created()` for 201.
 - **`baseUrl` / `APP_URL`** has to be `http(s)://host[/path]`.
 - **`RfcResponder`**: `type`, `title` and `status` in the details are dropped.
-- **A response's protocol version** has to be a version (`1.1`, `2`).
+- **A response's protocol version** has to be a version (`1.1`, `2`), and every header line
+  a token name and a value without control characters other than a tab — a response that
+  breaks this gets the router's 500 from `run()`, an exception from `emit()`.
 - **PHPStan:** `Route::$middleware` is `array<string|object>`; the three route properties
   have `set` hooks (no writes into them in place).
 

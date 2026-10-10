@@ -902,10 +902,13 @@ every field the router does not know. `X-Frame-Options`, `Strict-Transport-Secur
 `Access-Control-Allow-Origin` are added as well, not replaced — set them in one place. The
 status is the response's, whatever its headers are — PHP would turn a 403 with
 `WWW-Authenticate` into a 401 and a 200 with a `Location` into a 302; a redirect is a 3xx
-status (`Response::redirect()`). The status line is checked before anything is sent: a
-reason phrase with a control character other than a tab and a protocol version that is no
-version (a digit, and a dot and a digit for a minor one: `1.1`, `1.0`, `2`) are refused —
-PHP would drop such a line and send its own 200. `run()` answers 500 then (the `error`
+status (`Response::redirect()`). Status line and header lines are checked before anything
+is sent: a reason phrase with a control character other than a tab, a protocol version that
+is no version (a digit, and a dot and a digit for a minor one: `1.1`, `1.0`, `2`), a header
+name that is no token (RFC 9110) and a header value with a control character other than a
+tab are refused — PHP would drop such a status line and send its own 200, and refuse such a
+header line only after the lines in front of it went out (a `Location` among them makes
+the status a 302). `run()` answers 500 then (the `error`
 hook gets the `RouterException`), `emit()` throws it. If output has already started,
 nothing can be sent any more: the `error` hook is called with `type: 'emit'`.
 

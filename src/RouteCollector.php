@@ -53,8 +53,13 @@ final class RouteCollector
     /** @internal */
     public const PLAIN_PATH_RULE = 'must be a plain path, written decoded: no backslash, control character, percent-encoded character (%20), "?", "#" or dot segment';
 
-    /** What an HTTP method is made of: a token of RFC 9110 (section 5.6.2), one or more of these */
-    private const TOKEN_CHARACTERS = "!#$%&'*+-.^_`|~0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+    /**
+     * What an HTTP method — and a header name — is made of: a token of RFC 9110 (section
+     * 5.6.2), one or more of these. Router::emit() checks header names against it.
+     *
+     * @internal
+     */
+    public const TOKEN_CHARACTERS = "!#$%&'*+-.^_`|~0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 
     /**
      * How a pattern is read, for parts() and compile() alike: anything in braces, and what

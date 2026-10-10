@@ -1032,8 +1032,8 @@ final class Router implements RouterInterface
      * @param bool $withBody False for a HEAD request: the body is not read at all
      *
      * @throws RouterException If the body cannot be read, the reason phrase has a control
-     *                         character other than a tab, or the protocol version is no
-     *                         version — before anything is sent
+     *                         character other than a tab, the protocol version is no
+     *                         version, or a header line is none — before anything is sent
      */
     public function emit(ResponseInterface $response, bool $withBody = true): void
     {
@@ -1085,8 +1085,10 @@ final class Router implements RouterInterface
      *
      *
      * @throws RouterException If the response body cannot be read (closed or detached), the
-     *                         reason phrase has a control character other than a tab, or the
-     *                         protocol version is no version (a digit, a dot and a digit)
+     *                         reason phrase has a control character other than a tab, the
+     *                         protocol version is no version (a digit, a dot and a digit), or
+     *                         a header has a name that is no token or a value with a control
+     *                         character other than a tab
      *
      * @return array{status: string, headers: array<int|string, array<string>>, body: StreamInterface}
      */
@@ -1137,6 +1139,27 @@ final class Router implements RouterInterface
             $reasonPhrase
         );
 
+        // A header line is checked as well — A11: the PSR-7 object of an application may
+        // not check it, and header() only finds out once lines went out (a Location before
+        // it had made PHP's status a 302, a 403 got lost). A name is a token (RFC 9110), a
+        // value a string without a control character other than a tab.
+        $headers = $response->getHeaders();
+        foreach ($headers as $name => $values) {
+            $name = (string) $name;
+            $fine = $name !== '' && strspn($name, RouteCollector::TOKEN_CHARACTERS) === strlen($name);
+
+            foreach ($fine ? $values : [] as $value) {
+                $fine = $fine && preg_match('/[\x00-\x08\x0A-\x1F\x7F]/', $value) !== 1;
+            }
+
+            if (!$fine) {
+                throw new RouterException(
+                    'Response header must have a token as its name and a value without a control character other than a tab',
+                    debugMessage: (string) json_encode($name, JSON_INVALID_UTF8_SUBSTITUTE),
+                );
+            }
+        }
+
         // For string bodies the emitted bytes are identical to the previous `echo
         // $response->getBody()`: Nyholm's __toString() rewound the stream and returned
         // everything, which is exactly what transmit() does piecewise.
@@ -1144,7 +1167,7 @@ final class Router implements RouterInterface
             $body->rewind();
         }
 
-        return ['status' => $statusLine, 'headers' => $response->getHeaders(), 'body' => $body];
+        return ['status' => $statusLine, 'headers' => $headers, 'body' => $body];
     }
 
     /**

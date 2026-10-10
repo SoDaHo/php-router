@@ -352,10 +352,14 @@ class EmitStatusTest extends TestCase
         $this->assertSame(['router exception mid-body | 503'], $reports);
     }
 
-    public function testHeaderThatFailsBeforeTheStatusLineReportsTheStatusPhpSet(): void
+    /**
+     * A header PHP would refuse (a line break in the value; the PSR-7 object of an
+     * application may not check), behind a Location: up to 2.1.1 the Location went out
+     * first and made PHP's status a 302, then header() failed. It is refused before
+     * anything is sent now (A11): no Location, no 302, the router's 500 instead.
+     */
+    public function testHeaderLineThatIsNoneIsRefusedBeforeAnythingIsSent(): void
     {
-        // A header PHP refuses (a line break in the value; the PSR-7 object of an
-        // application may not check), after a Location that made PHP's status a 302
         // @phpstan-ignore class.extendsFinalByPhpDoc (a response that misbehaves on purpose)
         $response = new class (200) extends \Nyholm\Psr7\Response {
             public function getHeaders(): array
@@ -374,13 +378,82 @@ class EmitStatusTest extends TestCase
             restore_error_handler();
         }
 
-        $this->assertSame('', $sent);
-        $this->assertSame(302, http_response_code());
-        $this->assertCount(1, $reports);
-        $this->assertStringEndsWith(' | 302', $reports[0]);
+        $this->assertSame('Internal Server Error', $sent);
+        $this->assertSame(500, http_response_code());
+        $this->assertSame([self::HEADER_REFUSED . ' | 500'], $reports);
     }
 
-    public function testFirstHeaderThatFailsUnderTheCliReportsThe200PhpWouldSend(): void
+    private const HEADER_REFUSED = 'Response header must have a token as its name and a value without a control character other than a tab';
+
+    /**
+     * @return array<string, array{0: array<string, list<string>>}>
+     */
+    public static function headerLinesThatAreNone(): array
+    {
+        return [
+            'line feed in a value' => [['X-Broken' => ["a\nb"]]],
+            'carriage return and line feed' => [['X-Broken' => ["a\r\nX-Injected: 1"]]],
+            'NUL in a value' => [['X-Broken' => ["a\0b"]]],
+            'DEL in a value' => [['X-Broken' => ["a\x7Fb"]]],
+            'blank in a name' => [['X Broken' => ['a']]],
+            'colon in a name' => [['X-Broken:' => ['a']]],
+            'empty name' => [['' => ['a']]],
+        ];
+    }
+
+    /**
+     * @param array<string, list<string>> $headers
+     */
+    #[DataProvider('headerLinesThatAreNone')]
+    public function testEmitRefusesAHeaderLineThatIsNone(array $headers): void
+    {
+        // @phpstan-ignore class.extendsFinalByPhpDoc (a response that misbehaves on purpose)
+        $response = new class (403, $headers) extends \Nyholm\Psr7\Response {
+            /** @param array<string, list<string>> $broken */
+            public function __construct(int $status, private readonly array $broken)
+            {
+                parent::__construct($status);
+            }
+
+            public function getHeaders(): array
+            {
+                return ['Location' => ['/there'], ...$this->broken];
+            }
+        };
+
+        ob_start();
+        try {
+            Router::create()->emit($response);
+            $this->fail('The response was sent');
+        } catch (\Sodaho\Router\Exception\RouterException $e) {
+            $this->assertSame(self::HEADER_REFUSED, $e->getMessage());
+        } finally {
+            $sent = (string) ob_get_clean();
+        }
+
+        // Nothing went out: no status of PHP's own, no body
+        $this->assertSame('', $sent);
+        $this->assertFalse(http_response_code());
+    }
+
+    public function testHeaderLineOfVisibleTextAndATabGoesOut(): void
+    {
+        // @phpstan-ignore class.extendsFinalByPhpDoc (a response that misbehaves on purpose)
+        $response = new class (200) extends \Nyholm\Psr7\Response {
+            public function getHeaders(): array
+            {
+                return ['X-Fine' => ["a\tb", 'äöü (obs-text)'], 'X-Token!#$%&\'*+-.^_`|~' => ['1']];
+            }
+        };
+
+        [$sent, $reports] = $this->runWith(fn () => $response);
+
+        $this->assertSame([], $reports);
+        $this->assertSame(200, http_response_code());
+        $this->assertSame('', $sent);
+    }
+
+    public function testHeaderLineThatIsNoneAloneIsRefusedAsWell(): void
     {
         // @phpstan-ignore class.extendsFinalByPhpDoc (a response that misbehaves on purpose)
         $response = new class (503) extends \Nyholm\Psr7\Response {
@@ -400,11 +473,10 @@ class EmitStatusTest extends TestCase
             restore_error_handler();
         }
 
-        // Nothing set a status yet: the CLI keeps none, a server would send its 200
-        $this->assertSame('', $sent);
-        $this->assertFalse(http_response_code());
-        $this->assertCount(1, $reports);
-        $this->assertStringEndsWith(' | 200', $reports[0]);
+        // Refused before anything was sent: the router's 500 goes out instead
+        $this->assertSame('Internal Server Error', $sent);
+        $this->assertSame(500, http_response_code());
+        $this->assertSame([self::HEADER_REFUSED . ' | 500'], $reports);
     }
 
     public function testWithoutStreamsAResponseThatCannotBeReadGetsAPlain500(): void
