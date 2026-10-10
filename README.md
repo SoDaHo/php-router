@@ -185,7 +185,9 @@ holds two in a row, so `/files//etc/passwd` and `/files/a//b` do not match
 value `/etc/passwd` — an absolute path for every helper that takes one as such
 (`Path::makeAbsolute('/etc/passwd', '/srv/files')` is `/etc/passwd`). One slash at the end
 of the value stays where the path ends with it (`/files/docs/` gives `docs/` in the mode
-`strict`), and the value may be empty (`/files/`). Still: build a file path from a value
+`strict`), and the value may be empty (`/files/`) — in the middle of a pattern that makes an
+empty segment of the path (`/files/{path:any}/meta` takes `/files//meta`): what is refused
+is an empty segment inside the value. Still: build a file path from a value
 only after `realpath()` and a prefix check — on Windows `C:/…` is absolute as well.
 
 ### Custom Patterns
@@ -326,7 +328,9 @@ A route is set up in the routes file and read afterwards. Once the route table i
 process (RoadRunner, FrankenPHP, `handle()` in a loop) a value one request wrote onto it was
 what the next request read. Keep what belongs to one request in a request attribute. The
 arrays are never written in place (`$route->attributes['k'] = …`, `$route->middleware[] =
-…`): PHP refuses that with an `Error`, also in the routes file — use the setters.
+…`): PHP refuses that with an `Error`, also in the routes file — use the setters. The freeze
+is shallow: an object among the attributes (or a middleware instance) stays the object it
+is, and what one request changes on it the next one sees — keep such objects unchanged.
 
 ## Middleware
 

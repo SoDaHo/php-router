@@ -31,7 +31,9 @@ from SemVer by the owner's decision of 2026-10-10. See "Upgrading from
   path no longer matches the route (404 where no other route takes it), and `url()` refuses
   such a value (`a//b`, `/a`) as one that does not lead back. A slash at the end of the
   value stays where the path ends with it (`/files/docs/` gives `docs/`), an empty value
-  as well. The built-in pattern is `(?:[^/]+(?:/[^/]+)*(?:/(?=\z))?)?` instead of `.*`.
+  as well — in the middle of a pattern that makes an empty segment of the path
+  (`/files/{path:any}/meta` takes `/files//meta`); refused is an empty segment inside the
+  value. The built-in pattern is `(?:[^/]+(?:/[^/]+)*(?:/(?=\z))?)?` instead of `.*`.
 - A web app folder (`Router::app()`) opens a file before it reads anything of it, and
   checks the open file: its path still resolves to itself inside the folder, and the file
   under that path is the one that was opened (device and file number). A writer of the
@@ -96,7 +98,9 @@ from SemVer by the owner's decision of 2026-10-10. See "Upgrading from
   ->attribute('role', …)`) was what the next request read. The three properties stay public
   and readable. Writing into one of the arrays in place (`$route->attributes['k'] = …`,
   `$route->middleware[] = …`) is an `Error` of PHP now, also before the table is built —
-  the properties have a `set` hook; use the setters or assign the array as a whole.
+  the properties have a `set` hook; use the setters or assign the array as a whole. The
+  freeze is shallow: an object among the attributes or the middleware stays the object it
+  is, and what one request changes on it the next one sees.
 - A middleware key given a second time is refused with a `RouterException` where it is
   written: a route's `->middleware(['auth' => …])` inside a group with an `'auth'`, an
   inner `middlewareGroup()` with a key of an outer one, a second `Router::middleware()` call
@@ -293,7 +297,8 @@ look at:
 - **Routes changed at runtime.** Code that calls `attribute()`, `middleware()` or `name()`
   on a route after the table is built — in a middleware, a handler — throws now; keep what
   belongs to one request in a request attribute. In the routes file, write the arrays
-  through the setters: `$route->attributes['k'] = …` is a PHP `Error`.
+  through the setters: `$route->attributes['k'] = …` is a PHP `Error`. An object among the
+  attributes is not frozen with the route: keep it unchanged.
 - **Middleware keys.** Give middleware that should both run keys of their own; one that
   should replace another is a group or route of its own.
 - **Middleware from the container.** Register the middleware instance (or let the
@@ -301,7 +306,12 @@ look at:
 - **Route names.** A name names one address: give routes of different patterns names of
   their own (routes of one pattern may share one).
 - **`{path:any}` and empty segments.** `/files//x` no longer reaches `/files/{path:any}`;
-  `url()` refuses values with an empty segment.
+  `url()` refuses values with an empty segment (an empty value in the middle of a pattern
+  still makes one in the path: `/files//meta` for `/files/{path:any}/meta`).
+- **A web app folder at the root of the file system.** `Router::app('/', '/')` served no
+  file in 2.1.1, a configuration without effect; now it serves every file PHP can read
+  with a listed extension that no hidden segment leads to. Remove such a configuration
+  unless that is meant.
 - **Redirects.** A `RedirectHandler` built by hand throws when it is built where its target
   leaves scheme or host to a placeholder, has a control character other than a tab
   (`"/new\r\nX: 1"`), a placeholder that is not `{name}` (`'/new/{id:int}'`), or where its
@@ -324,7 +334,8 @@ look at:
   2.1.1; for `routesFile` `false` is refused.
 - **`baseUrl` / `APP_URL`** has to be `http(s)://host[:port][/path]`: a host the browser's
   parser takes, a port of digits (not an empty one), no user information or backslash —
-  also for `UrlGenerator::setBaseUrl()` on a generator built by hand.
+  also for `UrlGenerator::setBaseUrl()` on a generator built by hand, where `''` means none
+  now: `absoluteUrl()` throws then (2.1.1 gave a relative address).
 - **`RfcResponder`**: `type`, `title` and `status` in the details are dropped.
 - **`emit()`** can throw after the headers went out: when the body gives no byte for
   `emitIdleTimeout` seconds (30), ends short of its `Content-Length` after a first byte, or

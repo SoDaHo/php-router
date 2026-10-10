@@ -15,11 +15,13 @@ use Sodaho\Router\Exception\RouterException;
  * serves, and what one request changed on it held for every request after it in the same
  * process — so every further change throws a RouterException. Writing into one of the
  * arrays in place ($route->attributes['k'] = …, $route->middleware[] = …) is never
- * possible: PHP refuses it with an Error, the setters are the way.
+ * possible: PHP refuses it with an Error, the setters are the way. The freeze is shallow:
+ * an object among the attributes or the middleware stays the object it is, and what one
+ * request changes on it the next one sees — keep such objects unchanged, or per request.
  */
 final class Route
 {
-    /** Set when the route table is built: from then on nothing of the route changes */
+    /** Set when the route table is built: from then on the route itself does not change */
     private bool $frozen = false;
 
     /**
