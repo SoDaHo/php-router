@@ -818,7 +818,7 @@ open.)
 | `routesFile` | - | `null` | Routes file, as `loadRoutes()` sets it — a string, or `null` for none; another type is refused |
 | `implicitHead` | - | `true` | Answer `HEAD` through the `GET` route (see [HTTP Methods](#http-methods)) |
 | `emitChunkSize` | - | `8192` | Bytes `run()`/`emit()` read from the response body at a time; an integer, or a string of digits, from 1024 to 16777216 (see [Memory](#memory)) |
-| `emitIdleTimeout` | - | `30` | Seconds `run()`/`emit()` wait for the next byte of a body that has not ended (a read that gives `''` before the end); a number above 0 and up to 3600, a fraction as well (`0.5`), or a string of one. Then the body is given up on (see [PSR-15 Compatibility](#psr-15-compatibility)) |
+| `emitIdleTimeout` | - | `30` | Seconds `run()`/`emit()` wait for the next byte of a body that has not ended (a read that gives `''` before the end); a number above 0 and up to 3600, a fraction as well (`0.5`), or a string of one with six decimals at most (more would be rounded before the comparison). Then the body is given up on (see [PSR-15 Compatibility](#psr-15-compatibility)) |
 
 ## Hooks (Logging)
 

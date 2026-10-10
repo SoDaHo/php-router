@@ -313,7 +313,10 @@ final class Router implements RouterInterface
 
     /**
      * How long emit() waits for the next byte of a body that has not ended: a number of
-     * seconds above 0 (a fraction as well), up to an hour — or a string of such a number.
+     * seconds above 0 (a fraction as well), up to an hour — or a string of such a number,
+     * with six decimals at most: the wait is a matter of microseconds, and a string with
+     * more would be rounded before it is compared ('3600.0000000000000000000000000001' is
+     * the float 3600.0). An int or float is compared as the float it is.
      * 0 would give up at the first empty read, which a stream may give while its next
      * bytes are on their way.
      *
@@ -323,7 +326,7 @@ final class Router implements RouterInterface
     {
         $seconds = match (true) {
             is_int($value), is_float($value) => (float) $value,
-            is_string($value) && preg_match('/^\d+(?:\.\d+)?$/D', $value) === 1 => (float) $value,
+            is_string($value) && preg_match('/^\d+(?:\.\d{1,6})?$/D', $value) === 1 => (float) $value,
             default => null,
         };
 

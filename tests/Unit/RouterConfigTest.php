@@ -1233,6 +1233,12 @@ class RouterConfigTest extends TestCase
             'negative' => [-1],
             'above an hour' => [3601],
             'just above an hour' => [3600.5],
+            'a microsecond above an hour' => ['3600.000001'],
+            // A string with more decimals than the microsecond would be rounded before the
+            // comparison — this one is the float 3600.0
+            'above an hour in decimals a float does not hold' => ['3600.0000000000000000000000000001'],
+            'more decimals than microseconds' => ['0.0000001'],
+            'a point and no decimals' => ['30.'],
             'infinite' => [INF],
             'not a number' => [NAN],
             'a word' => ['long'],
@@ -1257,8 +1263,21 @@ class RouterConfigTest extends TestCase
 
     public function testIdleTimeoutIsANumberOfSecondsUpToAnHour(): void
     {
-        foreach ([30, 0.5, '0.5', '30', 3600, null] as $value) {
+        foreach ([30, 0.5, '0.5', '30', 3600, '3600.000000', '0.000001', null] as $value) {
             $this->assertInstanceOf(Router::class, Router::create(['emitIdleTimeout' => $value]), var_export($value, true));
+        }
+    }
+
+    public function testIdleTimeoutIsNotReadFromTheEnvironment(): void
+    {
+        $_ENV['ROUTER_EMIT_IDLE_TIMEOUT'] = 'never';
+        putenv('ROUTER_EMIT_IDLE_TIMEOUT=never');
+
+        try {
+            $this->assertInstanceOf(Router::class, Router::fromEnv());
+        } finally {
+            unset($_ENV['ROUTER_EMIT_IDLE_TIMEOUT']);
+            putenv('ROUTER_EMIT_IDLE_TIMEOUT');
         }
     }
 }

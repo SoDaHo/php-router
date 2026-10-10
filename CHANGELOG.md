@@ -192,8 +192,9 @@ from SemVer by the owner's decision of 2026-10-10. See "Upgrading from
 
 ### Added
 - `emitIdleTimeout` config option: how many seconds `run()`/`emit()` wait for the next byte
-  of a response body that has not ended — above 0 and up to 3600, a fraction as well;
-  default 30.
+  of a response body that has not ended — above 0 and up to 3600, a fraction as well (as a
+  string six decimals at most); default 30. Not read from the environment, like
+  `emitChunkSize`.
 - `Dispatcher::staticRoute()`: the static route of a method for a path, without a pass over
   the dynamic routes.
 - `Response::REDIRECT_STATUSES`: the statuses a redirect goes out with (301, 302, 303, 307,
