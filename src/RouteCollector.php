@@ -797,15 +797,17 @@ final class RouteCollector
     }
 
     /**
-     * One name, one route: url() gave the address of whichever route had the name last —
-     * 'oauth.callback' could lead to a debug route defined further down. Asked when the
-     * table is built (and by UrlGenerator): name() may still be called until then.
+     * One name, one address: url() gave the address of whichever route had the name last —
+     * 'oauth.callback' could lead to a debug route defined further down. Routes of the same
+     * pattern may share a name (get('/login') and post('/login') as 'login'): url() writes
+     * the same address for either. Asked when the table is built (and by UrlGenerator):
+     * name() may still be called until then.
      *
      * @internal
      *
      * @param iterable<Route> $routes
      *
-     * @throws DuplicateRouteException When two routes have the same name
+     * @throws DuplicateRouteException When two routes of different patterns have the same name
      */
     public static function assertNamesOnce(iterable $routes): void
     {
@@ -817,7 +819,7 @@ final class RouteCollector
                 continue;
             }
 
-            if (isset($patterns[$name])) {
+            if (isset($patterns[$name]) && $patterns[$name] !== $route->pattern) {
                 throw new DuplicateRouteException(
                     'Route name is already taken: a name belongs to one route',
                     debugMessage: sprintf('%s: %s and %s', $name, $patterns[$name], $route->pattern),

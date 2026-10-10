@@ -103,11 +103,13 @@ application.
   request ends in a 500 and the `error` hook gets a `RouterException`. The router used to
   build the class itself with its constructor's defaults instead — a rate limit configured
   with 5 ran with its default.
-- Two routes with the same name are refused with a `DuplicateRouteException` when the route
-  table is built (and by `new UrlGenerator()` for a list of `Route` objects): the first
-  request is answered with 500 and reported, `url()` and `match()` throw. `url()` gave the
-  address of whichever route had the name last — `oauth.callback` could lead to a route
-  defined further down. A route renamed with a second `name()` is still one route.
+- Two routes of different patterns with the same name are refused with a
+  `DuplicateRouteException` when the route table is built (and by `new UrlGenerator()` for a
+  list of `Route` objects): the first request is answered with 500 and reported, `url()`
+  and `match()` throw. `url()` gave the address of whichever route had the name last —
+  `oauth.callback` could lead to a route defined further down. Routes of the same pattern
+  may share a name (`get('/login')` and `post('/login')` as `login`: one address); a route
+  renamed with a second `name()` is still one route.
 - With `implicitHead` (the default) a static GET route wins over a dynamic HEAD route, as
   a static route wins over a dynamic one for every method: `HEAD /users/me` is answered by
   `get('/users/me')` like the GET, no longer by `head('/users/{id}')` with `id` = `me`.
@@ -243,7 +245,8 @@ What to look at:
   should replace another is a group or route of its own.
 - **Middleware from the container.** Register the middleware instance (or let the
   container build it), not a factory closure under its class name.
-- **Route names.** Give every route its own name.
+- **Route names.** A name names one address: give routes of different patterns names of
+  their own (routes of one pattern may share one).
 - **`{path:any}` and empty segments.** `/files//x` no longer reaches `/files/{path:any}`;
   `url()` refuses values with an empty segment.
 - **Redirects.** A `RedirectHandler` built by hand throws when it is built where its target

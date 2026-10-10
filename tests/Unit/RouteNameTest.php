@@ -79,6 +79,21 @@ class RouteNameTest extends TestCase
         $this->assertFalse($generator->hasRoute('first'));
     }
 
+    /**
+     * The same name on the same pattern (a form: GET shows it, POST takes it) names one
+     * address — url() is not in doubt, nothing to refuse
+     */
+    public function testRoutesOfOnePatternMayShareAName(): void
+    {
+        $collector = new RouteCollector();
+        $collector->get('/login', 'handler')->name('login');
+        $collector->post('/login', 'handler')->name('login');
+
+        $collector->getData();
+
+        $this->assertSame('/login', new UrlGenerator($collector->getRoutes())->url('login'));
+    }
+
     public function testUrlGeneratorRefusesTwoRouteObjectsUnderOneName(): void
     {
         $this->expectException(DuplicateRouteException::class);

@@ -519,8 +519,9 @@ $url = $router->absoluteUrl('user.show', ['id' => 5]);
 // → https://example.com/users/5
 ```
 
-A name belongs to one route: two routes with the same name end the building of the route
-table with a `DuplicateRouteException` (the first request is a 500 and reported, `url()`
+A name belongs to one address: two routes of different patterns with the same name end the
+building of the route table with a `DuplicateRouteException` (routes of one pattern may share
+a name — `get('/login')` and `post('/login')` as `login`) (the first request is a 500 and reported, `url()`
 and `match()` throw), naming both patterns in `getDebugMessage()` — `url()` used to give the
 address of whichever came last. A name that no route has throws a `RouteNotFoundException`;
 its message names only the name asked for, its `getDebugMessage()` lists every route name
@@ -1018,7 +1019,7 @@ where the log is yours alone; show neither to a client.
 | `NotFoundException` | Never thrown by the router (it answers 404 itself); for your own code |
 | `MethodNotAllowedException` | Never thrown by the router (it answers 405 itself); for your own code |
 | `RouteNotFoundException` | Named route doesn't exist (URL generation); `getDebugMessage()` lists every route name |
-| `DuplicateRouteException` | Same method+pattern registered twice, or two routes with the same name (when the table is built, and in `new UrlGenerator()`) |
+| `DuplicateRouteException` | Same method+pattern registered twice, or two routes of different patterns with the same name (when the table is built, and in `new UrlGenerator()`) |
 
 ## Trailing Slash Handling
 
