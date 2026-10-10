@@ -496,6 +496,13 @@ $url = $router->absoluteUrl('user.show', ['id' => 5]);
 // → https://example.com/users/5
 ```
 
+A name belongs to one route: two routes with the same name end the building of the route
+table with a `DuplicateRouteException` (the first request is a 500 and reported, `url()`
+and `match()` throw), naming both patterns in `getDebugMessage()` — `url()` used to give the
+address of whichever came last. A name that no route has throws a `RouteNotFoundException`;
+its message names only the name asked for, its `getDebugMessage()` lists every route name
+of the application — keep it out of responses and logs that others read.
+
 Values are encoded (`rawurlencode()`, always — see `urlEncoding`), and so is the literal
 text of route pattern and base path (`/my app/{x}` goes out as `/my%20app/…`; what a path
 may contain as it is — `:`, `@`, `!$&'()*+,;=` — stays). `url()` returns an address only

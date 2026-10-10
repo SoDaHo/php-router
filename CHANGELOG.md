@@ -23,6 +23,11 @@
   as well. The built-in pattern is `(?:[^/]+(?:/[^/]+)*(?:/(?=\z))?)?` instead of `.*`.
 
 ### Changed
+- Two routes with the same name are refused with a `DuplicateRouteException` when the route
+  table is built (and by `new UrlGenerator()` for a list of `Route` objects): the first
+  request is answered with 500 and reported, `url()` and `match()` throw. `url()` gave the
+  address of whichever route had the name last — `oauth.callback` could lead to a route
+  defined further down. A route renamed with a second `name()` is still one route.
 - README: two placeholders that take slashes in one route (`/{a:any}/{b:any}`) make the
   work grow with the square of the path's segments — a path of some 800 segments reaches
   PCRE's default backtrack limit and is answered with 500 (reported, never "no match"); a

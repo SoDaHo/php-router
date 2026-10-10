@@ -758,12 +758,17 @@ final class RouteCollector
      * Compile routes for the Dispatcher — and freeze them (see Route): from here on a route
      * serves requests and cannot be changed any more.
      *
+     * @throws DuplicateRouteException When two routes have the same name
+     * @throws RouterException When a route uses a type nobody defined or a fragment of its own does not compile
+     *
      * @return array{0: array<string, array<string, Route>>, 1: array<string, array<int, array{regex: string, route: Route, casts: array<string, string>}>>} [staticRoutes, dynamicRoutes]
      */
     public function getData(): array
     {
         $staticRoutes = [];
         $dynamicRoutes = [];
+
+        self::assertNamesOnce($this->routes);
 
         foreach ($this->routes as $route) {
             foreach ($route->methods as $method) {
@@ -842,6 +847,38 @@ final class RouteCollector
                     debugMessage: sprintf('%s: {%s:%s} is %s', $pattern, $part['name'], $type, $this->patterns[$type]),
                 );
             }
+        }
+    }
+
+    /**
+     * One name, one route: url() gave the address of whichever route had the name last —
+     * 'oauth.callback' could lead to a debug route defined further down. Asked when the
+     * table is built (and by UrlGenerator): name() may still be called until then.
+     *
+     * @internal
+     *
+     * @param iterable<Route> $routes
+     *
+     * @throws DuplicateRouteException When two routes have the same name
+     */
+    public static function assertNamesOnce(iterable $routes): void
+    {
+        $patterns = [];
+
+        foreach ($routes as $route) {
+            $name = $route->name;
+            if ($name === null) {
+                continue;
+            }
+
+            if (isset($patterns[$name])) {
+                throw new DuplicateRouteException(
+                    'Route name is already taken: a name belongs to one route',
+                    debugMessage: sprintf('%s: %s and %s', $name, $patterns[$name], $route->pattern),
+                );
+            }
+
+            $patterns[$name] = $route->pattern;
         }
     }
 
