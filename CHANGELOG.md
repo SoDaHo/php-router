@@ -43,6 +43,11 @@
   `array<string|object>` since 2.1.1 (it said `array<int, string|object>` before, and 2.1.1
   did not mention it): string keys are kept as the application gave them. Code that hands
   it on as a `list` under PHPStan sees the wider type.
+- Middleware named by class: when the container has the name but returns something that
+  is no `MiddlewareInterface` (a factory closure registered in place of the instance), the
+  request ends in a 500 and the `error` hook gets a `RouterException`. The router used to
+  build the class itself with its constructor's defaults instead — a rate limit configured
+  with 5 ran with its default.
 
 ## [2.1.1] - 2026-10-09
 

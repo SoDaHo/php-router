@@ -794,7 +794,16 @@ final class RouteDispatcher implements RequestHandlerInterface
     }
 
     /**
-     * @throws RouterException If middleware cannot be resolved
+     * The middleware instance for an entry of a middleware list: an instance as it is, a
+     * class name from the container where it has one — the container decides how it is
+     * built (a rate limit with its configured limit) — or built here when its constructor
+     * needs nothing. What the container returns for a name it has is taken or refused,
+     * never replaced by an instance built here with the constructor's defaults: a factory
+     * registered in place of the instance would otherwise quietly run the middleware
+     * with other settings than the application gave it.
+     *
+     * @throws RouterException If middleware cannot be resolved, or the container's entry for
+     *                         it is no MiddlewareInterface
      */
     private function resolveMiddleware(string|object $middleware): MiddlewareInterface
     {
@@ -808,6 +817,11 @@ final class RouteDispatcher implements RequestHandlerInterface
                 if ($resolved instanceof MiddlewareInterface) {
                     return $resolved;
                 }
+
+                throw new RouterException(
+                    'The container entry for a middleware is no MiddlewareInterface: register the middleware itself, not a factory or another object',
+                    debugMessage: sprintf('%s: %s', $middleware, get_debug_type($resolved)),
+                );
             }
             if (class_exists($middleware)) {
                 $constructor = new \ReflectionClass($middleware)->getConstructor();

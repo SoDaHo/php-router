@@ -870,6 +870,13 @@ $router = Router::create()
 // Otherwise instantiated directly
 ```
 
+Middleware given as a class name works the same way: a name the container has is the
+container's. What it returns has to be the middleware itself (a `MiddlewareInterface`) —
+a factory registered in its place, or any other object, ends the request in a 500 with a
+`RouterException`, instead of a middleware the router builds with its constructor's
+defaults (a rate limit with another limit than the one you configured). A name the
+container does not have is built directly when its constructor needs no argument.
+
 ## Wrapping the Router
 
 All classes of the library are `final`, `Router` included (the exceptions stay open). What
