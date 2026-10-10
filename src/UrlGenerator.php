@@ -10,10 +10,10 @@ use Sodaho\Router\Exception\RouterException;
 /**
  * Generates URLs from named routes.
  *
- * With URL encoding on (the default), an address is only returned when it leads back to
- * its route with exactly the values given, and when it is a path on this site: one slash
- * in front, no backslash, no '.' or '..' segment, nothing a client would read as another
- * host. With encoding off the application answers for what it puts in.
+ * Values are always encoded, and an address is only returned when it leads back to its
+ * route with exactly the values given, and when it is a path on this site: one slash in
+ * front, no backslash, no '.' or '..' segment, nothing a client would read as another
+ * host. (Encoding could be turned off up to 2.1.1, and took these checks along.)
  */
 final class UrlGenerator
 {
@@ -22,7 +22,6 @@ final class UrlGenerator
 
     private string $basePath = '';
     private ?string $baseUrl = null;
-    private bool $encodeParams = true;
     private bool $ignoreTrailingSlash = false;
 
     /** @var array<string, list<array{literal: string, name: string|null, type: string|null}>> Patterns taken apart, once each */
@@ -77,16 +76,21 @@ final class UrlGenerator
     }
 
     /**
-     * Enable or disable URL encoding for route parameters.
+     * URL encoding is always on: parameters are encoded with rawurlencode() ('John Doe'
+     * becomes 'John%20Doe'), and the address is checked. Off, values went out as they were
+     * and every check of url() with them — so off is refused, not ignored.
      *
-     * When enabled (default), parameters are encoded using rawurlencode().
-     * Example: 'John Doe' becomes 'John%20Doe'
+     * @deprecated since 2.2.0: encoding cannot be turned off; true changes nothing
      *
-     * @param bool $encode Enable URL encoding
+     * @param bool $encode Must be true
+     *
+     * @throws RouterException When $encode is false
      */
     public function setEncodeParams(bool $encode): void
     {
-        $this->encodeParams = $encode;
+        if (!$encode) {
+            throw new RouterException('URL encoding cannot be turned off: url() always encodes values and checks the address');
+        }
     }
 
     /**
@@ -114,14 +118,13 @@ final class UrlGenerator
     public function url(string $name, array $params = []): string
     {
         $pattern = $this->getPatternByName($name);
-        $address = ($this->encodeParams ? self::encodeLiteral($this->basePath) : $this->basePath)
-            . $this->replaceParameters($name, $pattern, $params);
+        $address = self::encodeLiteral($this->basePath) . $this->replaceParameters($name, $pattern, $params);
 
         // What goes out has the form of a path on this site: one slash in front and no
         // backslash (a client reads it as a slash). Parameter values cannot break that
         // form, they are encoded, and so is the literal text of route pattern and base
         // path — all but the backslash, which no request path may contain in any form.
-        if ($this->encodeParams && preg_match('#\A/(?!/)[^\\\\]*\z#', $address) !== 1) {
+        if (preg_match('#\A/(?!/)[^\\\\]*\z#', $address) !== 1) {
             throw new RouterException(
                 'The address would not be a path on this site: it has to begin with a single "/" and contain no backslash',
                 debugMessage: $address,
@@ -183,10 +186,10 @@ final class UrlGenerator
     /**
      * The path of a route with the parameter values in place.
      *
-     * With URL encoding on, the address is only returned when it leads back to its route
-     * with exactly these values: the path as the router would see it — values in place, not
-     * yet encoded — has to match the route's own regular expression, each placeholder
-     * capturing its value. That refuses a value that does not fit its placeholder ('12a'
+     * The address is only returned when it leads back to its route with exactly these
+     * values: the path as the router would see it — values in place, not yet encoded —
+     * has to match the route's own regular expression, each placeholder capturing its
+     * value. That refuses a value that does not fit its placeholder ('12a'
      * for {id:int}, an empty one, a slash where one segment is expected) and values that
      * the pattern would split differently among its placeholders. A slash that the
      * placeholder takes ({path:any}) stays a slash; each segment is encoded on its own —
@@ -233,11 +236,6 @@ final class UrlGenerator
 
         // The path as the router sees it after decoding
         $candidate = self::fill($parts, $values);
-
-        if (!$this->encodeParams) {
-            // The application encodes itself — and answers for what it writes
-            return $candidate;
-        }
 
         foreach ($values as $parameter => $value) {
             if (str_contains($value, '\\')) {

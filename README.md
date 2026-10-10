@@ -157,8 +157,8 @@ again — the rule looks at the path of the request it is given.
 **A control character has no route either:** a path with `%00` to `%1F` or `%7F` (a line
 break, a tab, a NUL byte) is answered with 404 in the same way, before the route table and
 before an app folder. No route pattern and no base path may contain one, so only a
-placeholder could take it — and hand a line break in an id to the handler. With URL
-encoding on, `url()` refuses a value with a control character for the same reason.
+placeholder could take it — and hand a line break in an id to the handler. `url()`
+refuses a value with a control character for the same reason.
 
 **Nor has a `.` or `..` segment:** `/files/..`, `/files/a/./b` and the encoded forms
 (`/files/%2E%2E/etc/passwd`, `/files/.%2e`) are answered with 404 in the same way. A
@@ -463,10 +463,10 @@ $url = $router->absoluteUrl('user.show', ['id' => 5]);
 // → https://example.com/users/5
 ```
 
-Values are encoded (`rawurlencode()`, see `urlEncoding`), and so is the literal text of
-route pattern and base path (`/my app/{x}` goes out as `/my%20app/…`; what a path may
-contain as it is — `:`, `@`, `!$&'()*+,;=` — stays). With URL encoding on, `url()`
-returns an address only when it leads back to its route with exactly the values you
+Values are encoded (`rawurlencode()`, always — see `urlEncoding`), and so is the literal
+text of route pattern and base path (`/my app/{x}` goes out as `/my%20app/…`; what a path
+may contain as it is — `:`, `@`, `!$&'()*+,;=` — stays). `url()` returns an address only
+when it leads back to its route with exactly the values you
 passed — the path as the router would see it has to match the route's pattern, each
 placeholder taking its value, and each value has to pass the cast of its type. A value
 that does not fit throws (`12a` or `01` for `{id:int}`, an empty value, a slash where one
@@ -697,10 +697,11 @@ ROUTER_URL_ENCODING=true
 A key in the array you pass wins whatever its value — `null`, `false` and `''` included
 (`null` then means the default) — and its variable is not looked at. `APP_DEBUG` and
 `ROUTER_URL_ENCODING` have to be boolean-like (`true`/`false`, `1`/`0`, `on`/`off`,
-`yes`/`no`) or empty, `ROUTER_TRAILING_SLASH` has to be `strict`, `ignore` or empty (empty
-means the default), `ROUTER_BASE_PATH` written decoded (see [Options](#options)); anything
-else makes `fromEnv()` throw a `RouterException` that names the variable. `APP_ENV` means
-nothing to the router.
+`yes`/`no`) or empty — and `ROUTER_URL_ENCODING` has to mean on (empty meant off and is
+refused like `false`, see [Options](#options)) —, `ROUTER_TRAILING_SLASH` has to be
+`strict`, `ignore` or empty (empty means the default), `ROUTER_BASE_PATH` written decoded;
+anything else makes `fromEnv()` throw a `RouterException` that names the variable.
+`APP_ENV` means nothing to the router.
 
 What a web server hands over with each request — nginx's `fastcgi_param`, Apache's
 `SetEnv` — is not the environment of the process: under PHP-FPM it reaches `fromEnv()` only
@@ -735,7 +736,7 @@ open.)
 | `basePath` | `ROUTER_BASE_PATH` | `''` | URL prefix for all routes (`/api`, `/api/` and `api` mean the same). Written decoded, like a route pattern (`/my app`, not `/my%20app`): a percent-encoded character, a backslash, a control character, `?`, `#` or a `.`/`..` segment is refused |
 | `baseUrl` | `APP_URL` | `null` | Base URL for `absoluteUrl()`, put in front of the address as it is (a slash at its end is dropped). Empty means none: `null`, `''` and, as in 1.x, `false` (`getenv()` without the variable), `0` and `'0'`; another type is refused, and so is a string with a control character or a blank. Also `setBaseUrl()` |
 | `trailingSlash` | `ROUTER_TRAILING_SLASH` | `'strict'` | `'strict'` or `'ignore'`; `null` and `''` mean the default, anything else is refused |
-| `urlEncoding` | `ROUTER_URL_ENCODING` | `true` | `rawurlencode()` parameter values in `url()`/`absoluteUrl()`; `false` inserts them as given. Boolean or boolean-like, as `debug` |
+| `urlEncoding` | `ROUTER_URL_ENCODING` | `true` | `rawurlencode()` parameter values in `url()`/`absoluteUrl()` and check the address. Always on: a value that means off (`false`, `0`, `'off'`, `''`) is refused with a `RouterException` — off, values went out as given and every check of `url()` with them (a backslash, a control character, a `..` segment, `//` in front). The key stays for a value that means on |
 | `routesFile` | - | `null` | Routes file, as `loadRoutes()` sets it |
 | `implicitHead` | - | `true` | Answer `HEAD` through the `GET` route (see [HTTP Methods](#http-methods)) |
 | `emitChunkSize` | - | `8192` | Bytes `run()`/`emit()` read from the response body at a time; an integer, or a string of digits, from 1024 to 16777216 (see [Memory](#memory)) |

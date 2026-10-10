@@ -14,6 +14,15 @@
   `handle()`. `_route_params` and `RouteMatch::$params` stay complete; `match()` is not
   touched. See README, "Accessing Parameters".
 
+### Changed
+- URL encoding can no longer be turned off. `'urlEncoding' => false` (or `0`, `'off'`,
+  `''`), `ROUTER_URL_ENCODING=false` (or empty) and `UrlGenerator::setEncodeParams(false)`
+  throw a `RouterException` where they are given, instead of switching `url()` to writing
+  values as they are: off took every check of `url()` along — a backslash, a control
+  character, a `.` or `..` segment, an address that begins with `//` (another host for a
+  client) went out unchecked. The key, the variable and `setEncodeParams(true)` are still
+  accepted with a value that means on; `setEncodeParams()` is deprecated.
+
 ## [2.1.1] - 2026-10-09
 
 ### Security

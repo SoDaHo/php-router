@@ -157,13 +157,13 @@ class RouterConfigTest extends TestCase
         $_ENV['APP_URL'] = 'https://env.example.com/';
         $_ENV['ROUTER_BASE_PATH'] = 'env/';
         $_ENV['ROUTER_TRAILING_SLASH'] = 'ignore';
-        $_ENV['ROUTER_URL_ENCODING'] = 'false';
+        $_ENV['ROUTER_URL_ENCODING'] = 'true';
 
         $router = $this->routerFromEnv();
 
         $this->assertTrue($router->isDebug());
         $this->assertSame(200, $router->handle(new ServerRequest('GET', '/env/users/'))->getStatusCode());
-        $this->assertSame('/env/users/a b', $router->url('users.show', ['id' => 'a b']));
+        $this->assertSame('/env/users/a%20b', $router->url('users.show', ['id' => 'a b']));
         $this->assertSame('https://env.example.com/env/users/5', $router->absoluteUrl('users.show', ['id' => 5]));
     }
 
@@ -242,28 +242,62 @@ class RouterConfigTest extends TestCase
         }
 
         // A key that is passed settles it: the variable is not looked at, so nothing throws
+        // (urlEncoding takes nothing that means off: true, or null for its default)
         $key = $variable === 'APP_DEBUG' ? 'debug' : 'urlEncoding';
-        foreach ([false, null] as $passed) {
+        foreach ([$key === 'debug' ? false : true, null] as $passed) {
             $router = $this->routerFromEnv([$key => $passed]);
 
             $this->assertFalse($router->isDebug());
-            // false switches the encoding off, null is its default (on)
-            $this->assertSame(
-                $key === 'urlEncoding' && $passed === false ? '/users/a b' : '/users/a%20b',
-                $router->url('users.show', ['id' => 'a b'])
-            );
+            $this->assertSame('/users/a%20b', $router->url('users.show', ['id' => 'a b']));
         }
     }
 
-    public function testEmptyFlagVariableIsOff(): void
+    public function testEmptyDebugVariableIsOff(): void
     {
         $_ENV['APP_DEBUG'] = '';
-        $_ENV['ROUTER_URL_ENCODING'] = '';
 
         $router = $this->routerFromEnv();
 
         $this->assertFalse($router->isDebug());
-        $this->assertSame('/users/a b', $router->url('users.show', ['id' => 'a b']));
+        $this->assertSame('/users/a%20b', $router->url('users.show', ['id' => 'a b']));
+    }
+
+    /**
+     * URL encoding cannot be turned off since 2.2.0 — off took every check of url() along.
+     * Empty meant off as well; the message names the variable, never the value.
+     *
+     * @return array<string, array{0: string|int|bool}>
+     */
+    public static function urlEncodingVariablesThatMeanOff(): array
+    {
+        return [
+            'false' => ['false'],
+            'off' => ['off'],
+            'no' => ['no'],
+            '0' => ['0'],
+            'empty' => [''],
+            'the integer 0' => [0],
+            'the boolean false' => [false],
+        ];
+    }
+
+    #[DataProvider('urlEncodingVariablesThatMeanOff')]
+    public function testUrlEncodingVariableThatMeansOffIsRefused(string|int|bool $value): void
+    {
+        $_ENV['ROUTER_URL_ENCODING'] = $value;
+
+        try {
+            Router::fromEnv();
+            $this->fail('URL encoding was turned off');
+        } catch (RouterException $e) {
+            $this->assertSame(
+                'Environment variable ROUTER_URL_ENCODING cannot turn URL encoding off: url() always encodes values and checks the address',
+                $e->getMessage()
+            );
+        }
+
+        // The key in the config settles it without asking the variable
+        $this->assertSame('/users/a%20b', $this->routerFromEnv(['urlEncoding' => true])->url('users.show', ['id' => 'a b']));
     }
 
     // ==================== what is left of the cache ====================
@@ -559,12 +593,12 @@ class RouterConfigTest extends TestCase
     {
         // $_ENV is a plain array: an application (or a loader that casts) may put more than strings there
         $_ENV['APP_DEBUG'] = true;
-        $_ENV['ROUTER_URL_ENCODING'] = 0;
+        $_ENV['ROUTER_URL_ENCODING'] = true;
 
         $router = $this->routerFromEnv();
 
         $this->assertTrue($router->isDebug());
-        $this->assertSame('/users/a b', $router->url('users.show', ['id' => 'a b']));
+        $this->assertSame('/users/a%20b', $router->url('users.show', ['id' => 'a b']));
 
         $_ENV['APP_DEBUG'] = false;
         $_ENV['ROUTER_URL_ENCODING'] = 1;
@@ -615,16 +649,42 @@ class RouterConfigTest extends TestCase
     {
         $this->assertSame('/users/a%20b', $this->routerFromEnv()->url('users.show', ['id' => 'a b']));
 
-        $_ENV['ROUTER_URL_ENCODING'] = 'false';
-        $this->assertSame('/users/a b', $this->routerFromEnv()->url('users.show', ['id' => 'a b']));
-        $this->assertSame('/users/a%20b', $this->routerFromEnv(['urlEncoding' => true])->url('users.show', ['id' => 'a b']));
+        $_ENV['ROUTER_URL_ENCODING'] = 'on';
+        $this->assertSame('/users/a%20b', $this->routerFromEnv()->url('users.show', ['id' => 'a b']));
     }
 
-    public function testUrlEncodingTakesBooleanLikeValuesAndRefusesTheRest(): void
+    /**
+     * @return array<string, array{0: mixed}>
+     */
+    public static function urlEncodingValuesThatMeanOff(): array
     {
-        $this->assertSame('/users/a b', $this->router(['urlEncoding' => 'false'])->url('users.show', ['id' => 'a b']));
-        $this->assertSame('/users/a b', $this->router(['urlEncoding' => 0])->url('users.show', ['id' => 'a b']));
+        return [
+            'false' => [false],
+            "'false'" => ['false'],
+            "'off'" => ['off'],
+            '0' => [0],
+            "'0'" => ['0'],
+            "'' (empty meant off)" => [''],
+        ];
+    }
+
+    #[DataProvider('urlEncodingValuesThatMeanOff')]
+    public function testUrlEncodingCannotBeTurnedOff(mixed $value): void
+    {
+        try {
+            $this->router(['urlEncoding' => $value]);
+            $this->fail('URL encoding was turned off');
+        } catch (RouterException $e) {
+            $this->assertSame("Config 'urlEncoding' cannot be turned off: url() always encodes values and checks the address", $e->getMessage());
+        }
+    }
+
+    public function testUrlEncodingTakesValuesThatMeanOnAndRefusesTheRest(): void
+    {
+        $this->assertSame('/users/a%20b', $this->router(['urlEncoding' => true])->url('users.show', ['id' => 'a b']));
         $this->assertSame('/users/a%20b', $this->router(['urlEncoding' => '1'])->url('users.show', ['id' => 'a b']));
+        $this->assertSame('/users/a%20b', $this->router(['urlEncoding' => 'yes'])->url('users.show', ['id' => 'a b']));
+        $this->assertSame('/users/a%20b', $this->router(['urlEncoding' => null])->url('users.show', ['id' => 'a b']));
 
         $this->expectException(RouterException::class);
         $this->expectExceptionMessage("Config 'urlEncoding' must be a boolean, got string");

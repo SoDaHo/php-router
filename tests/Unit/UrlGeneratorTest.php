@@ -424,10 +424,6 @@ class UrlGeneratorTest extends TestCase
         } catch (RouterException $e) {
             $this->assertSame($address, $e->getDebugMessage());
         }
-
-        // Without URL encoding the application writes the address and answers for it
-        $generator->setEncodeParams(false);
-        $this->assertSame('/app' . $address, $generator->url('page', $params));
     }
 
     /**
@@ -463,10 +459,6 @@ class UrlGeneratorTest extends TestCase
                 $this->assertSame($address, $e->getDebugMessage());
             }
         }
-
-        // Without URL encoding the application writes the address and answers for it
-        $generator->setEncodeParams(false);
-        $this->assertSame($address, $generator->url('page'));
     }
 
     /**
@@ -506,11 +498,6 @@ class UrlGeneratorTest extends TestCase
         $generator->setBasePath($basePath);
 
         $this->assertSame($address, $generator->url('page', $params));
-
-        // Decoded it is what the router compares — and what goes out without URL encoding,
-        // where the application writes the address and answers for it
-        $generator->setEncodeParams(false);
-        $this->assertSame(rawurldecode($address), $generator->url('page', $params));
     }
 
     /**
@@ -555,43 +542,34 @@ class UrlGeneratorTest extends TestCase
         $this->assertSame('/files//a', $generator->url('files', ['path' => '/a']));
     }
 
-    public function testUrlEncodingDisabled(): void
+    /**
+     * Off, values went out as they were and the checks of url() with them (a backslash, a
+     * control character, a '..' segment, '//' in front): that mode is refused, not kept.
+     */
+    public function testUrlEncodingCannotBeTurnedOff(): void
     {
-        $routes = [
-            new Route(['GET'], '/users/{name}', 'handler', [], 'users.show'),
-        ];
-        $generator = new UrlGenerator($routes);
-        $generator->setEncodeParams(false);
+        $generator = new UrlGenerator([new Route(['GET'], '/users/{name}', 'handler', [], 'users.show')]);
 
-        // Spaces should NOT be encoded
-        $url = $generator->url('users.show', ['name' => 'John Doe']);
-        $this->assertSame('/users/John Doe', $url);
+        try {
+            $generator->setEncodeParams(false);
+            $this->fail('Encoding was turned off');
+        } catch (RouterException $e) {
+            $this->assertSame('URL encoding cannot be turned off: url() always encodes values and checks the address', $e->getMessage());
+        }
 
-        // Umlauts should NOT be encoded
-        $url = $generator->url('users.show', ['name' => 'Müller']);
-        $this->assertSame('/users/Müller', $url);
+        // Still encoded and checked
+        $this->assertSame('/users/Test%20User', $generator->url('users.show', ['name' => 'Test User']));
+        $this->assertSame('/users/M%C3%BCller', $generator->url('users.show', ['name' => 'Müller']));
+        $this->expectException(RouterException::class);
+        $generator->url('users.show', ['name' => 'a\\b']);
     }
 
-    public function testUrlEncodingCanBeToggled(): void
+    public function testTurningUrlEncodingOnChangesNothing(): void
     {
-        $routes = [
-            new Route(['GET'], '/users/{name}', 'handler', [], 'users.show'),
-        ];
-        $generator = new UrlGenerator($routes);
-
-        // Default: encoded
-        $url = $generator->url('users.show', ['name' => 'Test User']);
-        $this->assertSame('/users/Test%20User', $url);
-
-        // Disable encoding
-        $generator->setEncodeParams(false);
-        $url = $generator->url('users.show', ['name' => 'Test User']);
-        $this->assertSame('/users/Test User', $url);
-
-        // Re-enable encoding
+        $generator = new UrlGenerator([new Route(['GET'], '/users/{name}', 'handler', [], 'users.show')]);
         $generator->setEncodeParams(true);
-        $url = $generator->url('users.show', ['name' => 'Test User']);
-        $this->assertSame('/users/Test%20User', $url);
+
+        $this->assertSame('/users/Test%20User', $generator->url('users.show', ['name' => 'Test User']));
     }
 
     public function testUrlEncodingPreservesAlphanumericAndSafeChars(): void
@@ -670,11 +648,6 @@ class UrlGeneratorTest extends TestCase
         $collector->get('/report/{day:date}', 'handler')->name('report');
 
         $this->assertSame('/report/2024-01-31', new UrlGenerator($collector->getRoutes(), $collector->getPatterns())->url('report', ['day' => '2024-01-31']));
-
-        // Without URL encoding nothing is checked, as before
-        $plain = new UrlGenerator($collector->getRoutes());
-        $plain->setEncodeParams(false);
-        $this->assertSame('/report/2024-01-31', $plain->url('report', ['day' => '2024-01-31']));
     }
 
     public function testInTheModeIgnoreTheRootPathKeepsItsSlash(): void
@@ -729,27 +702,18 @@ class UrlGeneratorTest extends TestCase
             $this->assertSame('The parameters do not fit the pattern of route "r": the address would not lead back to it', $e->getMessage());
             $this->assertSame($candidate, $e->getDebugMessage());
         }
-
-        // Without URL encoding the application writes the address and answers for it
-        $generator->setEncodeParams(false);
-        /** @phpstan-ignore argument.type */
-        $this->assertSame($candidate, $generator->url('r', $params));
     }
 
     public function testFloatThatIsNotFiniteIsRefused(): void
     {
         $generator = new UrlGenerator(['p' => '/p/{v}']);
 
-        // With URL encoding off as well: the application writes the address, not this value
-        foreach ([true, false] as $encode) {
-            $generator->setEncodeParams($encode);
-            foreach ([NAN, INF, -INF] as $value) {
-                try {
-                    $generator->url('p', ['v' => $value]);
-                    $this->fail('An address was generated');
-                } catch (RouterException $e) {
-                    $this->assertSame('Parameter "v" is not a finite number', $e->getMessage());
-                }
+        foreach ([NAN, INF, -INF] as $value) {
+            try {
+                $generator->url('p', ['v' => $value]);
+                $this->fail('An address was generated');
+            } catch (RouterException $e) {
+                $this->assertSame('Parameter "v" is not a finite number', $e->getMessage());
             }
         }
 
@@ -769,25 +733,18 @@ class UrlGeneratorTest extends TestCase
             $this->assertSame('Parameter "id" contains a control character, which no route accepts', $e->getMessage());
             $this->assertSame("5\n", $e->getDebugMessage());
         }
-
-        $generator->setEncodeParams(false);
-        $this->assertSame("/docs/5\n", $generator->url('r', ['id' => "5\n"]));
     }
 
     public function testNullIsNoValue(): void
     {
         $generator = new UrlGenerator(['p' => '/p/{a}/{b}']);
 
-        foreach ([true, false] as $encode) {
-            $generator->setEncodeParams($encode);
-
-            try {
-                /** @phpstan-ignore argument.type */
-                $generator->url('p', ['a' => 'x', 'b' => null]);
-                $this->fail('An address was generated');
-            } catch (RouterException $e) {
-                $this->assertSame('Parameter "b" for URL generation is null', $e->getMessage());
-            }
+        try {
+            /** @phpstan-ignore argument.type */
+            $generator->url('p', ['a' => 'x', 'b' => null]);
+            $this->fail('An address was generated');
+        } catch (RouterException $e) {
+            $this->assertSame('Parameter "b" for URL generation is null', $e->getMessage());
         }
     }
 }

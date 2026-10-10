@@ -68,7 +68,7 @@ final class Router implements RouterInterface
         'origin-agent-cluster' => true,
     ];
 
-    /** @var array{debug: bool, basePath: string, baseUrl: ?string, trailingSlash: string, routesFile: ?string, urlEncoding: bool, implicitHead: bool, emitChunkSize: int} */
+    /** @var array{debug: bool, basePath: string, baseUrl: ?string, trailingSlash: string, routesFile: ?string, implicitHead: bool, emitChunkSize: int} */
     private array $config;
 
     /** @var array<string|object> Middleware for every request, outermost first (string keys as the application gave them) */
@@ -119,9 +119,9 @@ final class Router implements RouterInterface
      * @throws RouterException If $config has a key the router does not know, if 'debug',
      *                         'urlEncoding' or 'implicitHead' is neither a boolean nor
      *                         boolean-like nor empty ('' and 0 count as off; null is the
-     *                         default), if 'emitChunkSize' is not an integer (or a string
-     *                         of digits) from 1024 to 16777216, or if 'baseUrl' is neither
-     *                         a string nor empty
+     *                         default), if 'urlEncoding' is off, if 'emitChunkSize' is not
+     *                         an integer (or a string of digits) from 1024 to 16777216, or
+     *                         if 'baseUrl' is neither a string nor empty
      */
     public function __construct(array $config = [])
     {
@@ -135,13 +135,14 @@ final class Router implements RouterInterface
             );
         }
 
+        self::urlEncoding($config['urlEncoding'] ?? true);
+
         $this->config = [
             'debug' => self::flag('debug', $config['debug'] ?? false),
             'basePath' => self::normalizeBasePath((string) ($config['basePath'] ?? '')),
             'baseUrl' => self::baseUrl($config['baseUrl'] ?? null),
             'trailingSlash' => self::trailingSlash($config['trailingSlash'] ?? 'strict'),
             'routesFile' => $config['routesFile'] ?? null,
-            'urlEncoding' => self::flag('urlEncoding', $config['urlEncoding'] ?? true),
             'implicitHead' => self::flag('implicitHead', $config['implicitHead'] ?? true),
             'emitChunkSize' => self::chunkSize($config['emitChunkSize'] ?? self::EMIT_CHUNK_SIZE),
         ];
@@ -246,6 +247,21 @@ final class Router implements RouterInterface
     }
 
     /**
+     * URL encoding is always on. Off, url() wrote values as they were and dropped every
+     * check with the encoding — a control character, a backslash, a '.' or '..' segment,
+     * an address that begins with '//' (another host for a client). The key stays, for a
+     * value that means on; anything that means off is refused rather than ignored.
+     *
+     * @throws RouterException If the value means off, or is neither boolean nor boolean-like
+     */
+    private static function urlEncoding(mixed $value): void
+    {
+        if (!self::flag('urlEncoding', $value)) {
+            throw new RouterException("Config 'urlEncoding' cannot be turned off: url() always encodes values and checks the address");
+        }
+    }
+
+    /**
      * @throws RouterException If the value is not an integer within the allowed range
      */
     private static function chunkSize(mixed $value): int
@@ -340,7 +356,8 @@ final class Router implements RouterInterface
      * @param array{debug?: bool|int|string|null, basePath?: string|null, baseUrl?: string|false|0|null, trailingSlash?: string|null, routesFile?: string|null, urlEncoding?: bool|int|string|null, implicitHead?: bool|int|string|null, emitChunkSize?: int|string|null} $config Values that take precedence
      *
      * @throws RouterException As the constructor; and if APP_DEBUG or ROUTER_URL_ENCODING is
-     *                         read and its value is not boolean-like (APP_DEBUG=maybe)
+     *                         read and its value is not boolean-like (APP_DEBUG=maybe), or
+     *                         ROUTER_URL_ENCODING means off
      */
     public static function fromEnv(array $config = []): self
     {
@@ -361,6 +378,14 @@ final class Router implements RouterInterface
                 // Names the variable — the config key would send the reader to the wrong place
                 throw new RouterException(sprintf(
                     'Environment variable %s must be boolean-like (true/false, 1/0, on/off, yes/no or empty)',
+                    $variable
+                ));
+            }
+
+            // Off is no mode any more (see urlEncoding()); empty meant off as well
+            if ($key === 'urlEncoding' && filter_var($value, FILTER_VALIDATE_BOOL) === false) {
+                throw new RouterException(sprintf(
+                    'Environment variable %s cannot turn URL encoding off: url() always encodes values and checks the address',
                     $variable
                 ));
             }
@@ -959,7 +984,6 @@ final class Router implements RouterInterface
             $generator = new UrlGenerator($this->collector->getRoutes(), $this->collector->getPatterns());
 
             $generator->setBasePath($this->config['basePath']);
-            $generator->setEncodeParams($this->config['urlEncoding']);
             $generator->setIgnoreTrailingSlash($this->config['trailingSlash'] === 'ignore');
 
             if ($this->config['baseUrl'] !== null) {

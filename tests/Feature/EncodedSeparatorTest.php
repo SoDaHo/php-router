@@ -499,20 +499,26 @@ class EncodedSeparatorTest extends TestCase
         $this->assertSame('/files/a/b', $ignore->url('files', ['path' => 'a/b']));
         $this->assertSame('files: a/b', $this->body($ignore->handle(new ServerRequest('GET', '/files/a/b'))));
         $this->assertSame('/api/files/a', $this->router(['trailingSlash' => 'ignore', 'basePath' => '/api'])->url('files', ['path' => 'a']));
-
-        // … and without URL encoding nothing is checked, as in the mode strict
-        $this->assertSame('/files/a/', $this->router(['trailingSlash' => 'ignore', 'urlEncoding' => false])->url('files', ['path' => 'a/']));
     }
 
-    public function testWithoutUrlEncodingValuesGoInAsGiven(): void
+    /**
+     * Up to 2.1.1 'urlEncoding' => false let these out as they were (and an application
+     * answered for them). Encoding cannot be turned off any more: they are checked like
+     * any other value.
+     */
+    public function testValuesThatEncodingOffLetThroughAreCheckedAlways(): void
     {
-        $router = $this->router(['urlEncoding' => false]);
+        $router = $this->router();
 
-        // The application encodes itself — and answers for what it writes
-        $this->assertSame('/tags/a/b', $router->url('tag', ['tag' => 'a/b']));
-        $this->assertSame('/tags/a%2Fb', $router->url('tag', ['tag' => 'a%2Fb']));
-        $this->assertSame('/files/../x', $router->url('files', ['path' => '../x']));
-        $this->assertSame('/tags/..', $router->url('tag', ['tag' => '..']));
-        $this->assertSame('/tags/a\\b', $router->url('tag', ['tag' => 'a\\b']));
+        $this->assertSame('/tags/a%252Fb', $router->url('tag', ['tag' => 'a%2Fb']));
+
+        foreach ([['tag', ['tag' => 'a/b']], ['files', ['path' => '../x']], ['tag', ['tag' => '..']], ['tag', ['tag' => 'a\\b']]] as [$name, $params]) {
+            try {
+                $router->url($name, $params);
+                $this->fail('An address was generated for ' . json_encode($params));
+            } catch (RouterException) {
+                // refused
+            }
+        }
     }
 }
