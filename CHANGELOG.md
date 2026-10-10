@@ -169,6 +169,9 @@ application.
   was cast (`true` became `'1'`, an array `'Array'` with a warning), a `routesFile` that is
   no string failed only when the table was built, with a `TypeError` of PHP.
 
+- `Response::tooManyRequests()` refuses a negative number of seconds with a
+  `RouterException`: `-1` went out as `Retry-After: -1`, no delay a client can wait for.
+
 ### Added
 - `Dispatcher::staticRoute()`: the static route of a method for a path, without a pass over
   the dynamic routes.
@@ -273,6 +276,7 @@ What to look at:
   takes.
 - **`get('')` in a group** (trailing slash mode `strict`) is the group's own address now;
   write `get('/')` for the address with the slash (a pattern of blanks alone stays there).
+- **`Response::tooManyRequests()`** takes 0 or more seconds.
 - **Redirect statuses:** `Response::redirect()`, `redirect()` routes and `RedirectHandler`
   take 301, 302, 303, 307 or 308 only (a 300, 304 or 305 redirect route was accepted by
   2.1.1); use `Response::created()` for 201.

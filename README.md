@@ -631,7 +631,7 @@ Response::unauthorized('Token expired');                   // 401 with message
 Response::forbidden();                                     // 403
 Response::validationError(['email' => 'Invalid format']);  // 422
 Response::methodNotAllowed(['GET', 'POST']);               // 405
-Response::tooManyRequests(60);                             // 429 with Retry-After
+Response::tooManyRequests(60);                             // 429 with Retry-After (0 or more seconds)
 Response::serverError();                                   // 500
 ```
 

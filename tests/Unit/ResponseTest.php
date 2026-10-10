@@ -126,6 +126,23 @@ class ResponseTest extends TestCase
         }
     }
 
+    /**
+     * Retry-After is a number of seconds, 0 or more: -1 went out as "Retry-After: -1"
+     */
+    public function testRetryAfterIsZeroOrMoreSeconds(): void
+    {
+        $this->assertSame('0', Response::tooManyRequests(0)->getHeaderLine('Retry-After'));
+        $this->assertSame('1', Response::tooManyRequests(1)->getHeaderLine('Retry-After'));
+
+        try {
+            Response::tooManyRequests(-1);
+            $this->fail('A negative Retry-After went out');
+        } catch (\Sodaho\Router\Exception\RouterException $e) {
+            $this->assertSame('Retry-After must be 0 or more seconds', $e->getMessage());
+            $this->assertSame('-1', $e->getDebugMessage());
+        }
+    }
+
     public function testHtmlResponse(): void
     {
         $response = Response::html('<h1>Hello</h1>');

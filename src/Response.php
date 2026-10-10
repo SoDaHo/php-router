@@ -271,12 +271,19 @@ final class Response
     }
 
     /**
-     * 429 Too Many Requests response.
+     * 429 Too Many Requests response. Retry-After is a number of seconds (RFC 9110), 0 or
+     * more: a negative one is no delay a client can wait for.
      *
-     * @param int $retryAfter Seconds until retry is allowed
+     * @param int $retryAfter Seconds until retry is allowed, 0 or more
+     *
+     * @throws RouterException When $retryAfter is below 0
      */
     public static function tooManyRequests(int $retryAfter): ResponseInterface
     {
+        if ($retryAfter < 0) {
+            throw new RouterException('Retry-After must be 0 or more seconds', debugMessage: (string) $retryAfter);
+        }
+
         $response = self::envelope(429, self::getResponder()->formatError(
             'Too many requests',
             'TOO_MANY_REQUESTS',
