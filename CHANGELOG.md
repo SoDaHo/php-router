@@ -23,6 +23,10 @@
   as well. The built-in pattern is `(?:[^/]+(?:/[^/]+)*(?:/(?=\z))?)?` instead of `.*`.
 
 ### Changed
+- README: two placeholders that take slashes in one route (`/{a:any}/{b:any}`) make the
+  work grow with the square of the path's segments — a path of some 800 segments reaches
+  PCRE's default backtrack limit and is answered with 500 (reported, never "no match"); a
+  test pins it.
 - URL encoding can no longer be turned off. `'urlEncoding' => false` (or `0`, `'off'`,
   `''`), `ROUTER_URL_ENCODING=false` (or empty) and `UrlGenerator::setEncodeParams(false)`
   throw a `RouterException` where they are given, instead of switching `url()` to writing

@@ -1334,6 +1334,14 @@ on. (1.x had a route cache; measured, loading it took about four times as long a
 - Define most-used routes first
 - Keep dynamic routes under 500 for best performance
 
+Within one route, the work grows with the length of the path — except for two placeholders
+that take slashes (`/{a:any}/{b:any}`, or a pattern of your own that takes one): PCRE tries
+every way to split the path between them, and the work grows with the square of its
+segments. With the default `pcre.backtrack_limit` (1,000,000) a path of some 800 segments
+to such a route reaches the limit, and the request is answered with 500 and reported to the
+`error` hook (never treated as "no match"). Keep one placeholder that takes slashes per
+route, or put a fixed segment between them that the path names once.
+
 ### Memory
 
 - ~1KB per route in memory
