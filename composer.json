@@ -37,7 +37,10 @@
         "test:security": "vendor/bin/phpunit --testsuite=Security",
         "test:all": "vendor/bin/phpunit",
         "test:coverage": "vendor/bin/phpunit --coverage-html coverage",
-        "analyse": "vendor/bin/phpstan analyse",
+        "analyse": [
+            "vendor/bin/phpstan analyse",
+            "vendor/bin/phpstan analyse -c phpstan.tests.neon --memory-limit=512M"
+        ],
         "cs": "vendor/bin/php-cs-fixer fix --dry-run --diff",
         "cs:fix": "vendor/bin/php-cs-fixer fix",
         "ci": ["@cs", "@analyse", "@test"]

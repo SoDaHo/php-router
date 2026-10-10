@@ -65,6 +65,9 @@ class StreamedDownloadTest extends TestCase
         file_put_contents($this->routesFile, $body);
     }
 
+    /**
+     * @param array<string, string> $server
+     */
     private function serve(string $uri, array $server = []): string
     {
         $_SERVER['REQUEST_METHOD'] = 'GET';

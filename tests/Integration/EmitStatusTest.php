@@ -101,7 +101,7 @@ class EmitStatusTest extends TestCase
     }
 
     /**
-     * @return array<string, array{0: int}>
+     * @return array<int, array{0: int}>
      */
     public static function statusCodesALocationDoesNotRewrite(): array
     {
@@ -358,6 +358,7 @@ class EmitStatusTest extends TestCase
     {
         // A header PHP refuses (a line break in the value; the PSR-7 object of an
         // application may not check), after a Location that made PHP's status a 302
+        // @phpstan-ignore class.extendsFinalByPhpDoc (a response that misbehaves on purpose)
         $response = new class (200) extends \Nyholm\Psr7\Response {
             public function getHeaders(): array
             {
@@ -383,6 +384,7 @@ class EmitStatusTest extends TestCase
 
     public function testFirstHeaderThatFailsUnderTheCliReportsThe200PhpWouldSend(): void
     {
+        // @phpstan-ignore class.extendsFinalByPhpDoc (a response that misbehaves on purpose)
         $response = new class (503) extends \Nyholm\Psr7\Response {
             public function getHeaders(): array
             {
@@ -409,6 +411,7 @@ class EmitStatusTest extends TestCase
 
     public function testWithoutStreamsAResponseThatCannotBeReadGetsAPlain500(): void
     {
+        // @phpstan-ignore class.extendsFinalByPhpDoc (a response that misbehaves on purpose)
         $response = new class () extends \Nyholm\Psr7\Response {
             public function getProtocolVersion(): string
             {
@@ -479,6 +482,7 @@ class EmitStatusTest extends TestCase
 
     public function testGetterThatThrowsBeforeTheFirstByteGivesA500(): void
     {
+        // @phpstan-ignore class.extendsFinalByPhpDoc (a response that misbehaves on purpose)
         $response = new class () extends \Nyholm\Psr7\Response {
             public function getProtocolVersion(): string
             {

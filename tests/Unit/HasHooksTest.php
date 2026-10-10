@@ -231,26 +231,11 @@ class HasHooksTest extends TestCase
     /**
      * An object whose fallback line goes to a file we can read: no STDERR, error_log to a temp file.
      *
-     * @return array{0: object, 1: string}
+     * @return array{0: HookedWithoutStderr, 1: string}
      */
     private function hookedObjectWithReadableLog(): array
     {
-        $log = sys_get_temp_dir() . '/router_hook_log_' . uniqid() . '.log';
-        $obj = new class () {
-            use HasHooks;
-
-            protected function hasStderr(): bool
-            {
-                return false;
-            }
-
-            public function fire(string $event): void
-            {
-                $this->trigger($event, []);
-            }
-        };
-
-        return [$obj, $log];
+        return [new HookedWithoutStderr(), sys_get_temp_dir() . '/router_hook_log_' . uniqid() . '.log'];
     }
 
     /**
@@ -446,5 +431,23 @@ class HasHooksTest extends TestCase
 
         $this->assertSame(['first: metrics down', 'second: audit down'], $told);
         $this->assertSame('', $written);
+    }
+}
+
+/**
+ * A hooked object whose fallback line goes to error_log(): it has no STDERR.
+ */
+final class HookedWithoutStderr
+{
+    use HasHooks;
+
+    protected function hasStderr(): bool
+    {
+        return false;
+    }
+
+    public function fire(string $event): void
+    {
+        $this->trigger($event, []);
     }
 }

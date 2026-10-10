@@ -64,6 +64,7 @@ class HandleNeverThrowsTest extends TestCase
             'handler' => [Router::create()->loadRoutes($this->routes($working)), 'handler failed'],
             'handler that returns no response' => [Router::create()->loadRoutes($this->routes(str_replace(['"/x"', '"/text"'], ['"/y"', '"/x"'], $working))), 'Handler must return ResponseInterface'],
             'middleware for every request' => [Router::create()->loadRoutes($this->routes($working))->middleware($throwing), 'middleware failed'],
+            default => throw new \LogicException('Unknown source: ' . $source),
             'no routes file' => [Router::create(), 'No routes loaded'],
             'routes file that throws' => [Router::create()->loadRoutes($this->routes('throw new \RuntimeException("routes failed");')), 'routes failed'],
             // An \Error, not an \Exception
@@ -155,6 +156,7 @@ class HandleNeverThrowsTest extends TestCase
 
         $asked = 0;
         if ($errorHandler !== 'none') {
+            /** @phpstan-ignore argument.type (one case returns no response on purpose, see 'returns no response') */
             $router->setErrorHandler(function (\Throwable $e) use ($errorHandler, &$asked) {
                 $asked++;
 
@@ -163,7 +165,9 @@ class HandleNeverThrowsTest extends TestCase
                     'declines' => null,
                     'throws' => throw new \LogicException('error handler failed'),
                     'throws what it was given' => throw $e,
+                    // A value an error handler must not return: the router reports the TypeError
                     'returns no response' => 'text',
+                    default => throw new \LogicException('Unknown error handler: ' . $errorHandler),
                 };
             });
         }
@@ -188,6 +192,7 @@ class HandleNeverThrowsTest extends TestCase
 
         $this->assertCount(count($expected), $reports, implode(' | ', array_column($reports, 0)));
         foreach ($expected as $i => $begin) {
+            // @phpstan-ignore argument.type (each beginning is written out above, none is empty)
             $this->assertStringStartsWith($begin, $reports[$i][0]);
             $this->assertSame([$method, '/x'], [$reports[$i][1], $reports[$i][2]]);
         }
@@ -400,11 +405,12 @@ class HandleNeverThrowsTest extends TestCase
             try {
                 $copy = clone $router;
                 $this->fail('A clone was made after ' . $use);
-            } catch (RouterException $e) {
+            } catch (RouterException $e) { // @phpstan-ignore catch.neverThrown (Router::__clone() throws it, a clone expression PHPStan does not follow)
                 $this->assertSame('A router can be cloned before its first use only: it was already used (a request, match() or url())', $e->getMessage());
             }
         }
 
+        // @phpstan-ignore deadCode.unreachable (reached: the catch above is, see there)
         unset($GLOBALS['never_' . $id]);
 
         // A router whose table could not be built, given another routes file: still used
@@ -551,6 +557,7 @@ class HandleNeverThrowsTest extends TestCase
 
             $this->assertSame('Internal Server Error', (string) $response->getBody());
             $this->assertCount(2, $reports, $source);
+            // @phpstan-ignore argument.type (each beginning is written out in the provider, none is empty)
             $this->assertStringStartsWith($first, $reports[0]);
             $this->assertSame('shared failure', $reports[1]);
         }
@@ -947,11 +954,12 @@ class HandleNeverThrowsTest extends TestCase
         $request->method('withAttribute')->willReturnSelf();
         $request->method('withoutAttribute')->willReturnSelf();
         $request->method('getAttribute')->willReturnCallback(function () use (&$broken) {
+            // @phpstan-ignore ternary.alwaysFalse (the middleware sets it through the reference)
             return $broken ? throw new \RuntimeException('request failed later') : null;
         });
 
         $breaks = new class ($broken) implements MiddlewareInterface {
-            public function __construct(private bool &$broken)
+            public function __construct(private bool &$broken) // @phpstan-ignore property.onlyWritten (written through the reference, read by the test)
             {
             }
 
@@ -1012,7 +1020,7 @@ final class RouterNeverTestWrapper
 
     public function stream_read(int $count): string|false
     {
-        return $this->handle !== null ? fread($this->handle, $count) : false;
+        return $this->handle !== null && $count > 0 ? fread($this->handle, $count) : false;
     }
 
     public function stream_eof(): bool

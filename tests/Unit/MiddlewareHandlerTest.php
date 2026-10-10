@@ -73,7 +73,8 @@ class MiddlewareHandlerTest extends TestCase
         $order = [];
 
         $middleware1 = new class ($order) implements MiddlewareInterface {
-            public function __construct(private array &$order)
+            /** @param list<string> $order */
+            public function __construct(private array &$order) // @phpstan-ignore property.onlyWritten (written through the reference, read by the test)
             {
             }
             public function process(
@@ -88,7 +89,8 @@ class MiddlewareHandlerTest extends TestCase
         };
 
         $middleware2 = new class ($order) implements MiddlewareInterface {
-            public function __construct(private array &$order)
+            /** @param list<string> $order */
+            public function __construct(private array &$order) // @phpstan-ignore property.onlyWritten (written through the reference, read by the test)
             {
             }
             public function process(
@@ -103,7 +105,8 @@ class MiddlewareHandlerTest extends TestCase
         };
 
         $finalHandler = new class ($order) implements RequestHandlerInterface {
-            public function __construct(private array &$order)
+            /** @param list<string> $order */
+            public function __construct(private array &$order) // @phpstan-ignore property.onlyWritten (written through the reference, read by the test)
             {
             }
             public function handle(ServerRequestInterface $request): ResponseInterface

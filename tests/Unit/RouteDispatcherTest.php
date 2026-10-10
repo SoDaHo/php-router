@@ -385,7 +385,7 @@ class RouteDispatcherTest extends TestCase
         $this->assertSame(405, $response->getStatusCode());
         $this->assertSame('POST, GET, HEAD', $response->getHeaderLine('Allow'));
         $this->assertStringContainsString('"allowed":["POST","GET","HEAD"]', (string) $response->getBody());
-        $this->assertSame(['POST', 'GET', 'HEAD'], $hookData['allowed_methods']);
+        $this->assertSame(['POST', 'GET', 'HEAD'], $hookData['allowed_methods'] ?? null);
     }
 
     public function testMiddlewareWithConstructorParametersGetsAnActionableError(): void
@@ -428,6 +428,7 @@ class BuggyController
     public function handle(ServerRequestInterface $request): ResponseInterface
     {
         // Simulate a bug: passing wrong type to a typed function
+        // @phpstan-ignore argument.type (the bug this controller simulates)
         $this->expectsInt('not an int'); // This throws TypeError
 
         return Response::success([]);

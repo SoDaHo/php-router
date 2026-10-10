@@ -337,7 +337,7 @@ class EncodedSeparatorTest extends TestCase
         $seen = [];
         $router->middleware(new class ($seen) implements MiddlewareInterface {
             /** @param list<RouteMatch> $seen */
-            public function __construct(private array &$seen)
+            public function __construct(private array &$seen) // @phpstan-ignore property.onlyWritten (written through the reference, read by the test)
             {
             }
 

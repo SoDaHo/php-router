@@ -363,6 +363,7 @@ class RouterTest extends TestCase
         $finalExceptions = [];
         foreach (new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator(dirname(__DIR__, 2) . '/src', \FilesystemIterator::SKIP_DOTS)) as $file) {
             $name = 'Sodaho\\Router\\' . str_replace(['/', '.php'], ['\\', ''], substr($file->getPathname(), strlen(dirname(__DIR__, 2) . '/src/')));
+            /** @var class-string $name */
             $class = new \ReflectionClass($name);
             if ($class->isInterface() || $class->isTrait()) {
                 continue;

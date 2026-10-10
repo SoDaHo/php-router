@@ -102,7 +102,11 @@ class TextStreamTest extends TestCase
     {
         foreach (['close', 'detach'] as $how) {
             $stream = new TextStream('abc');
-            $this->assertNull($how === 'detach' ? $stream->detach() : $stream->close());
+            if ($how === 'detach') {
+                $this->assertNull($stream->detach());
+            } else {
+                $stream->close();
+            }
 
             $this->assertFalse($stream->isReadable(), $how);
             $this->assertFalse($stream->isSeekable(), $how);

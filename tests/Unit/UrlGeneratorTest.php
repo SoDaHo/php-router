@@ -516,7 +516,7 @@ class UrlGeneratorTest extends TestCase
     public function testValueTheCastRefusesGivesNoAddress(string $pattern, mixed $value): void
     {
         $generator = new UrlGenerator([new Route(['GET'], $pattern, 'handler', [], 'r')]);
-        $name = array_column(RouteCollector::parts($pattern), 'name')[1];
+        $name = (string) array_column(RouteCollector::parts($pattern), 'name')[1];
 
         try {
             /** @phpstan-ignore argument.type */

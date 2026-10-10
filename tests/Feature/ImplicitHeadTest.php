@@ -120,7 +120,7 @@ class ImplicitHeadTest extends TestCase
 
         $this->assertTrue($match->isFound());
         $this->assertSame('HEAD', $match->method);
-        $this->assertSame('page', $match->route->name);
+        $this->assertSame('page', $match->route?->name);
         $this->assertTrue($match->viaGet);
         $this->assertSame(['GET', 'HEAD', 'PATCH'], $match->allowedMethods());
 
@@ -145,7 +145,7 @@ class ImplicitHeadTest extends TestCase
         $this->assertSame('', (string) $response->getBody(), 'no HEAD response carries a body while the switch is on');
 
         $match = $router->match(new ServerRequest('HEAD', '/both'));
-        $this->assertSame('both.head', $match->route->name);
+        $this->assertSame('both.head', $match->route?->name);
         $this->assertFalse($match->viaGet);
         $this->assertSame(['GET', 'HEAD'], $match->allowedMethods(), 'HEAD is not listed twice');
     }

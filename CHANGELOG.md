@@ -152,6 +152,10 @@
 ### Development
 - CI pins its actions to a commit and its container image to a digest (the comment names
   the version): a tag can be moved to other code.
+- PHPStan analyses the tests as well, on level 8 (`phpstan.tests.neon`; `composer analyse`
+  runs both): `src` stays on level max. Level max over `tests` asks for a type behind every
+  value a test decodes from a response body — about 450 places, more than this release
+  should carry; the tests' few ignores name their identifier and reason.
 
 ## [2.1.1] - 2026-10-09
 

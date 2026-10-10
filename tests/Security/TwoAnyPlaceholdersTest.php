@@ -66,6 +66,7 @@ class TwoAnyPlaceholdersTest extends TestCase
     public function testTwoOfThemReachTheLimitWithALongPathAndAnswer500(): void
     {
         $router = Router::create()->loadRoutes($this->routesFile);
+        /** @var list<array<string, mixed>> $reported */
         $reported = [];
         $router->on('error', function (array $data) use (&$reported): void {
             $reported[] = $data;
@@ -73,15 +74,16 @@ class TwoAnyPlaceholdersTest extends TestCase
 
         // A short path is decided ...
         $this->assertSame(404, $router->handle(new ServerRequest('GET', self::path('two', 100)))->getStatusCode());
-        $this->assertSame([], $reported);
+        $this->assertCount(0, $reported);
 
         // ... four times as many segments take about sixteen times the work
         $response = $router->handle(new ServerRequest('GET', self::path('two', 400)));
 
         $this->assertSame(500, $response->getStatusCode());
         $this->assertCount(1, $reported);
-        $this->assertInstanceOf(RouterException::class, $reported[0]['exception']);
-        $this->assertSame('Route pattern could not be matched: Backtrack limit exhausted', $reported[0]['exception']->getMessage());
-        $this->assertSame('/two/{a:any}/{b:any}/end', $reported[0]['exception']->getDebugMessage());
+        $exception = $reported[0]['exception'] ?? null;
+        $this->assertInstanceOf(RouterException::class, $exception);
+        $this->assertSame('Route pattern could not be matched: Backtrack limit exhausted', $exception->getMessage());
+        $this->assertSame('/two/{a:any}/{b:any}/end', $exception->getDebugMessage());
     }
 }

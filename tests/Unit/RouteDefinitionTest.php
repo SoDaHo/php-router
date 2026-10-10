@@ -189,7 +189,7 @@ class RouteDefinitionTest extends TestCase
 
         // … and the table is built with them: the longest name is one the regular expression takes
         $regex = array_column($collector->getData()[1]['GET'], 'regex');
-        $this->assertSame(1, preg_match(end($regex), '/value'));
+        $this->assertSame(1, preg_match((string) end($regex), '/value'));
     }
 
     // ==================== pattern types ====================

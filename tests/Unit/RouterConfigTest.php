@@ -97,6 +97,8 @@ class RouterConfigTest extends TestCase
 
     /**
      * @param array<string, mixed> $config
+     *
+     * @phpstan-impure It reads the environment, which a test changes between two calls
      */
     private function routerFromEnv(array $config = []): Router
     {
@@ -266,7 +268,7 @@ class RouterConfigTest extends TestCase
      * URL encoding cannot be turned off since 2.2.0 — off took every check of url() along.
      * Empty meant off as well; the message names the variable, never the value.
      *
-     * @return array<string, array{0: string|int|bool}>
+     * @return array<int|string, array{0: string|int|bool}>
      */
     public static function urlEncodingVariablesThatMeanOff(): array
     {
@@ -357,7 +359,7 @@ class RouterConfigTest extends TestCase
                 /** @phpstan-ignore argument.type */
                 Router::$factory($config);
                 $this->fail("{$factory}() accepted it");
-            } catch (RouterException $e) {
+            } catch (RouterException $e) { // @phpstan-ignore catch.neverThrown (a variable static call PHPStan does not follow)
                 // The message names what is allowed — never a value, and the keys only in the debug message
                 $this->assertSame('Unknown config key. Known keys: debug, basePath, baseUrl, trailingSlash, routesFile, urlEncoding, implicitHead, emitChunkSize', $e->getMessage());
                 $this->assertSame($debugMessage, $e->getDebugMessage());
@@ -436,7 +438,7 @@ class RouterConfigTest extends TestCase
     }
 
     /**
-     * @return array<string, array{0: mixed, 1: bool}>
+     * @return array<int|string, array{0: mixed, 1: bool}>
      */
     public static function debugValuesFromEnvFiles(): array
     {
@@ -654,7 +656,7 @@ class RouterConfigTest extends TestCase
     }
 
     /**
-     * @return array<string, array{0: mixed}>
+     * @return array<int|string, array{0: mixed}>
      */
     public static function urlEncodingValuesThatMeanOff(): array
     {

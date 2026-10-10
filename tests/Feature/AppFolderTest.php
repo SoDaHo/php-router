@@ -360,6 +360,8 @@ class AppFolderTest extends TestCase
 
     /**
      * @param array<string, string> $headers
+     *
+     * @phpstan-impure The file behind the path changes between two calls
      */
     private function ask(Router $router, string $path, array $headers, string $method = 'GET'): ResponseInterface
     {
@@ -518,7 +520,10 @@ class AppFolderTest extends TestCase
         $etag = $this->get($router, '/login/large.txt')->getHeaderLine('ETag');
 
         // Marked weak: time and size do not prove the same bytes
-        $stat = (array) stat($file);
+        $stat = stat($file);
+        if ($stat === false) {
+            $this->fail('No stat for ' . $file);
+        }
         $this->assertSame(sprintf('W/"%x-%x-6553f100-10001"', $stat['dev'], $stat['ino']), $etag);
         $this->assertSame(304, $this->ask($router, '/login/large.txt', ['If-None-Match' => substr($etag, 2)])->getStatusCode(), 'without the W/');
 
@@ -1238,7 +1243,7 @@ class AppFolderTest extends TestCase
         $seen = [];
         $guard = new class ($seen) implements MiddlewareInterface {
             /** @param array<int, mixed> $seen */
-            public function __construct(private array &$seen)
+            public function __construct(private array &$seen) // @phpstan-ignore property.onlyWritten (written through the reference, read by the test)
             {
             }
 

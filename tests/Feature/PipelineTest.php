@@ -557,7 +557,7 @@ class PipelineTest extends TestCase
         $seen = [];
         $router->middleware(new class ($seen) implements MiddlewareInterface {
             /** @param array<int, mixed> $seen */
-            public function __construct(private array &$seen)
+            public function __construct(private array &$seen) // @phpstan-ignore property.onlyWritten (written through the reference, read by the test)
             {
             }
 
@@ -620,7 +620,7 @@ class PipelineTest extends TestCase
         $spy = function (string $label) use (&$seen): MiddlewareInterface {
             return new class ($label, $seen) implements MiddlewareInterface {
                 /** @param array<int, mixed> $seen */
-                public function __construct(private readonly string $label, private array &$seen)
+                public function __construct(private readonly string $label, private array &$seen) // @phpstan-ignore property.onlyWritten (written through the reference, read by the test)
                 {
                 }
 
@@ -840,7 +840,7 @@ class PipelineTest extends TestCase
         $hook = [];
         $router = $this->router()
             ->middleware([$rewrite, new PipelineTag('failing', throw: true)])
-            ->setErrorHandler(function (\Throwable $e, ServerRequestInterface $request) use (&$seen): ?ResponseInterface {
+            ->setErrorHandler(function (\Throwable $e, ServerRequestInterface $request) use (&$seen): ResponseInterface {
                 $match = $request->getAttribute(RouteMatch::class);
                 $seen[] = [$e->getMessage(), $request->getUri()->getPath(), $match->path, $match->route?->getAttribute('format')];
 
@@ -1050,6 +1050,7 @@ class PipelineTest extends TestCase
         $this->assertInstanceOf(\WeakMap::class, $record);
 
         // … and a responder set afterwards is called with two again
+        /** @var array<string, list<mixed>> $calls */
         $calls = [];
         $dispatcher->setErrorResponder($responders['variadic'])->handle(new ServerRequest('GET', '/x'));
         $this->assertCount(2, $calls['variadic']);

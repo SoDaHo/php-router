@@ -20,7 +20,7 @@ class GroupOwnAddressTest extends TestCase
      */
     private static function patterns(RouteCollector $collector): array
     {
-        return array_map(static fn ($route): string => $route->pattern, $collector->getRoutes());
+        return array_values(array_map(static fn ($route): string => $route->pattern, $collector->getRoutes()));
     }
 
     public function testEmptyPatternIsTheGroupsOwnAddressInTheModeStrict(): void

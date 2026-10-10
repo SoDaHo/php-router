@@ -59,7 +59,7 @@ class RouterOutputTest extends TestCase
 
         ob_start();
         $router->run();
-        $output = ob_get_clean();
+        $output = (string) ob_get_clean();
 
         // Check that JSON body was output
         $this->assertStringContainsString('Hello World', $output);
@@ -87,7 +87,7 @@ class RouterOutputTest extends TestCase
 
         ob_start();
         Router::boot(['debug' => true], $this->routesFile);
-        $output = ob_get_clean();
+        $output = (string) ob_get_clean();
 
         $this->assertStringContainsString('"booted":true', $output);
     }
@@ -145,7 +145,7 @@ class RouterOutputTest extends TestCase
 
         ob_start();
         $router->run();
-        $output = ob_get_clean();
+        $output = (string) ob_get_clean();
 
         $this->assertStringContainsString('"success":false', $output);
         $this->assertStringContainsString('not found', strtolower($output));
@@ -174,7 +174,7 @@ class RouterOutputTest extends TestCase
 
         ob_start();
         $router->run();
-        $output = ob_get_clean();
+        $output = (string) ob_get_clean();
 
         // Redirect has empty body
         $this->assertEmpty($output);
@@ -210,7 +210,7 @@ class RouterOutputTest extends TestCase
 
         ob_start();
         $router->run();
-        $output = ob_get_clean();
+        $output = (string) ob_get_clean();
 
         // Verify the complete flow works
         $data = json_decode($output, true);
