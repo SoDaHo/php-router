@@ -360,7 +360,7 @@ final class AppFolder
 
         if ($opened === false
             || $named === false
-            || !str_starts_with($file, $root . DIRECTORY_SEPARATOR)
+            || !str_starts_with($file, self::below($root))
             || !self::isSameFile($opened, $named)) {
             fclose($handle);
 
@@ -518,12 +518,13 @@ final class AppFolder
      */
     private function fileFor(string $root, string $relative, bool &$startPage): string|false|null
     {
-        $target = realpath($relative === '' ? $root : $root . DIRECTORY_SEPARATOR . $relative);
+        $base = self::below($root);
+        $target = realpath($relative === '' ? $root : $base . $relative);
         if ($target === false) {
             return null;
         }
 
-        $startPage = is_dir($target) || $this->isStartPage($root . DIRECTORY_SEPARATOR . $relative, $target);
+        $startPage = is_dir($target) || $this->isStartPage($base . $relative, $target);
 
         if (is_dir($target)) {
             $target = realpath($target . DIRECTORY_SEPARATOR . $this->index);
@@ -533,18 +534,28 @@ final class AppFolder
         }
 
         // A file that cannot be read is treated like one that must not be served: 404, not 500
-        if (!str_starts_with($target, $root . DIRECTORY_SEPARATOR) || !is_file($target) || !is_readable($target)) {
+        if (!str_starts_with($target, $base) || !is_file($target) || !is_readable($target)) {
             return false;
         }
 
         // The resolved way counts as well: a link must not lead to something hidden
-        foreach (explode(DIRECTORY_SEPARATOR, substr($target, strlen($root) + 1)) as $segment) {
+        foreach (explode(DIRECTORY_SEPARATOR, substr($target, strlen($base))) as $segment) {
             if (str_starts_with($segment, '.')) {
                 return false;
             }
         }
 
         return $target;
+    }
+
+    /**
+     * The folder as the prefix of what lies below it: with one separator at its end — also
+     * where it is the root of the file system ('/', 'C:\'), which has one already: '//' as a
+     * prefix matched nothing, and such a folder served no file at all.
+     */
+    private static function below(string $root): string
+    {
+        return rtrim($root, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
     }
 
     /**
