@@ -110,16 +110,17 @@ class ResponseTest extends TestCase
      */
     public function testRedirectIsA3xxStatus(): void
     {
-        foreach ([300, 303, 307, 308, 399] as $status) {
+        foreach (Response::REDIRECT_STATUSES as $status) {
             $this->assertSame($status, Response::redirect('/new', $status)->getStatusCode());
         }
 
-        foreach ([200, 201, 299, 400, 500] as $status) {
+        // A 300, 304 or 305 with a Location is no redirect a client follows either
+        foreach ([200, 201, 299, 300, 304, 305, 306, 399, 400, 500] as $status) {
             try {
                 Response::redirect('/new', $status);
                 $this->fail("A redirect with {$status} was made");
             } catch (\Sodaho\Router\Exception\RouterException $e) {
-                $this->assertSame('Redirect status must be a 3xx status', $e->getMessage());
+                $this->assertSame('Redirect status must be 301, 302, 303, 307 or 308', $e->getMessage());
                 $this->assertSame((string) $status, $e->getDebugMessage());
             }
         }

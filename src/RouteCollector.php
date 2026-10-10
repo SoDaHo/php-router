@@ -489,12 +489,12 @@ final class RouteCollector
      *
      * @param string $from Source URL pattern
      * @param string $to Target URL
-     * @param int $status HTTP status code (default: 302), a 3xx status
+     * @param int $status HTTP status code (default: 302): 301, 302, 303, 307 or 308
      *
      * @throws DuplicateRouteException If route already exists
      * @throws RouterException If the target has a control character, a placeholder that is
      *                         not {name}, one its source does not have or one where scheme
-     *                         or host belong, or the status is no 3xx status
+     *                         or host belong, or the status is none of Response::REDIRECT_STATUSES
      */
     public function redirect(string $from, string $to, int $status = 302): Route
     {

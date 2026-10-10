@@ -26,11 +26,11 @@ final class RedirectHandler implements RequestHandlerInterface
      * Create a new RedirectHandler instance.
      *
      * @param string $target Target URL (can contain {param} placeholders)
-     * @param int $status HTTP status code (default: 302), a 3xx status
+     * @param int $status HTTP status code (default: 302): 301, 302, 303, 307 or 308
      *
      * @throws RouterException If the target has a control character other than a tab, a
      *                         placeholder that is not of the form {name} or one where scheme
-     *                         or host belong, or the status is no 3xx status
+     *                         or host belong, or the status is none of Response::REDIRECT_STATUSES
      */
     public function __construct(
         private readonly string $target,
@@ -45,9 +45,9 @@ final class RedirectHandler implements RequestHandlerInterface
             );
         }
 
-        // A Location with a 200 is no redirect: the client shows the empty body
-        if ($status < 300 || $status > 399) {
-            throw new RouterException('Redirect status must be a 3xx status', debugMessage: (string) $status);
+        // A Location with a 200 (or a 304) is no redirect: the client shows the empty body
+        if (!in_array($status, Response::REDIRECT_STATUSES, true)) {
+            throw new RouterException('Redirect status must be 301, 302, 303, 307 or 308', debugMessage: (string) $status);
         }
 
         // The target takes {name}, nothing else in braces: anything else would go out as it stands

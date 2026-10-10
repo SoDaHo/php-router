@@ -58,7 +58,8 @@ class RedirectHandlerTest extends TestCase
             'placeholder in host position' => ['//{host}/x', 302, $schemeOrHost],
             'placeholder behind an empty host' => ['https:///{path}', 302, $schemeOrHost],
             'line break' => ["/new\r\nX-Evil: 1", 302, 'Redirect target must not contain a control character'],
-            'no redirect status' => ['/new', 200, 'Redirect status must be a 3xx status'],
+            'no redirect status' => ['/new', 200, 'Redirect status must be 301, 302, 303, 307 or 308'],
+            'not modified' => ['/new', 304, 'Redirect status must be 301, 302, 303, 307 or 308'],
             'placeholder with a type' => ['/new/{id:int}', 302, 'Redirect target has a placeholder that is not of the form {name}'],
         ];
     }

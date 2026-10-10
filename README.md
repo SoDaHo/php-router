@@ -566,7 +566,8 @@ $r->redirect('/users/{id}/profile', '/profile/{id}');  // With parameters
 ```
 
 A placeholder in the target is `{name}` — nothing else in braces — and has to exist in the
-source (the prefix of its groups included). The status is a 3xx status, and the target
+source (the prefix of its groups included). The status is one a client follows — 301,
+302, 303, 307 or 308 (`Response::REDIRECT_STATUSES`; not 300, 304 or 305) —, and the target
 has no control character other than a tab; both are refused where the route is written.
 A placeholder must not stand where scheme or host belong: a target that has a scheme (a
 letter, then letters, digits, `+`, `-`, `.`, then `:`) or begins with `//` writes scheme
@@ -641,7 +642,7 @@ Response::html($content);                                // text/html
 Response::html($content, 404);                           // text/html with status
 Response::text($content);                                // text/plain
 Response::redirect('/new-url');                          // 302
-Response::redirect('/new-url', 301);                     // 301 — a 3xx status, or a RouterException
+Response::redirect('/new-url', 301);                     // 301 — 301, 302, 303, 307 or 308, or a RouterException
 Response::download($content, 'file.pdf');                // Attachment (in-memory string, filename sanitized)
 Response::download($content, 'file.pdf', 'application/pdf');
 Response::download($png, 'avatar.png', 'image/png', inline: true);  // shown, not saved

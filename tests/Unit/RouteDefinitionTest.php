@@ -519,22 +519,23 @@ class RouteDefinitionTest extends TestCase
         }
     }
 
-    public function testRedirectStatusIsA3xxStatus(): void
+    public function testRedirectStatusIsOneThatSendsTheClientOn(): void
     {
         $collector = new RouteCollector();
 
-        foreach ([200, 201, 299, 400, 0, 1000] as $status) {
+        // 300, 304, 305 and 399 were taken up to the first 2.2.0 candidate: no client follows them
+        foreach ([200, 201, 299, 300, 304, 305, 306, 399, 400, 0, 1000] as $status) {
             try {
                 $collector->redirect('/old', '/new', $status);
                 $this->fail('The redirect was registered with ' . $status);
             } catch (RouterException $e) {
-                $this->assertSame('Redirect status must be a 3xx status', $e->getMessage());
+                $this->assertSame('Redirect status must be 301, 302, 303, 307 or 308', $e->getMessage());
                 $this->assertSame((string) $status, $e->getDebugMessage());
             }
         }
         $this->assertSame([], $collector->getRoutes());
 
-        foreach ([300, 301, 302, 303, 307, 308, 399] as $status) {
+        foreach ([301, 302, 303, 307, 308] as $status) {
             $handler = $collector->redirect('/old/' . $status, '/new', $status)->handler;
             $this->assertInstanceOf(\Sodaho\Router\Middleware\RedirectHandler::class, $handler);
             $this->assertSame($status, $handler->getStatus());

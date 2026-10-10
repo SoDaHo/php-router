@@ -28,6 +28,13 @@ use Sodaho\Router\Stream\FileStream;
  */
 final class Response
 {
+    /**
+     * The statuses a redirect goes out with: those that send the client on to the
+     * Location. Not 300 (a choice, no redirect), 304 (not modified, no Location to follow),
+     * 305 and 306 (deprecated, unused), nor any other 3xx a client does not follow.
+     */
+    public const REDIRECT_STATUSES = [301, 302, 303, 307, 308];
+
     /** Upper bound for the filename inside Content-Disposition (see contentDisposition()). */
     private const FILENAME_MAX_BYTES = 200;
 
@@ -347,18 +354,19 @@ final class Response
     }
 
     /**
-     * Redirect response — a 3xx status: a Location with a 200 is no redirect, the client
-     * shows the empty body (a 201 with a Location is Response::created()).
+     * Redirect response — with a status that sends the client on (REDIRECT_STATUSES): a
+     * Location with a 200 is no redirect, the client shows the empty body, and so is one
+     * with a 304 (a 201 with a Location is Response::created()).
      *
      * @param string $url Target URL
-     * @param int $status HTTP status code (default: 302), a 3xx status
+     * @param int $status HTTP status code (default: 302): 301, 302, 303, 307 or 308
      *
-     * @throws RouterException When the status is no 3xx status
+     * @throws RouterException When the status is none of those
      */
     public static function redirect(string $url, int $status = 302): ResponseInterface
     {
-        if ($status < 300 || $status > 399) {
-            throw new RouterException('Redirect status must be a 3xx status', debugMessage: (string) $status);
+        if (!in_array($status, self::REDIRECT_STATUSES, true)) {
+            throw new RouterException('Redirect status must be 301, 302, 303, 307 or 308', debugMessage: (string) $status);
         }
 
         return new Psr7Response($status, ['Location' => $url]);

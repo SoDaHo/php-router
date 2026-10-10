@@ -47,7 +47,7 @@ application.
 - `RedirectHandler` refuses in its constructor what `RouteCollector::redirect()` refused for
   it: a target with a control character other than a tab, a placeholder that is not
   `{name}` or one where scheme or host belong (`'{a}:{b}'`, `'https:{path}'`,
-  `'//{host}/x'`), and a status that is no 3xx status. A handler built by hand — a handler
+  `'//{host}/x'`), and a status a client does not follow (see below). A handler built by hand — a handler
   of a route of your own — got none of these checks; `'{a}:{b}'` was caught only as the
   redirect went out. The scheme is read as RFC 3986 has it, in the constructor and where
   the address goes out, by one function (`'1{x}:y'` is a path).
@@ -124,10 +124,13 @@ application.
   — write `get('/')` to keep `/api/`. Only the empty string itself: a pattern of blanks
   alone (`get('   ')`) stays `/api/`. Outside a group and in the mode `ignore` nothing
   changes.
-- `Response::redirect()` refuses a status that is no 3xx status with a `RouterException`
-  (`Redirect status must be a 3xx status`), as redirect routes do since 2.1.1: a `Location`
-  with a 200 is no redirect — the client shows the empty body. 2.0.0 promised a 3xx status
-  for both; a 201 with a `Location` is `Response::created()`.
+- A redirect has a status a client follows: 301, 302, 303, 307 or 308
+  (`Response::REDIRECT_STATUSES`). `Response::redirect()` refuses any other with a
+  `RouterException` (`Redirect status must be 301, 302, 303, 307 or 308`) — it took any
+  status, and a `Location` with a 200 is no redirect, the client shows the empty body (2.0.0
+  promised a 3xx status). Redirect routes and `RedirectHandler`, which took every 3xx since
+  2.1.1, refuse 300, 304, 305 and 306 as well: no client follows those. A 201 with a
+  `Location` is `Response::created()`.
 - `baseUrl` (config, `setBaseUrl()`, `APP_URL` through `fromEnv()`) has to be an address of
   a host: `http://` or `https://`, the host, a port and a path at most — and read as a
   browser reads it (PHP's WHATWG parser, `Uri\WhatWg\Url`) it has to name the host it is
@@ -169,6 +172,8 @@ application.
 ### Added
 - `Dispatcher::staticRoute()`: the static route of a method for a path, without a pass over
   the dynamic routes.
+- `Response::REDIRECT_STATUSES`: the statuses a redirect goes out with (301, 302, 303, 307,
+  308).
 
 ### Deprecated
 - `UrlGenerator::setEncodeParams()`: encoding cannot be turned off; `true` changes nothing,
@@ -259,13 +264,16 @@ What to look at:
 - **Redirects.** A `RedirectHandler` built by hand throws when it is built where its target
   leaves scheme or host to a placeholder, has a control character other than a tab
   (`"/new\r\nX: 1"`), a placeholder that is not `{name}` (`'/new/{id:int}'`), or where its
-  status is no 3xx status — what `redirect()` refused for it already. A value that would
+  status is not 301, 302, 303, 307 or 308 — what `redirect()` refused for it already (a 300,
+  304 or 305 it took). A value that would
   make a `.` or `..` segment is a 500 instead of a redirect.
 - **HEAD.** A dynamic `head()` route no longer answers for a path a static `get()` route
   takes.
 - **`get('')` in a group** (trailing slash mode `strict`) is the group's own address now;
   write `get('/')` for the address with the slash (a pattern of blanks alone stays there).
-- **`Response::redirect()`** takes a 3xx status only; use `Response::created()` for 201.
+- **Redirect statuses:** `Response::redirect()`, `redirect()` routes and `RedirectHandler`
+  take 301, 302, 303, 307 or 308 only (a 300, 304 or 305 redirect route was accepted by
+  2.1.1); use `Response::created()` for 201.
 - **`basePath` and `routesFile`** in the config take a string or `null`; `true`, a number
   or an array are refused when the router is built.
 - **`baseUrl` / `APP_URL`** has to be `http(s)://host[:port][/path]`, the host written as a
