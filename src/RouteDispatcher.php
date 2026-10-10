@@ -59,13 +59,6 @@ final class RouteDispatcher implements RequestHandlerInterface
     private \WeakMap $issued;
 
     /**
-     * The answers handle() cut for HEAD (see answersHead())
-     *
-     * @var \WeakMap<ResponseInterface, true>
-     */
-    private \WeakMap $headAnswers;
-
-    /**
      * Create a new RouteDispatcher.
      *
      * @param array{0: array<string, array<string, Route>>, 1: array<string, array<int, array{regex: string, route: Route, casts: array<string, string>}>>} $dispatchData Compiled route data from RouteCollector
@@ -86,7 +79,6 @@ final class RouteDispatcher implements RequestHandlerInterface
         $this->trailingSlash = $trailingSlash;
         $this->debug = $debug;
         $this->issued = new \WeakMap();
-        $this->headAnswers = new \WeakMap();
     }
 
     /**
@@ -430,6 +422,25 @@ final class RouteDispatcher implements RequestHandlerInterface
      */
     public function handle(ServerRequestInterface $request): ResponseInterface
     {
+        return $this->answer($request)[0];
+    }
+
+    /**
+     * What handle() answers, and whether this call cut the answer's body because the
+     * request was HEAD at any step on its way in (implicitHead): such an answer keeps the
+     * response's headers, including a Content-Length where there is one, and goes out
+     * without a body — with withBody false. Router::run() needs to know, because the method
+     * the request came in with does not say it when a middleware passed it on as HEAD. Said
+     * for this call only, never kept on the response: a handler may return a response that
+     * was cut for HEAD before (an earlier answer it kept, a HEAD sub-request's answer) as
+     * its answer to a POST, which goes out with its body.
+     *
+     * @internal Used by Router
+     *
+     * @return array{ResponseInterface, bool} The response, and whether its body was cut for HEAD
+     */
+    public function answer(ServerRequestInterface $request): array
+    {
         $startTime = microtime(true);
 
         // The request as it was last passed inwards, and whether it has been HEAD at any step
@@ -538,7 +549,8 @@ final class RouteDispatcher implements RequestHandlerInterface
         // ETag, a Content-Length), and status and headers stay exactly as they are. "HEAD"
         // is a request that was HEAD at any step on its way in — also in a delegation whose
         // answer a middleware threw away to delegate again.
-        if ($this->implicitHead && $head) {
+        $cut = $this->implicitHead && $head;
+        if ($cut) {
             try {
                 $response = $response->withBody(\Nyholm\Psr7\Stream::create(''));
             } catch (\Throwable $e) {
@@ -549,27 +561,12 @@ final class RouteDispatcher implements RequestHandlerInterface
 
                 $response = $this->withoutBody($e, $current, isset($answered[$response]), $known);
             }
-
-            // Whoever sends it has to send it as an answer to HEAD — also when the request
-            // came in as a POST a middleware passed on as HEAD (see answersHead())
-            $this->headAnswers[$response] = true;
         }
 
-        return $response;
-    }
-
-    /**
-     * Whether handle() returned this response as the answer to a request that was HEAD at
-     * any step on its way in, its body cut (implicitHead): it keeps the response's headers,
-     * including a Content-Length where there is one, and goes out without a body — with
-     * withBody false. Router::run() asks this, because the method the request came in with
-     * does not say it when a middleware passed it on as HEAD.
-     *
-     * @internal Used by Router::run()
-     */
-    public function answersHead(ResponseInterface $response): bool
-    {
-        return isset($this->headAnswers[$response]);
+        // Whoever sends a cut answer has to send it as one to HEAD — also when the request
+        // came in as a POST a middleware passed on as HEAD. Returned with it, not marked on
+        // the response object, which outlives this call
+        return [$response, $cut];
     }
 
     /**

@@ -750,15 +750,15 @@ final class Router implements RouterInterface
             return;
         }
 
-        // handle() does not throw: what goes wrong is a 500 already
-        $response = $this->handle($request);
+        // answer() does not throw, like handle(): what goes wrong is a 500 already
+        [$response, $cut] = $this->answer($request);
 
         // An answer to HEAD goes out without its body, and keeps its headers, including a
         // Content-Length where it has one — also when the request came in as a POST that a
-        // middleware passed on as HEAD: the dispatcher cut that answer's body (implicitHead),
-        // and only it can say so. The dispatcher is null where the routes could not be
-        // loaded: no middleware ran then.
-        $withBody = $request->getMethod() !== 'HEAD' && $this->dispatcher?->answersHead($response) !== true;
+        // middleware passed on as HEAD: this call cut that answer's body (implicitHead), and
+        // only it can say so. Whatever it did not cut goes out as an answer to the method
+        // the request came in with, also a response cut for HEAD in an earlier call.
+        $withBody = $request->getMethod() !== 'HEAD' && !$cut;
 
         // Once output has started, the response is not even looked at
         if (!$this->outputStarted()) {
@@ -837,10 +837,21 @@ final class Router implements RouterInterface
      */
     public function handle(ServerRequestInterface $request): ResponseInterface
     {
+        return $this->answer($request)[0];
+    }
+
+    /**
+     * What handle() answers, and whether this call cut the answer's body for HEAD (see
+     * RouteDispatcher::answer()). run() sends it by that, for this call only.
+     *
+     * @return array{ResponseInterface, bool} The response, and whether its body was cut for HEAD
+     */
+    private function answer(ServerRequestInterface $request): array
+    {
         try {
             // Everything a request runs into in there is answered in there, through
             // errorResponse() (see getDispatcher())
-            return $this->getDispatcher()->handle($request);
+            return $this->getDispatcher()->answer($request);
         } catch (\Throwable $e) {
             // What is left: the routes could not be loaded
             /** @var \WeakMap<\Throwable, true> $known */
@@ -849,17 +860,17 @@ final class Router implements RouterInterface
 
             // No answer to HEAD carries a body with implicitHead on — this one included
             if (!$this->config['implicitHead'] || RouteDispatcher::describe($request)['method'] !== 'HEAD') {
-                return $response;
+                return [$response, false];
             }
 
             try {
-                return $response->withBody(\Nyholm\Psr7\Stream::create(''));
+                return [$response->withBody(\Nyholm\Psr7\Stream::create('')), true];
             } catch (\Throwable $failure) {
                 // The error handler's response does not take another body (or PHP cannot
                 // open the stream for an empty one)
                 $this->reportOnce($failure, $request, $known);
 
-                return RouteDispatcher::plain(500);
+                return [RouteDispatcher::plain(500), true];
             }
         }
     }
