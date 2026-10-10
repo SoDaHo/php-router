@@ -556,8 +556,9 @@ final class RouteCollector
 
             // An empty pattern is the group's own address: get('') in group('/api') is /api,
             // get('/') stays /api/ — the two addresses this mode tells apart. (Up to 2.1.1
-            // both were /api/, and /api could not be registered in the group at all.)
-            $normalizedPattern = $trimmed === '' && $prefix !== '' ? '' : '/' . ltrim($trimmed, '/');
+            // both were /api/, and /api could not be registered in the group at all.) Only
+            // the empty pattern itself: blanks alone stay what they were, /api/.
+            $normalizedPattern = $pattern === '' && $prefix !== '' ? '' : '/' . ltrim($trimmed, '/');
             $path = $prefix . $normalizedPattern;
             $path = '/' . ltrim($path, '/');
         } else {

@@ -119,7 +119,8 @@ application.
   address: `/api` in `group('/api', …)`, while `get('/')` stays `/api/`. Up to 2.1.1 both
   registered `/api/` (the second was a duplicate), and `/api` could not be registered in
   the group at all. **A route written as `get('')` in a group moves from `/api/` to `/api`**
-  — write `get('/')` to keep `/api/`. Outside a group and in the mode `ignore` nothing
+  — write `get('/')` to keep `/api/`. Only the empty string itself: a pattern of blanks
+  alone (`get('   ')`) stays `/api/`. Outside a group and in the mode `ignore` nothing
   changes.
 - `Response::redirect()` refuses a status that is no 3xx status with a `RouterException`
   (`Redirect status must be a 3xx status`), as redirect routes do since 2.1.1: a `Location`

@@ -40,6 +40,23 @@ class GroupOwnAddressTest extends TestCase
         $this->assertSame(['/api', '/api/', '/api/v1', '/api/v1/users'], self::patterns($collector));
     }
 
+    /**
+     * Only the empty pattern itself: one of blanks alone is trimmed to '' in this mode and
+     * stays /api/, as in 2.1.1 — it does not move with get('').
+     */
+    public function testPatternOfBlanksStaysTheAddressWithTheSlash(): void
+    {
+        $collector = new RouteCollector();
+        $collector->setPreserveTrailingSlash(true);
+
+        $collector->group('/api', function (RouteCollector $r): void {
+            $r->get('   ', 'handler');
+            $r->get('', 'handler');
+        });
+
+        $this->assertSame(['/api/', '/api'], self::patterns($collector));
+    }
+
     public function testOutsideAGroupAnEmptyPatternIsTheRoot(): void
     {
         $collector = new RouteCollector();

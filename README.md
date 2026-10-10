@@ -285,9 +285,9 @@ $r->group('/api', function (RouteCollector $r) {
 ```
 
 In the trailing slash mode `strict` (the default), `/api` and `/api/` are two addresses:
-inside `group('/api', …)`, `get('')` registers the group's own address `/api` and
-`get('/')` registers `/api/`. (Up to 2.1.1 both registered `/api/`.) In the mode `ignore`
-both are `/api`.
+inside `group('/api', …)`, `get('')` — exactly the empty string — registers the group's
+own address `/api`, and `get('/')` registers `/api/` (so does a pattern of blanks alone, as
+before). (Up to 2.1.1 both registered `/api/`.) In the mode `ignore` both are `/api`.
 
 ## Route Attributes
 
