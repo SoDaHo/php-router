@@ -750,10 +750,14 @@ final class Router implements RouterInterface
             return;
         }
 
-        $withBody = $request->getMethod() !== 'HEAD';
-
         // handle() does not throw: what goes wrong is a 500 already
         $response = $this->handle($request);
+
+        // An answer to HEAD goes out without its body, and keeps the GET's Content-Length —
+        // also when the request came in as a POST that a middleware passed on as HEAD: the
+        // dispatcher cut that answer's body (implicitHead), and only it can say so. The
+        // dispatcher is null where the routes could not be loaded: no middleware ran then.
+        $withBody = $request->getMethod() !== 'HEAD' && $this->dispatcher?->answersHead($response) !== true;
 
         // Once output has started, the response is not even looked at
         if (!$this->outputStarted()) {
@@ -764,6 +768,8 @@ final class Router implements RouterInterface
     /**
      * What run() sends: everything is read from the response before the first byte goes
      * out; what fails then is answered with a 500, what fails afterwards only reported.
+     *
+     * @param bool $withBody Whether $response goes out with its body (see run())
      */
     private function deliver(ResponseInterface $response, ServerRequestInterface $request, bool $withBody): void
     {
@@ -771,8 +777,11 @@ final class Router implements RouterInterface
             $prepared = $this->prepare($response, $withBody);
         } catch (\Throwable $e) {
             // Nothing was sent: the response cannot be read (its body closed, a getter
-            // that throws). A 500 can go out, and the error hook hears why.
+            // that throws). A 500 can go out, and the error hook hears why. It is the
+            // router's answer to the request as it came in: with its text, unless that was
+            // HEAD — also where a middleware passed a POST on as HEAD (as 2.1.1 sent it)
             $this->report($e, $request);
+            $withBody = $request->getMethod() !== 'HEAD';
             $prepared = $this->prepare($this->plainAnswer(500, 'Internal Server Error', fn (\Throwable $failure) => $this->report($failure, $request)), $withBody);
         }
 

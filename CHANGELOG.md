@@ -228,7 +228,8 @@ from SemVer by the owner's decision of 2026-10-10. See "Upgrading from
   one too — refused before anything is sent where the body says its size is 0 (`run()`
   answers 500 then). So the answer to `HEAD`, which keeps the `Content-Length` of the `GET`,
   goes out through `emit($response, withBody: false)` — `emit()` cannot tell it from a body
-  that is missing; `run()` does this itself. A 1xx, 204, 205 or 304 sends no body at all
+  that is missing; `run()` does this itself, also for a request that a middleware passed on
+  as `HEAD`. A 1xx, 204, 205 or 304 sends no body at all
   (see "Security"). A body longer than its `Content-Length` went out whole — a kept-alive
   client read the rest as the start of the next response; it is sent up to the length now,
   never beyond, and ends the same way.
@@ -424,7 +425,11 @@ look at:
 - **The answer to `HEAD` through `emit()`** needs `withBody: false`
   (`$router->emit($response, withBody: $request->getMethod() !== 'HEAD')`): it keeps the
   `Content-Length` of the `GET` with an empty body, which `emit($response)` refuses now
-  before anything is sent (2.1.1 sent it). `run()` is not affected.
+  before anything is sent (2.1.1 sent it). The same holds for the answer to a request that
+  a middleware passed on as `HEAD` (a `POST` it rewrote): its body is cut as well, so
+  `emit()` needs `withBody: false` for it — the caller knows its middleware, `emit()` does
+  not. `run()` sends both as 2.1.1 did: without a body, with the `Content-Length` of the
+  `GET`.
 - **A response's protocol version** has to be a version (`1.1`, `2`), its status code from
   100 to 599, and every header line a token name and a value without control characters
   other than a tab — a response that breaks this gets the router's 500 from `run()`, an

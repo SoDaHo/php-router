@@ -159,6 +159,13 @@ class EmitOverHttpTest extends TestCase
 
                 Sodaho\Router\Router::create(['debug' => false, 'basePath' => ''])
                     ->loadRoutes(__DIR__ . '/routes.php')
+                    // A request with X-As-Head is passed on as HEAD, whatever it came in as
+                    ->middleware(new class implements \\Psr\\Http\\Server\\MiddlewareInterface {
+                        public function process(\\Psr\\Http\\Message\\ServerRequestInterface \$request, \\Psr\\Http\\Server\\RequestHandlerInterface \$handler): \\Psr\\Http\\Message\\ResponseInterface
+                        {
+                            return \$handler->handle(\$request->hasHeader('X-As-Head') ? \$request->withMethod('HEAD') : \$request);
+                        }
+                    })
                     ->on('error', function (array \$data): void {
                         // Any exception, not only the router's own: what has no debug message logs ''
                         \$debug = \$data['exception'] instanceof Sodaho\Router\Exception\RouterException ? \$data['exception']->getDebugMessage() : '';
@@ -416,6 +423,23 @@ class EmitOverHttpTest extends TestCase
         $this->assertSame('HTTP/1.1 200 OK', $head['status']);
         $this->assertSame(['4'], self::valuesOf($head['headers'], 'Content-Length'));
         $this->assertSame('', $head['body']);
+    }
+
+    /**
+     * A POST a middleware passed on as HEAD gets what HEAD gets: the headers with the GET's
+     * Content-Length, without the body — a candidate of 2.2.0 sent a 500 for it (see
+     * RunRewrittenToHeadTest).
+     */
+    public function testPostPassedOnAsHeadGetsTheHeadersWithoutTheBody(): void
+    {
+        @unlink(self::$docroot . '/error.log');
+
+        $response = $this->request('POST', '/page', ['X-As-Head: 1']);
+
+        $this->assertSame('HTTP/1.1 200 OK', $response['status']);
+        $this->assertSame(['4'], self::valuesOf($response['headers'], 'Content-Length'));
+        $this->assertSame('', $response['body']);
+        $this->assertFileDoesNotExist(self::$docroot . '/error.log');
     }
 
     /**

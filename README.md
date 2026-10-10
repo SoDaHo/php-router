@@ -969,7 +969,9 @@ is given up on with a `RouterException` once the headers are out: `run()` report
 the response promised. A body longer than its `Content-Length` is sent up to it, never
 beyond (a kept-alive client would read the rest as the next response), and ends the same
 way. The answer to `HEAD` keeps the `Content-Length` of the `GET` without a body: `run()`
-sends it without reading the body, `emit()` with `withBody: false` as above. If output has
+sends it without reading the body, `emit()` with `withBody: false` as above. So is the
+answer to a request that a middleware passed on as `HEAD` (a `POST` it rewrote): `run()`
+knows it from the router, the caller of `emit()` from its middleware. If output has
 already started, nothing can be sent any more: the `error` hook is called with
 `type: 'emit'`.
 
