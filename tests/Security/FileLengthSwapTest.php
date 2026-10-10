@@ -35,7 +35,8 @@ class FileLengthSwapTest extends TestCase
     {
         $process = proc_open(
             [PHP_BINARY, '-r', self::SWAPPER, $this->dir],
-            [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
+            // Nothing to read from it: what it might print must not fill a pipe and stop it
+            [0 => ['file', '/dev/null', 'r'], 1 => ['file', '/dev/null', 'w'], 2 => ['file', '/dev/null', 'w']],
             $pipes,
         );
         $this->assertIsResource($process);
@@ -44,6 +45,16 @@ class FileLengthSwapTest extends TestCase
         $sizes = [];
 
         try {
+            // The swapper is a process of its own: wait until it has replaced the file once
+            // (a slow machine starts it late), so that the loop below runs while it swaps
+            $deadline = microtime(true) + 20;
+            while (self::sizeOf($this->dir . '/file.bin') === 10 && microtime(true) < $deadline) {
+                usleep(1000);
+            }
+            if (self::sizeOf($this->dir . '/file.bin') === 10) {
+                $this->markTestSkipped('The swapper did not start within 20 seconds');
+            }
+
             for ($i = 0; $i < 3000; $i++) {
                 $response = Response::file($this->dir . '/file.bin');
                 $body = (string) $response->getBody();
@@ -54,14 +65,18 @@ class FileLengthSwapTest extends TestCase
             }
         } finally {
             touch($this->dir . '/stop');
-            foreach ($pipes as $pipe) {
-                fclose($pipe);
-            }
             proc_close($process);
         }
 
         $this->assertSame(0, $mismatches, 'Content-Length did not describe the body');
         $this->assertCount(2, $sizes, 'the file was not replaced while it was served');
+    }
+
+    private static function sizeOf(string $file): int
+    {
+        clearstatcache(true, $file);
+
+        return (int) @filesize($file);
     }
 
     /** Replaces file.bin by one of 10 and one of 20 bytes in turn (rename() is atomic) until told to stop */

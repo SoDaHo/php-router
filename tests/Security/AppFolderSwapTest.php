@@ -102,12 +102,20 @@ class AppFolderSwapTest extends TestCase
         ]);
         $process = proc_open(
             [PHP_BINARY, '-r', self::SWAPPER, $swapper],
-            [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
+            // Nothing to read from it: what it might print must not fill a pipe and stop it
+            [0 => ['file', '/dev/null', 'r'], 1 => ['file', '/dev/null', 'w'], 2 => ['file', '/dev/null', 'w']],
             $pipes,
         );
         $this->assertIsResource($process);
 
         try {
+            // The swapper is a process of its own: wait until it has put the link in place
+            // once (a slow machine starts it late), so that the requests run while it swaps
+            $deadline = microtime(true) + 20;
+            while (!file_exists($this->root . '/file.txt.inside') && !is_link($this->root . '/file.txt') && microtime(true) < $deadline) {
+                usleep(1000);
+            }
+
             $app = new AppFolder('/', $this->root);
             $seen = ['INSIDE' => 0, 'SECRET' => 0, 'none' => 0];
 
@@ -118,9 +126,6 @@ class AppFolderSwapTest extends TestCase
             }
         } finally {
             touch($this->base . '/stop');
-            foreach ($pipes as $pipe) {
-                fclose($pipe);
-            }
             proc_close($process);
             @unlink($this->base . '/stop');
         }
