@@ -927,8 +927,10 @@ header line only after the lines in front of it went out (a `Location` among the
 the status a 302). `run()` answers 500 then (the `error`
 hook gets the `RouterException`), `emit()` throws it. A read that gives `''` before the end
 of the body is waited past (PSR-7 allows it while the next bytes are on their way), with a
-pause that grows to 50 ms; a body that gives no byte for `emitIdleTimeout` seconds (30), or
-ends short of its `Content-Length` after a first byte, is given up on with a
+pause that grows to 50 ms and never reaches past the deadline; a body that gives no byte
+for `emitIdleTimeout` seconds (30) — counted from the first read that gave nothing; a byte
+that comes after that is too late —, or ends short of its `Content-Length` after a first
+byte, is given up on with a
 `RouterException` once the headers are out: `run()` reports it to the `error` hook (with the
 status that went out), `emit()` throws it — the client got less than the response promised.
 A body that sent no byte is no short one (the answer to `HEAD` keeps the `Content-Length` of

@@ -59,6 +59,47 @@ class EmitIdleTimeoutTest extends TestCase
         $this->assertLessThan(30, $body->reads);
     }
 
+    public function testByteThatComesBeforeTheDeadlineIsTaken(): void
+    {
+        // Ready 30 ms before the deadline, inside what could be the last 50 ms pause: a pause
+        // takes half the time left at most, so a read still comes before the deadline
+        $body = new LateBody(0.17);
+
+        $this->assertSame('AB', $this->emitted(new Psr7Response(200, [], $body), ['emitIdleTimeout' => 0.2]));
+    }
+
+    public function testByteThatComesAfterTheDeadlineIsRefused(): void
+    {
+        // Ready 30 ms after the deadline: up to the first 2.2.0 candidate a byte that came
+        // after a pause was taken, and wound the clock back
+        $this->assertStalledAfterOneByte(new LateBody(0.23));
+    }
+
+    public function testByteThatAReadGivesOnlyAfterTheDeadlineIsRefused(): void
+    {
+        // The read itself takes longer than the idle timeout: what it gives came too late
+        $this->assertStalledAfterOneByte(new BlockingBody(0.3));
+    }
+
+    private function assertStalledAfterOneByte(StreamInterface $body): void
+    {
+        $level = ob_get_level();
+        ob_start();
+
+        try {
+            Router::create(['emitIdleTimeout' => 0.2])->emit(new Psr7Response(200, [], $body));
+            $this->fail('emit() took a byte that came after the deadline');
+        } catch (RouterException $e) {
+            $this->assertSame('Response body stalled before its end: no byte within emitIdleTimeout', $e->getMessage());
+            $this->assertSame('1 bytes sent', $e->getDebugMessage());
+            $this->assertSame('A', ob_get_contents());
+        } finally {
+            while (ob_get_level() > $level) {
+                ob_end_clean();
+            }
+        }
+    }
+
     public function testBodyThatGivesNoByteForTheIdleTimeoutIsGivenUp(): void
     {
         $body = new ScriptedBody(['A'], endless: true);
@@ -271,13 +312,14 @@ final class ScriptedBody implements StreamInterface
 
 /**
  * A body whose second part is there only after a moment: 'A', then nothing until the
- * moment passed, then 'B' and its end — what a source that is not ready yet gives.
+ * moment passed — counted from the first read that gave nothing, where emit() starts its
+ * wait as well —, then 'B' and its end: what a source that is not ready yet gives.
  */
 final class LateBody implements StreamInterface
 {
     public int $reads = 0;
     private int $step = 0;
-    private ?int $readyAt = null;
+    private ?float $readyAt = null;
 
     public function __construct(private float $seconds)
     {
@@ -288,12 +330,13 @@ final class LateBody implements StreamInterface
         $this->reads++;
         if ($this->step === 0) {
             $this->step = 1;
-            $this->readyAt = hrtime(true) + (int) ($this->seconds * 1e9);
 
             return 'A';
         }
 
-        if (hrtime(true) < $this->readyAt) {
+        $now = hrtime(true) / 1e9;
+        $this->readyAt ??= $now + $this->seconds;
+        if ($now < $this->readyAt) {
             return '';
         }
 
@@ -305,6 +348,104 @@ final class LateBody implements StreamInterface
     public function eof(): bool
     {
         return $this->step === 2;
+    }
+
+    public function __toString(): string
+    {
+        return '';
+    }
+
+    public function close(): void
+    {
+    }
+
+    public function detach()
+    {
+        return null;
+    }
+
+    public function getSize(): ?int
+    {
+        return null;
+    }
+
+    public function tell(): int
+    {
+        return 0;
+    }
+
+    public function isSeekable(): bool
+    {
+        return false;
+    }
+
+    public function seek(int $offset, int $whence = SEEK_SET): void
+    {
+    }
+
+    public function rewind(): void
+    {
+    }
+
+    public function isWritable(): bool
+    {
+        return false;
+    }
+
+    public function write(string $string): int
+    {
+        return 0;
+    }
+
+    public function isReadable(): bool
+    {
+        return true;
+    }
+
+    public function getContents(): string
+    {
+        return '';
+    }
+
+    public function getMetadata(?string $key = null): mixed
+    {
+        return $key === null ? [] : null;
+    }
+}
+
+/**
+ * A body whose read blocks: 'A', one read that gives nothing, then a read that takes its
+ * time before it gives 'B' and the end — a source that answers, but late.
+ */
+final class BlockingBody implements StreamInterface
+{
+    private int $step = 0;
+
+    public function __construct(private float $seconds)
+    {
+    }
+
+    public function read(int $length): string
+    {
+        $this->step++;
+
+        return match ($this->step) {
+            1 => 'A',
+            2 => '',
+            default => $this->late(),
+        };
+    }
+
+    private function late(): string
+    {
+        usleep((int) ($this->seconds * 1e6));
+
+        return 'B';
+    }
+
+    public function eof(): bool
+    {
+        return $this->step >= 3;
     }
 
     public function __toString(): string

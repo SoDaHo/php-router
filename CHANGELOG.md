@@ -170,9 +170,11 @@ from SemVer by the owner's decision of 2026-10-10. See "Upgrading from
   say so when a response body does not arrive whole. Up to 2.1.1 the emitter stopped
   without a word at the third empty read in a row — PSR-7 gives `''` while the next bytes
   are on their way, so `'A', '', '', '', 'B'` went out as `A`, a whole answer for every
-  report. Now the pause between empty reads grows from none to 50 ms, and a body that gives
-  no byte for `emitIdleTimeout` seconds (30; the brake against a stream that never reports
-  its end), or ends short of its `Content-Length` after a first byte, ends in a
+  report. Now the pause between empty reads grows from none to 50 ms (half the time left at
+  most), and a body that gives no byte for `emitIdleTimeout` seconds (30, counted from the
+  first read that gave nothing; the brake against a stream that never reports its end) —
+  a byte that comes later, after a pause or from a read that blocked, is too late and
+  winds no clock back —, or ends short of its `Content-Length` after a first byte, ends in a
   `RouterException`: `run()` reports it to the `error` hook with the status that went out,
   `emit()` throws it. A body that sent no byte (the answer to `HEAD`, which keeps the
   `Content-Length` of the `GET`, also through `emit()` without `withBody: false`) and the

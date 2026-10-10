@@ -1287,21 +1287,29 @@ final class Router implements RouterInterface
         $expected = self::contentLength($prepared['headers']);
         $sent = 0;
         $pause = 0;
-        $idleSince = null;
+        // When the wait for the next byte ends, in seconds of the monotonic clock: set by the
+        // first read that gives nothing, cleared by a byte that comes in time
+        $deadline = null;
         while (!$body->eof()) {
             $chunk = $body->read($this->config['emitChunkSize']);
-            if ($chunk === '') {
-                $now = hrtime(true);
-                $idleSince ??= $now;
-                if (($now - $idleSince) / 1e9 >= $this->config['emitIdleTimeout']) {
-                    throw new RouterException(
-                        'Response body stalled before its end: no byte within emitIdleTimeout',
-                        debugMessage: sprintf('%d bytes sent', $sent),
-                    );
-                }
+            $now = hrtime(true) / 1e9;
 
+            // Asked after every read, before what it gave is used: a byte that comes after
+            // the deadline came too late, and must not wind the clock back — a source that is
+            // always a little late would never be given up on
+            if ($deadline !== null && $now >= $deadline) {
+                throw new RouterException(
+                    'Response body stalled before its end: no byte within emitIdleTimeout',
+                    debugMessage: sprintf('%d bytes sent', $sent),
+                );
+            }
+
+            if ($chunk === '') {
+                $deadline ??= $now + $this->config['emitIdleTimeout'];
                 if ($pause > 0) {
-                    usleep($pause);
+                    // Half the time left at most: the reads come closer as the deadline nears,
+                    // and a byte that comes before it is read before it, not just after
+                    usleep((int) min($pause, ($deadline - $now) * 5e5));
                 }
                 $pause = min(max(2 * $pause, 1000), self::EMIT_IDLE_PAUSE_MAX);
 
@@ -1309,7 +1317,7 @@ final class Router implements RouterInterface
             }
 
             $pause = 0;
-            $idleSince = null;
+            $deadline = null;
             $sent += strlen($chunk);
             echo $chunk;
         }
