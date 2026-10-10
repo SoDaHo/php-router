@@ -22,6 +22,20 @@
   value stays where the path ends with it (`/files/docs/` gives `docs/`), an empty value
   as well. The built-in pattern is `(?:[^/]+(?:/[^/]+)*(?:/(?=\z))?)?` instead of `.*`.
 
+- A redirect is not sent where a value would be — or make, with the text around it — a `.`
+  or `..` segment of the path: `redirect('/docs/{x}-z', '/docs/{x}/')` with `/docs/..-z`
+  rendered `/docs/../`, which a client resolves to `/`; `'/a/%2e{x}'` with `.` rendered
+  `/a/%2e.`. `handle()` answers 500 and the `error` hook gets a `RouterException`, as for
+  a rendering that would change scheme or host. A `..` the target writes itself
+  (`'../{x}'`) and dots that make no segment of their own (`'/dl/{x}.json'` with `..`) go
+  out as before.
+- `RedirectHandler` refuses in its constructor what `RouteCollector::redirect()` refused for
+  it: a target with a control character other than a tab, a placeholder that is not
+  `{name}` or one where scheme or host belong (`'{a}:{b}'`, `'https:{path}'`,
+  `'//{host}/x'`), and a status that is no 3xx status. A handler built by hand — a handler
+  of a route of your own — got none of these checks; `'{a}:{b}'` was caught only as the
+  redirect went out.
+
 ### Changed
 - Two routes with the same name are refused with a `DuplicateRouteException` when the route
   table is built (and by `new UrlGenerator()` for a list of `Route` objects): the first

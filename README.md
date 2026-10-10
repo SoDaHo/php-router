@@ -562,9 +562,17 @@ giving `//evil.example` — is not sent; the request ends in a 500 and the `erro
 the `RouterException`. The check compares the target as written with the address as
 rendered, not with the host the request came to: an empty value in front of a slash ends
 in a 500 also where the rendering would name the application's own host
-(`//app.example`). Encoded as a whole, `redirect('/old/{path:any}', '/new/{path}')`
-sends `/old/docs/intro` to `/new/docs%2Fintro` — a path this router answers with 404. For
-redirects that keep the segments of a path, use a route or a handler of your own.
+(`//app.example`). Nor is an address sent where a value would be — or make, with the text
+around it — a `.` or `..` segment of the path: `'/docs/{x}/'` with `..` (a client would ask
+for `/`), `'/a/%2e{x}'` with `.`; a `..` the target writes itself (`'../{x}'`) and dots that
+are no segment of their own (`'/dl/{x}.json'` with `..`, a value `...`) go out. Encoded as
+a whole, `redirect('/old/{path:any}', '/new/{path}')` sends `/old/docs/intro` to
+`/new/docs%2Fintro` — a path this router answers with 404. For redirects that keep the
+segments of a path, use a route or a handler of your own.
+
+The rules belong to `RedirectHandler` itself: one built by hand (`new RedirectHandler($to,
+$status)`, as a handler of a route of your own) refuses the same targets in its
+constructor, and checks what it renders in the same way.
 
 ## Response Helpers
 

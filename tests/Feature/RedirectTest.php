@@ -237,6 +237,48 @@ class RedirectTest extends TestCase
         }
     }
 
+    /**
+     * A value alone that would be — or make — a '.' or '..' segment is not sent: '/go{path:any}'
+     * takes '.' from '/go.', and '/a/.' in front makes '/a/..' (a client asks for '/');
+     * '/go/{x}-z' takes '..' from '/go/..-z' (no dot segment of the request path).
+     * Through the router: 500 and the error hook.
+     */
+    public function testValueThatWouldMakeADotSegmentIsA500ThroughTheRouter(): void
+    {
+        $routes = sys_get_temp_dir() . '/router_redirect_dots_' . uniqid() . '.php';
+        file_put_contents($routes, <<<'PHP'
+            <?php
+            return function ($r) {
+                $r->redirect('/go{path:any}', '/a/.{path}');
+                $r->redirect('/docs/{x}-z', '/docs/{x}/');
+            };
+            PHP);
+
+        try {
+            $router = Router::create()->loadRoutes($routes);
+            $reported = [];
+            $router->on('error', function (array $data) use (&$reported): void {
+                $reported[] = $data['exception'];
+            });
+
+            foreach (['/go.' => '/a/..', '/docs/..-z' => '/docs/../', '/docs/.-z' => '/docs/./'] as $path => $rendered) {
+                $response = $router->handle(new ServerRequest('GET', $path));
+
+                $this->assertSame(500, $response->getStatusCode(), $path);
+                $this->assertFalse($response->hasHeader('Location'), $path);
+                $reason = array_pop($reported);
+                $this->assertInstanceOf(RouterException::class, $reason);
+                $this->assertSame('Redirect not sent: a value would make a "." or ".." path segment, which a client resolves before it asks', $reason->getMessage());
+                $this->assertSame($rendered, $reason->getDebugMessage());
+            }
+
+            $this->assertSame('/docs/a/', $router->handle(new ServerRequest('GET', '/docs/a-z'))->getHeaderLine('Location'));
+            $this->assertSame('/docs/.../', $router->handle(new ServerRequest('GET', '/docs/...-z'))->getHeaderLine('Location'));
+        } finally {
+            unlink($routes);
+        }
+    }
+
     public function testRedirectWorksWithHead(): void
     {
         $collector = new RouteCollector();

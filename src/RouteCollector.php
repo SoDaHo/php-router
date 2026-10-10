@@ -467,44 +467,27 @@ final class RouteCollector
     /**
      * Register a redirect route.
      *
-     * Uses RedirectHandler instead of a Closure.
+     * Uses RedirectHandler instead of a Closure; its constructor refuses what no redirect
+     * could send (see RedirectHandler).
      *
      * @param string $from Source URL pattern
      * @param string $to Target URL
      * @param int $status HTTP status code (default: 302), a 3xx status
      *
      * @throws DuplicateRouteException If route already exists
-     * @throws RouterException If the target has a control character or a placeholder its
-     *                         source does not have, or the status is no 3xx status
+     * @throws RouterException If the target has a control character, a placeholder that is
+     *                         not {name}, one its source does not have or one where scheme
+     *                         or host belong, or the status is no 3xx status
      */
     public function redirect(string $from, string $to, int $status = 302): Route
     {
-        // What a response cannot carry in its Location header is said here, not by a 500
-        // for every request to the route (a tab it carries, as it always did)
-        if (preg_match('/[\x00-\x08\x0A-\x1F\x7F]/', $to) === 1) {
-            throw new RouterException(
-                'Redirect target must not contain a control character',
-                debugMessage: (string) json_encode($to, JSON_INVALID_UTF8_SUBSTITUTE),
-            );
-        }
-
-        // A Location with a 200 is no redirect: the client shows the empty body
-        if ($status < 300 || $status > 399) {
-            throw new RouterException('Redirect status must be a 3xx status', debugMessage: (string) $status);
-        }
+        $handler = new Middleware\RedirectHandler($to, $status);
 
         // A placeholder in the target that the source (with the prefix of its groups) does
         // not have would go out as it stands. Said before the route is registered.
         $known = array_column(self::parts($this->currentPrefix . '/' . $from), 'name');
         preg_match_all('/\{([A-Za-z0-9_]+)\}/', $to, $wanted);
 
-        // … and so would one with a type: the target takes {name}, nothing else in braces
-        if (strpbrk((string) preg_replace('/\{[A-Za-z0-9_]+\}/', '', $to), '{}') !== false) {
-            throw new RouterException(
-                'Redirect target has a placeholder that is not of the form {name}',
-                debugMessage: $to,
-            );
-        }
         $unknown = array_diff($wanted[1], $known);
         if ($unknown !== []) {
             throw new RouterException(
@@ -513,65 +496,7 @@ final class RouteCollector
             );
         }
 
-        if ($wanted[1] !== [] && !self::fixesSchemeAndHost($to)) {
-            throw new RouterException(
-                'Redirect target has a placeholder where scheme or host belong: write them into the target, the host closed by "/", "?" or "#"',
-                debugMessage: $to,
-            );
-        }
-
-        return $this->addRoute(
-            ['GET', 'HEAD'],
-            $from,
-            new Middleware\RedirectHandler($to, $status)
-        );
-    }
-
-    /**
-     * Whether a redirect target leaves scheme and host of the address to nothing a request
-     * brings: either it has neither (a path, '?…' or '#…', no ':' in front of its first
-     * '/', '?' or '#'), or it writes both — scheme and '//' or '//' alone, a host that is
-     * not empty, closed by '/', '?' or '#' — before its first placeholder. A value is
-     * encoded as a whole (RedirectHandler), so it cannot bring a '/', '?', '#' or ':' of
-     * its own; but in scheme or host position it would be the scheme or the host itself:
-     * 'https:///{path}' with 'evil.example' is https://evil.example for a browser.
-     *
-     * Read as a browser reads an address (WHATWG URL): blanks and control characters at
-     * the edges and tabs inside dropped, a backslash taken for a slash.
-     */
-    private static function fixesSchemeAndHost(string $target): bool
-    {
-        $seen = str_replace(['\\', "\t"], ['/', ''], trim($target, "\x00..\x20"));
-        $front = (string) strstr($seen . '{', '{', true);
-
-        // A ':' in front of the first '/', '?' or '#' ends a scheme — if what stands in front
-        // of it is one (RFC 3986: a letter, then letters, digits, '+', '-', '.'): '1:x' is a
-        // path. A placeholder in there could make one ('{a}:', 'ht{a}tps:') unless a
-        // character in front of it already rules that out.
-        $firstSegment = substr($seen, 0, strcspn($seen, '/?#'));
-        $colon = strpos($firstSegment, ':');
-        $scheme = false;
-
-        if ($colon !== false) {
-            $beforeColon = substr($firstSegment, 0, $colon);
-            if (preg_match('~^(?:[A-Za-z][A-Za-z0-9+.\-]*)?\{~', $beforeColon) === 1) {
-                return false;
-            }
-            $scheme = preg_match('~^[A-Za-z][A-Za-z0-9+.\-]*$~D', $beforeColon) === 1;
-        }
-
-        if (!$scheme && !str_starts_with($seen, '//')) {
-            // A path, a query or a fragment of the address the client is at
-            return true;
-        }
-
-        // Scheme ('https:') — written, not a placeholder — and host, all before the first
-        // placeholder: '//', user information if any, a host that is not empty, a port if
-        // any, then '/', '?' or '#'
-        return preg_match(
-            '~^(?:[A-Za-z][A-Za-z0-9+.\-]*:)?//(?:[^/?#@]*@)?(?:\[[^\]/?#]+\]|[^/?#@:\[\]]+)(?::\d*)?[/?#]~',
-            $front,
-        ) === 1;
+        return $this->addRoute(['GET', 'HEAD'], $from, $handler);
     }
 
     // ==================== Internal ====================
