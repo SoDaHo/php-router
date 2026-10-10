@@ -12,7 +12,7 @@ use Sodaho\Router\Exception\RouterException;
  * Partially mutable while the routes file runs: middleware, name and attributes can be set
  * via fluent setters (or by assigning the property as a whole). Once the route table is
  * built (RouteCollector::getData()) the route is frozen: it is shared by every request it
- * serves, and what one request changed on it held for every request after it in the same
+ * serves, and what one request changed on it would hold for every request after it in the same
  * process — so every further change throws a RouterException. Writing into one of the
  * arrays in place ($route->attributes['k'] = …, $route->middleware[] = …) is never
  * possible: PHP refuses it with an Error, the setters are the way. The freeze is shallow:
@@ -90,9 +90,9 @@ final class Route
     /**
      * A middleware list with more middleware behind it — the one rule for a route, nested
      * groups and the router's own list. Numbered entries add up. A string key names one
-     * middleware: given a second time it would replace the first one in its place (as up
-     * to 2.1.1), and an 'auth' of a route quietly took the place of the 'auth' of its
-     * group — a check that the route's own one relied on no longer ran. Refused instead.
+     * middleware: given a second time it would replace the first one in its place, and an
+     * 'auth' of a route would quietly take the place of the 'auth' of its group — a check
+     * that the route's own one relied on would no longer run. Refused instead.
      *
      * @internal
      *

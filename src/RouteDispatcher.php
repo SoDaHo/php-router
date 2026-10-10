@@ -143,7 +143,7 @@ final class RouteDispatcher implements RequestHandlerInterface
     /**
      * Turn what route middleware and handlers throw into a response, inside the middleware
      * set with setMiddleware() — and, as the last resort, what that middleware throws
-     * itself. Without a responder exceptions leave handle() as before. What the responder
+     * itself. Without a responder exceptions leave handle() as they are. What the responder
      * throws itself leaves handle() too; it is not asked a second time.
      *
      * @param (\Closure(\Throwable, ServerRequestInterface): ResponseInterface)|null $responder

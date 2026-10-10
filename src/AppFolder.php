@@ -328,7 +328,7 @@ final class AppFolder
      *
      * The file was resolved a moment ago (realpath(), see fileFor()), and a writer of the
      * folder could have put a link to a file elsewhere in its place since: opened blindly,
-     * that file went out (a race between the check and fopen()). So the file is opened
+     * that file would go out (a race between the check and fopen()). So the file is opened
      * first and checked at the handle: its path, resolved again, is still itself inside the
      * folder (no link on the way now), and the file under that path — the link itself
      * where one stands there, lstat() — is the one the handle holds (device and file
@@ -546,7 +546,7 @@ final class AppFolder
     /**
      * The folder as the prefix of what lies below it: with one separator at its end — also
      * where it is the root of the file system ('/', 'C:\'), which has one already: '//' as a
-     * prefix matched nothing, and such a folder served no file at all.
+     * prefix would match nothing, and such a folder would serve no file at all.
      *
      * @internal Public for its tests: a root like 'C:\' exists on Windows only
      *

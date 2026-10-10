@@ -13,7 +13,7 @@ use Sodaho\Router\Exception\RouterException;
  * Values are always encoded, and an address is only returned when it leads back to its
  * route with exactly the values given, and when it is a path on this site: one slash in
  * front, no backslash, no '.' or '..' segment, nothing a client would read as another
- * host. (Encoding could be turned off up to 2.1.1, and took these checks along.)
+ * host.
  */
 final class UrlGenerator
 {
@@ -76,7 +76,7 @@ final class UrlGenerator
     /**
      * Set the base URL for absolute URL generation: an http(s) address of a host (see
      * checkBaseUrl()), or null or '' for none. It is put in front of every absolute address
-     * as it is — 'javascript:alert(1)//' made every one a script.
+     * as it is — 'javascript:alert(1)//' would make every one a script.
      *
      * @param string|null $baseUrl Base URL (e.g., 'https://example.com')
      *
@@ -98,7 +98,7 @@ final class UrlGenerator
      * What a base URL has to be, whoever gives it (the router's config, setBaseUrl(),
      * APP_URL, a generator built by hand): what an address can begin with — http or https,
      * '://' and a host, then a port and a path at most. No control character or blank (a
-     * line break made every absolute address a Location header the response refuses), no
+     * line break would make every absolute address a Location header the response refuses), no
      * query or fragment (the path would land behind them), not 'example.com' (every address
      * relative) and no other scheme. No user information and no backslash
      * ('https://evil\@trusted.example' is the host 'evil' for a browser), a port of digits if
@@ -153,8 +153,8 @@ final class UrlGenerator
 
     /**
      * URL encoding is always on: parameters are encoded with rawurlencode() ('John Doe'
-     * becomes 'John%20Doe'), and the address is checked. Off, values went out as they were
-     * and every check of url() with them — so off is refused, not ignored.
+     * becomes 'John%20Doe'), and the address is checked. Off, values would go out as they
+     * are, and every check of url() with them — so off is refused, not ignored.
      *
      * @deprecated since 2.2.0: encoding cannot be turned off; true changes nothing
      *
@@ -203,7 +203,7 @@ final class UrlGenerator
 
         // A '.' or '..' segment never arrives: a client resolves it before it asks (the
         // encoded forms too). Looked for in the finished address, base path included —
-        // '/tenant/..' in front of '/login' made '/tenant/../login', which a client reads as
+        // '/tenant/..' in front of '/login' would make '/tenant/../login', which a client reads as
         // '/login', outside the base path. '/dl/{name}.json' with the value '..' has none,
         // '/x/{a}.' with a value that the pattern lets be '.' has one.
         if (preg_match('#(?:^|/)\.\.?(?:/|$)#D', $address) === 1) {
@@ -410,8 +410,7 @@ final class UrlGenerator
         );
 
         // An address that begins with '//' is none of this site: a client reads what follows
-        // as another host. ('/{path:any}' with the value '/evil.example/x' — 1.x wrote
-        // '/%2Fevil.example%2Fx'.)
+        // as another host ('/{path:any}' with the value '/evil.example/x').
         if (str_starts_with($url, '//')) {
             throw new RouterException(
                 'The address would begin with "//", which a client reads as another host',
@@ -425,7 +424,7 @@ final class UrlGenerator
     /**
      * Literal text of a route pattern or base path as it stands in an address: what a
      * path may contain as it is stays (also ':', '@' and the sub-delimiters, so that
-     * '/v1:batch' and '/@{user}' read as before), everything else is percent-encoded. The
+     * '/v1:batch' and '/@{user}' read as written), everything else is percent-encoded. The
      * backslash is left for url() to refuse.
      */
     private static function encodeLiteral(string $literal): string

@@ -52,8 +52,8 @@ final class RouteHandler implements RequestHandlerInterface
         }
 
         // Controller class + method. A class name only: [$object, 'method'] is a callable
-        // and is called on that object below — taken for a class name, it was a TypeError
-        // (a 500)
+        // and is called on that object below — taken for a class name, it would be a
+        // TypeError (a 500)
         if (is_array($this->handler) && count($this->handler) === 2 && is_string($this->handler[0] ?? null)) {
             [$class, $method] = $this->handler;
 
@@ -65,7 +65,7 @@ final class RouteHandler implements RequestHandlerInterface
 
             // What the container returns under the class name has to be an object of that
             // class (or of a class below it, or one that implements the interface named):
-            // a wrong alias or factory ran another object's method of the same name — a
+            // a wrong alias or factory would run another object's method of the same name — a
             // consent or token handler of the wrong kind — without a word
             if (!$instance instanceof $class) {
                 throw new RouterException(

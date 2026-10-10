@@ -38,7 +38,7 @@ final class RedirectHandler implements RequestHandlerInterface
         private readonly int $status = 302
     ) {
         // What a response cannot carry in its Location header is said here, not by a 500
-        // for every request to the route (a tab it carries, as it always did)
+        // for every request to the route (a tab it carries)
         if (preg_match('/[\x00-\x08\x0A-\x1F\x7F]/', $target) === 1) {
             throw new RouterException(
                 'Redirect target must not contain a control character',
@@ -87,7 +87,7 @@ final class RedirectHandler implements RequestHandlerInterface
 
         // What the router hands over is a list of values by name; a handler built by hand
         // may be given anything under that attribute — what is no such list, or a value that
-        // is no scalar (an array became 'Array' with a warning), is no value of the target
+        // is no scalar (an array would become 'Array' with a warning), is no value of the target
         if (!is_array($params)) {
             throw new RouterException(
                 'Redirect not sent: the route parameters (_route_params) are no array of values',
@@ -107,7 +107,7 @@ final class RedirectHandler implements RequestHandlerInterface
             $target = str_replace('{' . $key . '}', rawurlencode((string) $value), $target);
         }
 
-        // A placeholder no value took went out as it stands ('/go/{id}' as the address): a
+        // A placeholder no value took would go out as it stands ('/go/{id}' as the address): a
         // value brings no brace of its own (encoded), so what is left is one of the target's
         if (preg_match('/\{[A-Za-z0-9_]+\}/', $target) === 1) {
             throw new RouterException(

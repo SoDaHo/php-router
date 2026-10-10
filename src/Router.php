@@ -216,7 +216,7 @@ final class Router implements RouterInterface
             return $flag;
         }
 
-        // Neither a boolean nor boolean-like. Something truthy used to end in a TypeError on
+        // Neither a boolean nor boolean-like. Something truthy would end in a TypeError on
         // every request; something empty ([]) simply is not "on".
         if (!$meaningless && !$value) {
             return false;
@@ -231,8 +231,8 @@ final class Router implements RouterInterface
      * Any other string is put in front of the address as it is (a slash at its end is
      * dropped) — so it has to be what an address can begin with: http or https, '://' and
      * a host, then a port and a path at most. No control character or blank (a line break
-     * made every absolute address a Location header the response refuses), no query or
-     * fragment (the path would land behind them), not 'example.com' (that made every
+     * would make every absolute address a Location header the response refuses), no query or
+     * fragment (the path would land behind them), not 'example.com' (that would make every
      * address relative, 'example.com/users/5') and no other scheme. No user information
      * and no backslash ('https://evil\@trusted.example' is the host 'evil' for a browser),
      * a port of digits if any, and a browser's parser (WHATWG URL) takes it with a host
@@ -271,8 +271,8 @@ final class Router implements RouterInterface
     }
 
     /**
-     * A config value that has to be a string: anything else was cast ('basePath' => true
-     * became '1', [] the word 'Array' with a warning) or failed only when the table was
+     * A config value that has to be a string: anything else would be cast ('basePath' => true
+     * becomes '1', [] the word 'Array' with a warning) or fail only when the table is
      * built (a routesFile that is an array, in file_exists()).
      *
      * @throws RouterException If the value is no string
@@ -287,7 +287,7 @@ final class Router implements RouterInterface
     }
 
     /**
-     * URL encoding is always on. Off, url() wrote values as they were and dropped every
+     * URL encoding is always on. Off, url() would write values as they are and drop every
      * check with the encoding — a control character, a backslash, a '.' or '..' segment,
      * an address that begins with '//' (another host for a client). The key stays, for a
      * value that means on; anything that means off is refused rather than ignored.
@@ -372,7 +372,7 @@ final class Router implements RouterInterface
 
     /**
      * @throws RouterException If the value is not one of the two modes — any other value
-     *                         left the router half in one mode and half in the other
+     *                         would leave the router half in one mode and half in the other
      */
     private static function trailingSlash(mixed $value): string
     {
@@ -452,7 +452,7 @@ final class Router implements RouterInterface
                 ));
             }
 
-            // Off is no mode any more (see urlEncoding()); empty meant off as well
+            // Off is refused (see urlEncoding()); an empty value means off and is refused too
             if ($key === 'urlEncoding' && filter_var($value, FILTER_VALIDATE_BOOL) === false) {
                 throw new RouterException(sprintf(
                     'Environment variable %s cannot turn URL encoding off: url() always encodes values and checks the address',
@@ -494,7 +494,7 @@ final class Router implements RouterInterface
     /**
      * A router is cloned before its first use — a clone is then a router of its own. Once
      * it was used (a request, match(), url(): the route table built or tried), a clone
-     * would share the table with the original (a hook added to the clone fired for the
+     * would share the table with the original (a hook added to the clone would fire for the
      * original) or run the routes file a second time (what it does to $this, twice).
      *
      * @throws RouterException When the router was used already
@@ -780,7 +780,7 @@ final class Router implements RouterInterface
             // Nothing was sent: the response cannot be read (its body closed, a getter
             // that throws). A 500 can go out, and the error hook hears why. It is the
             // router's answer to the request as it came in: with its text, unless that was
-            // HEAD — also where a middleware passed a POST on as HEAD (as 2.1.1 sent it)
+            // HEAD — also where a middleware passed a POST on as HEAD
             $this->report($e, $request);
             $withBody = $request->getMethod() !== 'HEAD';
             $prepared = $this->prepare($this->plainAnswer(500, 'Internal Server Error', fn (\Throwable $failure) => $this->report($failure, $request)), $withBody);
@@ -1213,8 +1213,8 @@ final class Router implements RouterInterface
      */
     private function prepare(ResponseInterface $response, bool $withBody): array
     {
-        // Readability BEFORE anything is sent: a detached/closed body used to blow up loudly
-        // inside __toString(). Throwing after the headers went out would leave a half-sent
+        // Readability BEFORE anything is sent: a detached/closed body throws inside
+        // __toString(). Throwing after the headers went out would leave a half-sent
         // response; throwing here lets the error handler still produce a proper 500.
         $unreadable = 'Response body is not readable (closed or detached before emit)';
         try {
@@ -1229,8 +1229,8 @@ final class Router implements RouterInterface
         }
 
         // The status is a number of three digits from 100 to 599 (RFC 9110, 15) — read once.
-        // The PSR-7 objects of other makes may not check it; a 99 or a 600 went out as it
-        // was, a status line no client can read as one.
+        // The PSR-7 objects of other makes may not check it; a 99 or a 600 would go out as it
+        // is, a status line no client can read as one.
         $code = $response->getStatusCode();
         if ($code < 100 || $code > 599) {
             throw new RouterException('Response status code must be from 100 to 599', debugMessage: (string) $code);
@@ -1238,7 +1238,7 @@ final class Router implements RouterInterface
 
         // RFC 9112: reason-phrase = *( HTAB / SP / VCHAR / obs-text ). The PSR-7 objects do
         // not check it, and PHP drops a status line with a line break and sends its own 200
-        // instead — a 403 went out as a 200, with a warning in the body. Refused here, before
+        // instead — a 403 would go out as a 200, with a warning in the body. Refused here, before
         // anything is sent, so that run() can still answer with a 500.
         $reasonPhrase = $response->getReasonPhrase();
         if (preg_match('/[\x00-\x08\x0A-\x1F\x7F]/', $reasonPhrase) === 1) {
@@ -1249,7 +1249,7 @@ final class Router implements RouterInterface
         }
 
         // The protocol version goes into the same line, and the PSR-7 objects do not check
-        // it either: "1.1\r\nX-Injected: 1" turned a 403 into PHP's 200 as well. A version
+        // it either: "1.1\r\nX-Injected: 1" would turn a 403 into PHP's 200 as well. A version
         // is a digit, and a dot and a digit where it has a minor one ("1.1", "2").
         $protocolVersion = $response->getProtocolVersion();
         if (preg_match('/^\d(?:\.\d)?\z/', $protocolVersion) !== 1) {
@@ -1266,10 +1266,10 @@ final class Router implements RouterInterface
             $reasonPhrase
         );
 
-        // A header line is checked as well — A11: the PSR-7 object of an application may
-        // not check it, and header() only finds out once lines went out (a Location before
-        // it had made PHP's status a 302, a 403 got lost). A name is a token (RFC 9110), a
-        // value a string without a control character other than a tab.
+        // A header line is checked as well: the PSR-7 object of an application may not
+        // check it, and header() only finds out once lines went out (a Location before it
+        // would have made PHP's status a 302, a 403 would be lost). A name is a token
+        // (RFC 9110), a value a string without a control character other than a tab.
         $headers = $response->getHeaders();
         foreach ($headers as $name => $values) {
             $name = (string) $name;
@@ -1309,7 +1309,7 @@ final class Router implements RouterInterface
         }
 
         // … and in its body: what a 1xx, 204, 205 or 304 sent after its headers, a kept-alive
-        // client read as the start of the next response. Refused, not dropped — a body there
+        // client would read as the start of the next response. Refused, not dropped — a body there
         // is a mistake of the application. Only its size is asked, the body is never read:
         // a size of 0 goes out without a body, one that is not known counts as not empty.
         $size = $withBody ? $body->getSize() : null;
@@ -1332,9 +1332,9 @@ final class Router implements RouterInterface
             );
         }
 
-        // For string bodies the emitted bytes are identical to the previous `echo
-        // $response->getBody()`: Nyholm's __toString() rewound the stream and returned
-        // everything, which is exactly what transmit() does piecewise. A body that does not
+        // For string bodies the emitted bytes are identical to `echo $response->getBody()`:
+        // Nyholm's __toString() rewinds the stream and returns everything, which is exactly
+        // what transmit() does piecewise. A body that does not
         // go out is not touched at all.
         if ($withBody && !$bodiless && $body->isSeekable()) {
             $body->rewind();
@@ -1349,8 +1349,8 @@ final class Router implements RouterInterface
      * transfer coding and sends the body as it is: a Transfer-Encoding of the response's own
      * would announce a framing the bytes do not have (with a Content-Length next to it, two
      * framings a sender must not combine). A Content-Length is one value of digits: two of
-     * them ('3' and '5', or '3, 3' in one line), or one that is no number, used to be
-     * treated as no length at all — and sent as it was, a body of any length behind it.
+     * them ('3' and '5', or '3, 3' in one line), or one that is no number, would otherwise
+     * be treated as no length at all — and sent as it is, a body of any length behind it.
      *
      * @param array<int|string, array<string>> $headers
      *
@@ -1439,7 +1439,7 @@ final class Router implements RouterInterface
         // Status line LAST. header() rewrites the status as a side effect: WWW-Authenticate
         // forces 401 and Location forces 302 (unless 201/3xx). Sent first, a 403 with a
         // challenge would arrive as 401 and a 202 with a Location as 302 — and a 200 with a
-        // Location, which 1.x still left to PHP, as a redirect nobody asked for.
+        // Location as a redirect nobody asked for.
         header($prepared['status']);
 
         // HEAD: PHP discards the output anyway, so do not read the body at all — for a
@@ -1455,8 +1455,8 @@ final class Router implements RouterInterface
 
         // An empty read does not mean "done": PSR-7 gives '' where no bytes are there yet
         // (a pump or append stream, a source that is not ready) while eof() is still false,
-        // and breaking on it would truncate the body — so would giving up after a few reads
-        // in a row (2.1.1 stopped silently at the third). Waited for instead, with a pause
+        // and breaking on it would truncate the body — so would giving up silently after a
+        // few empty reads in a row. Waited for instead, with a pause
         // that grows from none to EMIT_IDLE_PAUSE_MAX, until 'emitIdleTimeout' passed
         // without a byte — which still guards against a stream that never reports eof — and
         // then said: the client got less than the response promised, which must not look

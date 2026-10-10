@@ -49,7 +49,7 @@ final class Dispatcher
      */
     public function dispatch(string $method, string $uri): array
     {
-        // 1. Static Route Check (O(1) - Ultra Fast)
+        // 1. Static Route Check (O(1))
         if (isset($this->staticRoutes[$method][$uri])) {
             return [self::FOUND, $this->staticRoutes[$method][$uri], [], []];
         }

@@ -113,7 +113,7 @@ final class RouteCollector
         // What a fragment names is a parameter of every route that uses it — handed to the
         // handler as an argument nobody declared, or under '_route_params' in place of the
         // route's own; and a verb ends or steers the match of the whole route ('a(*ACCEPT)'
-        // matched '/files/abcd'). Refused where the pattern is added.
+        // would match '/files/abcd'). Refused where the pattern is added.
         $construct = self::constructOfItsOwn($regex);
         if ($construct === 'name') {
             throw new RouterException(
@@ -129,7 +129,7 @@ final class RouteCollector
         }
         // A callout ((?C), (?C1), (?C"text")) does nothing in PHP, which sets no callout
         // function — but the text of its string is read by nobody, and read as a fragment it
-        // hid what follows ('(?C"[")(?<n>x)(?C"]")' is a named group for PCRE). Refused.
+        // would hide what follows ('(?C"[")(?<n>x)(?C"]")' is a named group for PCRE). Refused.
         if ($construct === 'callout') {
             throw new RouterException(
                 'Pattern fragment must not contain a callout ((?C...)): callouts are not supported in a pattern fragment',
@@ -588,7 +588,7 @@ final class RouteCollector
     {
         // A route without a method is never asked for. A method that is no token cannot be
         // the method of a request — and would stand in the Allow header of every 405 for
-        // the path: "GET\r\n" made each of those a 500.
+        // the path: "GET\r\n" would make each of those a 500.
         if ($methods === []) {
             throw new RouterException('Route needs at least one HTTP method', debugMessage: $pattern);
         }
@@ -614,14 +614,13 @@ final class RouteCollector
             }
 
             // An empty pattern is the group's own address: get('') in group('/api') is /api,
-            // get('/') stays /api/ — the two addresses this mode tells apart. (Up to 2.1.1
-            // both were /api/, and /api could not be registered in the group at all.) Only
-            // the empty pattern itself: blanks alone stay what they were, /api/.
+            // get('/') stays /api/ — the two addresses this mode tells apart. Only the empty
+            // pattern itself: blanks alone stay what they are, /api/.
             $normalizedPattern = $pattern === '' && $prefix !== '' ? '' : '/' . ltrim($trimmed, '/');
             $path = $prefix . $normalizedPattern;
             $path = '/' . ltrim($path, '/');
         } else {
-            // Ignore mode: normalize everything (current behavior)
+            // Ignore mode: normalize everything
             $path = '/' . trim($this->currentPrefix . '/' . trim($pattern, '/'), '/');
         }
 
@@ -854,8 +853,8 @@ final class RouteCollector
     }
 
     /**
-     * One name, one address: url() gave the address of whichever route had the name last —
-     * 'oauth.callback' could lead to a debug route defined further down. Routes of the same
+     * One name, one address: url() would give the address of whichever route has the name
+     * last — 'oauth.callback' could lead to a debug route defined further down. Routes of the same
      * pattern may share a name (get('/login') and post('/login') as 'login'): url() writes
      * the same address for either. Asked when the table is built (and by UrlGenerator):
      * name() may still be called until then.

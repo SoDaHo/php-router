@@ -21,8 +21,8 @@ use Sodaho\Router\Contract\ResponderInterface;
  * "type", "title" and "status" are the responder's and the response's, never the details':
  * "type" comes from the error code, "title" from the message, and "status" is the status
  * code of the response — formatError() is not told it, so Response adds it. A details
- * array that names one of them does not replace it ("status": 200 in a 400 said the request
- * went well).
+ * array that names one of them does not replace it ("status": 200 in a 400 would say the
+ * request went well).
  *
  * Success format uses simple JSON (RFC 9457 only defines error format):
  * {"data": {...}, "message": "..."}
