@@ -136,11 +136,13 @@ class StreamedDownloadTest extends TestCase
     public function testRangeRequestEmitsExactlyTheRequestedSlice(): void
     {
         // NON-periodic payload: with '0123456789' repeated, every offset error that is a
-        // multiple of 10 stays invisible.
+        // multiple of 10 stays invisible — and with '(i * 37 + 11) % 256' every one that is
+        // a multiple of 256. Blocks of SHA-256 of the block number depend on the position.
         $payload = '';
-        for ($i = 0; $i < 1000; $i++) {
-            $payload .= chr(($i * 37 + 11) % 256);
+        for ($i = 0; strlen($payload) < 1000; $i++) {
+            $payload .= hash('sha256', (string) $i, true);
         }
+        $payload = substr($payload, 0, 1000);
         file_put_contents($this->payloadFile, $payload);
 
         $this->createRoutes(

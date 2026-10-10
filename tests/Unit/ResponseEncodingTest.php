@@ -48,13 +48,11 @@ class ResponseEncodingTest extends TestCase
         // It should NOT crash (which it did before)
         $this->assertSame(200, $response->getStatusCode());
 
-        // It SHOULD contain the Replacement Character  (U+FFFD)
-        // The exact output depends on PHP's implementation of substitution,
-        // usually it replaces the bad byte.
-        $this->assertStringContainsString('Hello', $decoded['data']['text']);
-        $this->assertStringContainsString('World', $decoded['data']['text']);
-
-        // Verify it is valid JSON now
-        $this->assertNotNull($decoded, 'Response body is not valid JSON');
+        // The bad byte is replaced by the replacement character U+FFFD, not dropped: a
+        // text that only contained 'Hello' and 'World' would pass as well if it were
+        // dropped (JSON_INVALID_UTF8_IGNORE) — and two words would be glued together
+        $this->assertSame("Hello \u{FFFD} World", $decoded['data']['text']);
+        // In the body as it is, unescaped (JSON_UNESCAPED_UNICODE)
+        $this->assertSame('{"success":true,"data":{"text":"Hello ' . "\u{FFFD}" . ' World"}}', $body);
     }
 }

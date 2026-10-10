@@ -142,7 +142,7 @@ class HandleNeverThrowsTest extends TestCase
 
         $reports = [];
         $router->on('error', function (array $data) use (&$reports): void {
-            $reports[] = [$data['exception']->getMessage(), $data['method'], $data['path']];
+            $reports[] = [$data['exception']->getMessage(), $data['method'], $data['path'], $data['exception']];
         });
 
         $hookErrors = 0;
@@ -179,12 +179,15 @@ class HandleNeverThrowsTest extends TestCase
         // No try: an exception here is the failure of this test
         $response = $router->handle(new ServerRequest($method, '/x'));
 
-        // What was reported, in order: the failure, then what failed while it was answered
+        // What was reported, in order: the failure, then what failed while it was answered —
+        // each by how its message begins, or (where PHP words it) by its type
         $expected = [$first];
         if ($errorHandler === 'throws') {
             $expected[] = 'error handler failed';
         } elseif ($errorHandler === 'returns no response') {
-            $expected[] = 'Sodaho\Router\Router::errorResponse(): Return value must be of type Psr\Http\Message\ResponseInterface';
+            // The router's return type refuses the string: a TypeError of its own, whatever
+            // PHP's message and the router's inner method say
+            $expected[] = \TypeError::class;
         }
         if ($responderFails && $errorHandler !== 'answers') {
             $expected[] = 'responder failed';
@@ -192,8 +195,13 @@ class HandleNeverThrowsTest extends TestCase
 
         $this->assertCount(count($expected), $reports, implode(' | ', array_column($reports, 0)));
         foreach ($expected as $i => $begin) {
-            // @phpstan-ignore argument.type (each beginning is written out above, none is empty)
-            $this->assertStringStartsWith($begin, $reports[$i][0]);
+            if ($begin === \TypeError::class) {
+                $this->assertInstanceOf(\TypeError::class, $reports[$i][3]);
+                $this->assertNull($reports[$i][3]->getPrevious());
+            } else {
+                // @phpstan-ignore argument.type (each beginning is written out above, none is empty)
+                $this->assertStringStartsWith($begin, $reports[$i][0]);
+            }
             $this->assertSame([$method, '/x'], [$reports[$i][1], $reports[$i][2]]);
         }
 

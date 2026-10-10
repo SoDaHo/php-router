@@ -319,6 +319,15 @@ from SemVer by the owner's decision of 2026-10-10. See "Upgrading from
 - The "header injection" test of the security suite checked a fixed target against
   itself; it checks what refuses a line break now — the registration of a target with one,
   and a value with one (no route).
+- Tests check what they name: the redirect of `run()` by its status (and over a socket by
+  its `Location`), not only its empty body; the range fixtures by their position (blocks of
+  SHA-256 — `(i * 37 + 11) % 256` repeated every 256 bytes, and a range off by 256 read the
+  same bytes); the replacement character U+FFFD exactly (`Hello` and `World` alone passed
+  with `JSON_INVALID_UTF8_IGNORE` as well); an error handler that returns no response by
+  the `TypeError` it causes, not by PHP's wording and a private method's name; an empty
+  `{path:any}` value in the middle of a pattern (`/edit//meta`, written by `url()` and
+  matched); and the range path of `Response::file()` (206 and 416) while the file is
+  replaced, which a length taken from `filesize()` failed unseen.
 - New public methods and a constant marked `@internal` (not part of the contract, used
   inside the library): `Route::freeze()`, `Route::addMiddleware()`,
   `RouteCollector::assertNamesOnce()`, `RouteCollector::TOKEN_CHARACTERS` (private in

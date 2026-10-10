@@ -12,15 +12,20 @@ class ResponseFileTest extends TestCase
 {
     private string $path;
 
-    /** Deterministic, NON-periodic payload — a periodic fixture hides offset bugs. */
+    /**
+     * Deterministic payload whose every byte depends on its position: blocks of SHA-256 of
+     * the block number. A periodic fixture hides offset bugs — the earlier '(i * 37 + 11) %
+     * 256' repeated itself every 256 bytes, and a range off by 256 read the same bytes.
+     */
     private string $payload;
 
     protected function setUp(): void
     {
         $this->payload = '';
-        for ($i = 0; $i < 1000; $i++) {
-            $this->payload .= chr(($i * 37 + 11) % 256);
+        for ($i = 0; strlen($this->payload) < 1000; $i++) {
+            $this->payload .= hash('sha256', (string) $i, true);
         }
+        $this->payload = substr($this->payload, 0, 1000);
 
         $this->path = sys_get_temp_dir() . '/response_file_test_' . uniqid() . '.bin';
         file_put_contents($this->path, $this->payload);

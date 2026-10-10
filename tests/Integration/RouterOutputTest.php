@@ -152,7 +152,7 @@ class RouterOutputTest extends TestCase
     }
 
     #[RunInSeparateProcess]
-    public function testEmitWithMultipleHeaders(): void
+    public function testRedirectGoesOutWithItsStatusAndAnEmptyBody(): void
     {
         $this->createRoutesFile(
             <<<'PHP'
@@ -176,10 +176,14 @@ class RouterOutputTest extends TestCase
         $router->run();
         $output = (string) ob_get_clean();
 
+        // The status PHP got: the redirect's own (http_response_code() shows it in CLI too)
+        $this->assertSame(302, http_response_code());
         // Redirect has empty body
-        $this->assertEmpty($output);
+        $this->assertSame('', $output);
 
-        // Header assertions skipped: xdebug_get_headers() unreliable in subprocess isolation
+        // The header lines cannot be seen here — in CLI header() sends nothing and
+        // headers_list() stays empty. EmitOverHttpTest asks a real web server for them
+        // (testRedirectGoesOutWithItsStatusItsLocationAndItsOtherHeaders).
     }
 
     /**

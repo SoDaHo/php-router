@@ -10,6 +10,7 @@ use PHPUnit\Framework\TestCase;
 use Sodaho\Router\Response;
 use Sodaho\Router\RouteCollector;
 use Sodaho\Router\RouteDispatcher;
+use Sodaho\Router\UrlGenerator;
 
 /**
  * {path:any} takes slashes, but no empty segment. '/files//etc/passwd' gave the value
@@ -73,7 +74,25 @@ class AnyPlaceholderTest extends TestCase
             'empty value' => ['/files/', 'files: '],
             'slash at the end of the path' => ['/files/docs/', 'files: docs/'],
             'in front of a literal' => ['/edit/docs/a/meta', 'meta: docs/a'],
+            // An empty value is no empty segment inside the value: in the middle of a pattern
+            // it makes one in the path, and that path reaches the route
+            'empty value in the middle of a pattern' => ['/edit//meta', 'meta: '],
         ];
+    }
+
+    public function testEmptyValueInTheMiddleOfAPatternIsWrittenAndMatchedAsAnEmptySegment(): void
+    {
+        $collector = new RouteCollector();
+        $collector->get('/edit/{path:any}/meta', 'handler')->name('meta');
+
+        // url() writes it as the path that reaches the route …
+        $address = new UrlGenerator($collector->getRoutes(), $collector->getPatterns())->url('meta', ['path' => '']);
+        $this->assertSame('/edit//meta', $address);
+
+        // … and match() finds the route there with the value ''
+        $match = new RouteDispatcher($collector->getData())->match(new ServerRequest('GET', $address));
+        $this->assertTrue($match->isFound());
+        $this->assertSame(['path' => ''], $match->params);
     }
 
     #[DataProvider('pathsThatReachTheRoute')]

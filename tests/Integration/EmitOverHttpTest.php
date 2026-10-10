@@ -67,6 +67,7 @@ class EmitOverHttpTest extends TestCase
                     \$r->get('/ping', fn() => Response::text({$ping}));
                     \$r->get('/forbidden', fn() => Response::forbidden()->withHeader('WWW-Authenticate', 'Bearer error="insufficient_scope"'));
                     \$r->get('/accepted', fn() => Response::accepted(['job' => 7])->withHeader('Location', '/jobs/7'));
+                    \$r->get('/redirect', fn() => Response::redirect('/new-location', 302)->withHeader('X-Extra', 'kept'));
                     \$r->get('/headers', fn() => Response::success('x')
                         ->withHeader('X-Test', 'lib')
                         ->withHeader('Cache-Control', 'public, max-age=60')
@@ -320,6 +321,16 @@ class EmitOverHttpTest extends TestCase
         $this->assertSame('HTTP/1.1 202 Accepted', $response['status']);
         $this->assertSame(['/jobs/7'], self::valuesOf($response['headers'], 'Location'));
         $this->assertSame('{"success":true,"data":{"job":7}}', $response['body']);
+    }
+
+    public function testRedirectGoesOutWithItsStatusItsLocationAndItsOtherHeaders(): void
+    {
+        $response = $this->request('GET', '/redirect');
+
+        $this->assertSame('HTTP/1.1 302 Found', $response['status']);
+        $this->assertSame(['/new-location'], self::valuesOf($response['headers'], 'Location'));
+        $this->assertSame(['kept'], self::valuesOf($response['headers'], 'X-Extra'));
+        $this->assertSame('', $response['body']);
     }
 
     public function testFieldsThatExistOncePerMessageAreReplaced(): void
