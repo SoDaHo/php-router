@@ -33,6 +33,7 @@ class UrlGeneratorBaseUrlTest extends TestCase
             'a backslash: the host is evil for a browser' => ['https://evil\\@trusted.example/base', $host],
             'user information' => ['https://user:secret@app.example', $host],
             'a port and no host' => ['https://:443', $host],
+            'an empty port' => ['https://app.example:', $host],
             'a query' => ['https://app.example?x=1', $host],
             'a line break' => ["https://app.example\r\nX: 1", $blank],
         ];
@@ -62,6 +63,12 @@ class UrlGeneratorBaseUrlTest extends TestCase
 
         $generator->setBaseUrl('https://app.example:8443/base/');
         $this->assertSame('https://app.example:8443/base/users/5', $generator->absoluteUrl('users.show', ['id' => 5]));
+
+        // A host the parser writes otherwise is put in front as it is written
+        $generator->setBaseUrl('https://Bücher.example');
+        $this->assertSame('https://Bücher.example/users/5', $generator->absoluteUrl('users.show', ['id' => 5]));
+        $generator->setBaseUrl('https://[0:0:0:0:0:0:0:1]:8443');
+        $this->assertSame('https://[0:0:0:0:0:0:0:1]:8443/users/5', $generator->absoluteUrl('users.show', ['id' => 5]));
 
         $generator->setBaseUrl('');
         $this->expectException(RouterException::class);

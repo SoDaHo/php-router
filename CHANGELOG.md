@@ -136,17 +136,19 @@ deliberate deviation from SemVer by the owner's decision of 2026-10-10. See "Upg
   2.1.1, refuse 300, 304, 305 and 306 as well: no client follows those. A 201 with a
   `Location` is `Response::created()`.
 - `baseUrl` (config, `setBaseUrl()`, `APP_URL` through `fromEnv()`) has to be an address of
-  a host: `http://` or `https://`, the host, a port and a path at most — and read as a
-  browser reads it (PHP's WHATWG parser, `Uri\WhatWg\Url`) it has to name the host it is
-  written with. `example.com` made every absolute address relative (`example.com/users/5`),
+  a host: `http://` or `https://`, the host, a port of digits and a path at most — and a
+  browser's parser (PHP's WHATWG parser, `Uri\WhatWg\Url`) has to take it with a host.
+  `example.com` made every absolute address relative (`example.com/users/5`),
   `//evil.example` or `javascript:alert(1)` an address elsewhere, a query or fragment put the
   path behind it, and `https://evil\@trusted.example/base` is the host `evil` for a browser.
   Refused as well: user information, a backslash, an authority that is no host
-  (`https://:443`, `https://[::1`, `https://@`), a port that is no number or outside
-  1–65535, an IPv4 address the parser writes otherwise (`https://127.1`). Such a value is
-  refused with a `RouterException` when it is given (the message names `APP_URL` where it
-  came from there). The rule lives in `UrlGenerator::setBaseUrl()`, which the router
-  delegates to: a generator built by hand refuses the same values (it took any string, and
+  (`https://:443`, `https://[::1`, `https://@`), a port that is empty, no number or outside
+  1–65535 (`https://example.com:`, `:bad`, `:0`). How the parser writes the host does not
+  matter: `https://Bücher.example`, `https://[0:0:0:0:0:0:0:1]` and `https://127.1` are taken
+  as in 2.1.1 and put in front as written. Such a value is refused with a `RouterException`
+  when it is given (the message names `APP_URL` where it came from there). The rule lives in
+  `UrlGenerator::checkBaseUrl()`, which the router and `UrlGenerator::setBaseUrl()` both
+  call: a generator built by hand refuses the same values (it took any string, and
   `javascript:alert(1)//` made every absolute address a script); `null` and `''` mean none
   there.
 - `RfcResponder`: the details of an error no longer replace `type`, `title` or `status` —
@@ -239,7 +241,7 @@ deliberate deviation from SemVer by the owner's decision of 2026-10-10. See "Upg
 - New public methods marked `@internal` (not part of the contract, used inside the
   library): `Route::freeze()`, `Route::addMiddleware()`, `RouteCollector::assertNamesOnce()`,
   `FileStream::fromHandle()`, `Response::fileFromHandle()`, `AppFolder::openWithin()`,
-  `AppFolder::below()`, `AppFolder::visibleBelow()`.
+  `AppFolder::below()`, `AppFolder::visibleBelow()`, `UrlGenerator::checkBaseUrl()`.
 
 ### Upgrading from 2.1.1
 Much of what 2.2.0 refuses never worked as meant and is refused now instead of doing the
@@ -292,9 +294,9 @@ look at:
   2.1.1); use `Response::created()` for 201.
 - **`basePath` and `routesFile`** in the config take a string or `null`; `true`, a number
   or an array are refused when the router is built.
-- **`baseUrl` / `APP_URL`** has to be `http(s)://host[:port][/path]`, the host written as a
-  browser reads it, without user information or backslash — also for
-  `UrlGenerator::setBaseUrl()` on a generator built by hand.
+- **`baseUrl` / `APP_URL`** has to be `http(s)://host[:port][/path]`: a host the browser's
+  parser takes, a port of digits (not an empty one), no user information or backslash —
+  also for `UrlGenerator::setBaseUrl()` on a generator built by hand.
 - **`RfcResponder`**: `type`, `title` and `status` in the details are dropped.
 - **`emit()`** can throw after the headers went out: when the body stalls or ends short of
   its `Content-Length` (`run()` reports it instead).

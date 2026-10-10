@@ -1103,11 +1103,14 @@ class RouterConfigTest extends TestCase
             'a port that is no number' => ['https://example.com:bad'],
             'a port beyond 65535' => ['https://example.com:65536'],
             'port 0' => ['https://example.com:0'],
+            // The parser takes an empty port as none — written, it is no port of digits
+            'an empty port' => ['https://example.com:'],
+            'an empty port in front of a path' => ['https://example.com:/base'],
+            'an empty port behind an IPv6 host' => ['https://[::1]:'],
             'a backslash: the host is evil for a browser' => ['https://evil\\@trusted.example/base'],
             'a backslash in front of the path' => ['https://\\/login'],
             'a backslash in the path' => ['https://app.example/a\\b'],
             'user information' => ['https://user:secret@app.example'],
-            'an IPv4 address written short' => ['https://127.1'],
         ];
     }
 
@@ -1154,6 +1157,12 @@ class RouterConfigTest extends TestCase
             'https://xn--bcher-kva.example' => 'https://xn--bcher-kva.example/users/5',
             'https://a.example./' => 'https://a.example./users/5',
             'https://app.example:65535' => 'https://app.example:65535/users/5',
+            // Written otherwise than the parser writes them, and taken as in 2.1.1: for a
+            // browser they name the host they are written with
+            'https://Bücher.example' => 'https://Bücher.example/users/5',
+            'https://[0:0:0:0:0:0:0:1]' => 'https://[0:0:0:0:0:0:0:1]/users/5',
+            'https://[::ffff:192.0.2.128]' => 'https://[::ffff:192.0.2.128]/users/5',
+            'https://127.1' => 'https://127.1/users/5',
         ] as $baseUrl => $address) {
             $this->assertSame($address, $this->router(['baseUrl' => $baseUrl])->absoluteUrl('users.show', ['id' => 5]), $baseUrl);
         }

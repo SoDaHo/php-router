@@ -224,10 +224,10 @@ final class Router implements RouterInterface
      * a host, then a port and a path at most. No control character or blank (a line break
      * made every absolute address a Location header the response refuses), no query or
      * fragment (the path would land behind them), not 'example.com' (that made every
-     * address relative, 'example.com/users/5') and no other scheme. And read as a browser
-     * reads it (WHATWG URL), it names the host it is written with: no user information, no
-     * backslash ('https://evil\@trusted.example' is the host 'evil' for a browser), no
-     * authority that is no host ('https://:443', 'https://[::1'). Anything else is refused.
+     * address relative, 'example.com/users/5') and no other scheme. No user information
+     * and no backslash ('https://evil\@trusted.example' is the host 'evil' for a browser),
+     * a port of digits if any, and a browser's parser (WHATWG URL) takes it with a host
+     * ('https://:443', 'https://[::1' have none). Anything else is refused.
      *
      * @throws RouterException If the value is neither a string nor empty, has a control
      *                         character or a blank, or is no http(s) address of a host

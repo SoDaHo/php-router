@@ -97,10 +97,10 @@ final class UrlGenerator
      * '://' and a host, then a port and a path at most. No control character or blank (a
      * line break made every absolute address a Location header the response refuses), no
      * query or fragment (the path would land behind them), not 'example.com' (every address
-     * relative) and no other scheme. And read as a browser reads it (WHATWG URL), it names
-     * the host it is written with: no user information, no backslash
-     * ('https://evil\@trusted.example' is the host 'evil' for a browser), no authority that
-     * is no host ('https://:443', 'https://[::1').
+     * relative) and no other scheme. No user information and no backslash
+     * ('https://evil\@trusted.example' is the host 'evil' for a browser), a port of digits if
+     * any, and a browser's parser (WHATWG URL) takes it with a host ('https://:443',
+     * 'https://[::1' have none).
      *
      * @internal Router asks it with the name of where the value came from ($what)
      *
@@ -125,30 +125,27 @@ final class UrlGenerator
 
     /**
      * Whether a base URL is an http(s) address of a host, as written and as a browser reads
-     * it: http or https, '://', an authority without user information or backslash, a path
-     * at most — and the WHATWG parser of PHP finds in it the host the text names (in its
-     * ASCII or its Unicode form), on a port from 1 to 65535 if one is given.
+     * it. As written: http or https, '://', a host (an IPv6 one in brackets), a port of
+     * digits if any — not an empty one —, a path at most; no user information, backslash,
+     * query or fragment. As read: the WHATWG parser of PHP takes it, with a host, on a port
+     * from 1 to 65535. How the parser writes the host is its own: 'Bücher.example',
+     * '[0:0:0:0:0:0:0:1]' or '127.1' name the same host for a browser as written — what
+     * would name another one ('@', '\') is refused as written already.
      */
     private static function isAddressOfAHost(string $value): bool
     {
-        if (preg_match('~^https?://([^/?#\\\\@]+)(?:/[^?#\\\\]*)?\z~i', $value, $written) !== 1) {
+        if (preg_match('~^https?://(?:\[[^]/?#\\\\@]*\]|[^:/?#\\\\@[\]]+)(?::\d+)?(?:/[^?#\\\\]*)?\z~i', $value) !== 1) {
             return false;
         }
 
         $url = \Uri\WhatWg\Url::parse($value);
-        if ($url === null) {
+        if ($url === null || ($url->getAsciiHost() ?? '') === '') {
             return false;
         }
 
         $port = $url->getPort();
-        if ($port !== null && ($port < 1 || $port > 65535)) {
-            return false;
-        }
 
-        // The host as written: the authority without a port (an IPv6 host keeps its brackets)
-        $host = (string) preg_replace('~:\d*\z~', '', $written[1]);
-
-        return $url->getAsciiHost() === strtolower($host) || $url->getUnicodeHost() === $host;
+        return $port === null || ($port >= 1 && $port <= 65535);
     }
 
     /**
