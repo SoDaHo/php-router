@@ -975,6 +975,11 @@ a factory registered in its place, or any other object, ends the request in a 50
 defaults (a rate limit with another limit than the one you configured). A name the
 container does not have is built directly when its constructor needs no argument.
 
+The same holds for a controller (`[UserController::class, 'show']`): what the container
+returns under the name has to be an object of that class — or of one below it, or of one
+that implements the interface named. Another object with a method of the same name is not
+called; the request ends in a 500 with a `RouterException`.
+
 ## Wrapping the Router
 
 All classes of the library are `final`, `Router` included (the exceptions stay open). What
@@ -1047,7 +1052,7 @@ where the log is yours alone; show neither to a client.
 
 | Exception | When |
 |-----------|------|
-| `RouterException` | Everything the router refuses: a route, pattern, fragment of `addPattern()`, middleware key or redirect target where it is written; a config value; a change to a route once the table is built; a placeholder named like an attribute of the request, a container entry that is no middleware, a redirect rendering that would change scheme or host or make a dot segment, a status line or header line that is none (a status code outside 100 to 599 among them), a `Transfer-Encoding` or a `Content-Length` that is not one value of digits, a body or `Content-Length` a 1xx, 204, 205 or 304 must not have, a body that gives no byte for `emitIdleTimeout` seconds, ends short of its `Content-Length` or goes beyond it — while a request is handled each of these goes to the `error` hook, as a 500 where nothing was sent yet |
+| `RouterException` | Everything the router refuses: a route, pattern, fragment of `addPattern()`, middleware key or redirect target where it is written; a config value; a change to a route once the table is built; a placeholder named like an attribute of the request, a container entry that is no middleware or no object of the controller class the route names, a redirect rendering that would change scheme or host or make a dot segment, a status line or header line that is none (a status code outside 100 to 599 among them), a `Transfer-Encoding` or a `Content-Length` that is not one value of digits, a body or `Content-Length` a 1xx, 204, 205 or 304 must not have, a body that gives no byte for `emitIdleTimeout` seconds, ends short of its `Content-Length` or goes beyond it — while a request is handled each of these goes to the `error` hook, as a 500 where nothing was sent yet |
 | `NotFoundException` | Never thrown by the router (it answers 404 itself); for your own code |
 | `MethodNotAllowedException` | Never thrown by the router (it answers 405 itself); for your own code |
 | `RouteNotFoundException` | Named route doesn't exist (URL generation); `getDebugMessage()` lists every route name |

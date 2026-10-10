@@ -143,6 +143,12 @@ from SemVer by the owner's decision of 2026-10-10. See "Upgrading from
   request ends in a 500 and the `error` hook gets a `RouterException`. The router used to
   build the class itself with its constructor's defaults instead — a rate limit configured
   with 5 ran with its default.
+- Controllers named by class (`[ExpectedController::class, 'show']`): what the container
+  returns under that name has to be an object of the class — or of one below it, or of one
+  that implements the interface named; anything else ends the request in a 500 and the
+  `error` hook gets a `RouterException`. Any object with a method of that name was called:
+  a wrong alias or factory ran another object's handler (a consent or token handler of the
+  wrong kind) without a word.
 - Two routes of different patterns with the same name are refused with a
   `DuplicateRouteException` when the route table is built (and by `new UrlGenerator()` for a
   list of `Route` objects): the first request is answered with 500 and reported, `url()`
@@ -342,6 +348,10 @@ look at:
   should replace another is a group or route of its own.
 - **Middleware from the container.** Register the middleware instance (or let the
   container build it), not a factory closure under its class name.
+- **Controllers from the container.** The first element of `[name, 'method']` is a class
+  or interface name, and the container's entry under it an object of it: a factory
+  closure, an object of another class or a service id that names no class there end the
+  request in a 500.
 - **Route names.** A name names one address: give routes of different patterns names of
   their own (routes of one pattern may share one).
 - **`{path:any}` and empty segments.** `/files//x` no longer reaches `/files/{path:any}`;

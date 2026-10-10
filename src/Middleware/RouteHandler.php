@@ -35,7 +35,9 @@ final class RouteHandler implements RequestHandlerInterface
      *
      * @param ServerRequestInterface $request PSR-7 request
      *
-     * @throws RouterException If handler is invalid or does not return ResponseInterface
+     * @throws RouterException If handler is invalid or does not return ResponseInterface, or
+     *                         the container's entry for a controller class is no object of
+     *                         that class
      *
      * @return ResponseInterface PSR-7 response
      */
@@ -60,6 +62,17 @@ final class RouteHandler implements RequestHandlerInterface
             $instance = ($this->container?->has($class))
                 ? $this->container->get($class)
                 : $this->instantiateController($class);
+
+            // What the container returns under the class name has to be an object of that
+            // class (or of a class below it, or one that implements the interface named):
+            // a wrong alias or factory ran another object's method of the same name — a
+            // consent or token handler of the wrong kind — without a word
+            if (!$instance instanceof $class) {
+                throw new RouterException(
+                    'The container entry for a controller is no object of the class the route names: register the controller itself under its class name',
+                    debugMessage: sprintf('%s: %s', $class, get_debug_type($instance)),
+                );
+            }
 
             // PHP 8 Named Arguments: ['id' => 5] becomes id: 5
             try {
