@@ -120,6 +120,10 @@ from SemVer by the owner's decision of 2026-10-10. See "Upgrading from
   (`(?x)`, `(?xx)`, `(?xx:…)`, `(?ix)`) is refused, as PCRE ignores blanks from there on —
   under `xx` in a class as well, where `(?xx)[ ](?<n>x)]` is one class. Other options
   (`(?i)`, `(?s)`, `(?m)`, `(?n)`, `(?J)`, `(?U)` …) and turning `x` off stay allowed.
+  Callouts (`(?C)`, `(?C1)`, `(?C"text")`) are not supported in a fragment either and are
+  refused: they do nothing in PHP, and the text of their string is read by nobody —
+  `(?C"[")(?<n>x)(?C"]")` hid a named group from the check behind a `[` that opens no
+  class (a `\(?C`, or a `(?C` in a class, is none and stays allowed).
 - A route is frozen once the route table is built from it (`RouteCollector::getData()`, so
   the first request, `match()` or `url()`): `attribute()`, `middleware()`, `name()` and
   assigning `$route->attributes`, `$route->middleware` or `$route->name` throw a
@@ -338,7 +342,7 @@ look at:
   does not capture (`(?:…)`), drop `(*…)` verbs; refer to other placeholders by name
   (`(?P=other)`). Drop the options `x` and `xx` (`(?x)`, `(?xx)`, `(?xx:…)`, also among
   others: `(?ix)`), which 2.1.1 took: write the fragment without the blanks extended mode
-  ignored.
+  ignored. Drop callouts (`(?C…)`) from a fragment as well; they did nothing in PHP.
 - **Routes changed at runtime.** Code that calls `attribute()`, `middleware()` or `name()`
   on a route after the table is built — in a middleware, a handler — throws now; keep what
   belongs to one request in a request attribute. In the routes file, write the arrays

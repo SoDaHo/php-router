@@ -127,6 +127,15 @@ final class RouteCollector
                 debugMessage: $name,
             );
         }
+        // A callout ((?C), (?C1), (?C"text")) does nothing in PHP, which sets no callout
+        // function — but the text of its string is read by nobody, and read as a fragment it
+        // hid what follows ('(?C"[")(?<n>x)(?C"]")' is a named group for PCRE). Refused.
+        if ($construct === 'callout') {
+            throw new RouterException(
+                'Pattern fragment must not contain a callout ((?C...)): callouts are not supported in a pattern fragment',
+                debugMessage: $name,
+            );
+        }
         // The options x and xx make PCRE read what follows otherwise — blanks ignored, under
         // xx in a character class as well ('(?xx)[ ](?<n>x)]' is one class) — and the check
         // above reads it as written: not followed, refused
@@ -146,7 +155,9 @@ final class RouteCollector
      * named group ((?P<n>…), (?<n>…), (?'n'…) — not a lookbehind (?<=, (?<!), 'verb' for
      * anything that begins with '(*' ((*ACCEPT), (*SKIP), (*pla:…)), null for none — or
      * that this reading cannot follow: 'extended' for an option setting that turns x or xx
-     * on ((?x), (?xx:…), (?ix), (?^x)), from where PCRE ignores blanks.
+     * on ((?x), (?xx:…), (?ix), (?^x)), from where PCRE ignores blanks, and 'callout' for
+     * anything that begins with '(?C' ((?C), (?C1), (?C"text")), whose string PCRE does
+     * not read as a pattern — its '[' or '\Q' opens nothing.
      *
      * Read as PCRE reads it without those options: what is escaped (\cX with the character
      * behind it), quoted (\Q…\E) or in a character class is no parenthesis. (A comment,
@@ -156,7 +167,7 @@ final class RouteCollector
      * route expression has it on. A group that does not capture or one without a name stays
      * allowed — no number reaches the parameters (see Dispatcher).
      *
-     * @return 'name'|'verb'|'extended'|null
+     * @return 'name'|'verb'|'extended'|'callout'|null
      */
     private static function constructOfItsOwn(string $fragment): ?string
     {
@@ -188,6 +199,10 @@ final class RouteCollector
 
             if ($character === '(' && ($fragment[$i + 1] ?? '') === '*') {
                 return 'verb';
+            }
+
+            if ($character === '(' && substr($fragment, $i, 3) === '(?C') {
+                return 'callout';
             }
 
             if ($character === '(' && preg_match('/\G\(\?(?:P<|<(?![=!])|\')/', $fragment, $match, 0, $i) === 1) {

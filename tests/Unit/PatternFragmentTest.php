@@ -17,13 +17,15 @@ use Sodaho\Router\RouteDispatcher;
  * named group of its own would be a parameter of every route that uses it, a verb
  * ((*ACCEPT)) would end or steer the match of the whole route. Both are refused where the
  * pattern is added; what the fragment may still do is read as PCRE reads it — up to the
- * options x and xx (extended mode), which change the reading and are refused as well.
+ * options x and xx (extended mode), which change the reading, and callouts, whose strings
+ * PCRE does not read: both refused as well.
  */
 class PatternFragmentTest extends TestCase
 {
     private const NAMED = 'Pattern fragment must not contain a named group: it may refer to the placeholders of its route by name ((?P=other)), not name one itself';
     private const VERB = 'Pattern fragment must not contain a (*...) construct: a verb such as (*ACCEPT) ends or steers the match of the whole route';
     private const EXTENDED = 'Pattern fragment must not turn on extended mode ((?x), (?xx)): extended mode is not supported in a pattern fragment';
+    private const CALLOUT = 'Pattern fragment must not contain a callout ((?C...)): callouts are not supported in a pattern fragment';
 
     /**
      * @return array<string, array{0: string, 1: string}>
@@ -67,6 +69,17 @@ class PatternFragmentTest extends TestCase
             'extended mode among other options' => ['(?ix)a b', self::EXTENDED],
             'extended mode after a reset of the options' => ['(?^x)a b', self::EXTENDED],
             'extended mode behind a class' => ['[a-z](?x) b', self::EXTENDED],
+            // A callout does nothing in PHP, but the text of its string is read by nobody: read
+            // as a fragment, its '[' or '\Q' hid what follows from the check — PCRE compiled a
+            // group n, a verb, extended mode there
+            'named group behind a callout string' => ['(?C"[")(?<n>x)(?C"]")', self::CALLOUT],
+            'named group behind a callout string in quotes' => ["(?C'[')(?<n>x)(?C']')", self::CALLOUT],
+            'named group behind a callout string in braces' => ['(?C{[})(?<n>x)(?C{]})', self::CALLOUT],
+            'named group behind a quote in a callout string' => ['(?C"\Q")(?<n>x)(?C"\E")', self::CALLOUT],
+            'verb behind a callout string' => ['(?C"[")a(*ACCEPT)(?C"]")', self::CALLOUT],
+            'extended mode behind a callout string' => ['(?C"[")(?x)a b(?C"]")', self::CALLOUT],
+            'callout' => ['a(?C)b', self::CALLOUT],
+            'numbered callout' => ['a(?C1)b', self::CALLOUT],
         ];
     }
 
@@ -118,6 +131,9 @@ class PatternFragmentTest extends TestCase
             'reference to a placeholder by name' => ['(?P=a)', '/x/x', '/x/y'],
             // '\c]' in a class is one character: the class goes on to the next ']'
             'parenthesis in a class behind \c]' => ['[\c](?<n>x)]+', '/x/(n', '/x/a'],
+            // A callout spelled with an escaped parenthesis or in a class is none
+            'callout spelled with an escaped parenthesis' => ['a\(?C', '/x/a(C', '/x/a'],
+            'callout spelled in a class' => ['[(?C]+', '/x/(?C', '/x/a'],
         ];
     }
 
