@@ -47,6 +47,10 @@ class PatternFragmentTest extends TestCase
             // two, the '[' hid what follows from the check
             'named group behind \c[' => ['(?:\c[)?(?<extra>[a-z]+)', self::NAMED],
             'verb behind \c[' => ['(?:\c[)?a(*ACCEPT)', self::VERB],
+            // … and '\c\' is one character (FS) as well: the backslash belongs to it and
+            // escapes nothing — the '(' behind it opens a group
+            'named group behind \\c\\' => ['\c\(?<n>x)', self::NAMED],
+            'verb behind \\c\\' => ['\c\(*ACCEPT)', self::VERB],
         ];
     }
 
