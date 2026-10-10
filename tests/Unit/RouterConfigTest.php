@@ -887,6 +887,42 @@ class RouterConfigTest extends TestCase
         Router::fromEnv();
     }
 
+    /**
+     * @return array<string, array{0: string, 1: mixed}>
+     */
+    public static function configValuesThatAreNoString(): array
+    {
+        return [
+            // Up to 2.1.1 basePath was cast: true became '1', an array 'Array' with a warning
+            'basePath true' => ['basePath', true],
+            'basePath 123' => ['basePath', 123],
+            'basePath array' => ['basePath', ['/api']],
+            // … and a routesFile that is an array failed only when the table was built
+            'routesFile array' => ['routesFile', ['routes.php']],
+            'routesFile false' => ['routesFile', false],
+            'routesFile 0' => ['routesFile', 0],
+        ];
+    }
+
+    #[DataProvider('configValuesThatAreNoString')]
+    public function testConfigValueThatMustBeAStringIsRefusedOtherwise(string $key, mixed $value): void
+    {
+        try {
+            Router::create([$key => $value]);
+            $this->fail('The router was created');
+        } catch (RouterException $e) {
+            $this->assertSame(sprintf("Config '%s' must be a string, got %s", $key, get_debug_type($value)), $e->getMessage());
+        }
+    }
+
+    public function testBasePathAndRoutesFileTakeNullForTheirDefault(): void
+    {
+        $router = Router::create(['basePath' => null, 'routesFile' => null])->loadRoutes($this->routesFile);
+
+        $this->assertSame(200, $router->handle(new ServerRequest('GET', '/users'))->getStatusCode());
+        $this->assertSame(200, Router::create(['routesFile' => $this->routesFile])->handle(new ServerRequest('GET', '/users'))->getStatusCode());
+    }
+
     public function testBasePathsThatStayAllowed(): void
     {
         foreach (['' => '/users', '/' => '/users', '/api/' => '/api/users', 'api' => '/api/users', '/my app' => '/my app/users', '/über' => '/über/users', '/v1.2' => '/v1.2/users', '/a..b/.well-known' => '/a..b/.well-known/users', '/100%' => '/100%/users', '/5%2' => '/5%2/users', '//' => '/users', '//api//' => '/api/users', '/api//v1' => '/api//v1/users'] as $basePath => $path) {

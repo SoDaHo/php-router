@@ -120,8 +120,9 @@ final class Router implements RouterInterface
      *                         'urlEncoding' or 'implicitHead' is neither a boolean nor
      *                         boolean-like nor empty ('' and 0 count as off; null is the
      *                         default), if 'urlEncoding' is off, if 'emitChunkSize' is not
-     *                         an integer (or a string of digits) from 1024 to 16777216, or
-     *                         if 'baseUrl' is neither a string nor empty
+     *                         an integer (or a string of digits) from 1024 to 16777216, if
+     *                         'baseUrl' is neither a string nor empty, or if 'basePath' or
+     *                         'routesFile' is given and no string
      */
     public function __construct(array $config = [])
     {
@@ -139,10 +140,10 @@ final class Router implements RouterInterface
 
         $this->config = [
             'debug' => self::flag('debug', $config['debug'] ?? false),
-            'basePath' => self::normalizeBasePath((string) ($config['basePath'] ?? '')),
+            'basePath' => self::normalizeBasePath(self::text('basePath', $config['basePath'] ?? '')),
             'baseUrl' => self::baseUrl($config['baseUrl'] ?? null),
             'trailingSlash' => self::trailingSlash($config['trailingSlash'] ?? 'strict'),
-            'routesFile' => $config['routesFile'] ?? null,
+            'routesFile' => isset($config['routesFile']) ? self::text('routesFile', $config['routesFile']) : null,
             'implicitHead' => self::flag('implicitHead', $config['implicitHead'] ?? true),
             'emitChunkSize' => self::chunkSize($config['emitChunkSize'] ?? self::EMIT_CHUNK_SIZE),
         ];
@@ -284,6 +285,22 @@ final class Router implements RouterInterface
         $host = (string) preg_replace('~:\d*\z~', '', $written[1]);
 
         return $url->getAsciiHost() === strtolower($host) || $url->getUnicodeHost() === $host;
+    }
+
+    /**
+     * A config value that has to be a string: anything else was cast ('basePath' => true
+     * became '1', [] the word 'Array' with a warning) or failed only when the table was
+     * built (a routesFile that is an array, in file_exists()).
+     *
+     * @throws RouterException If the value is no string
+     */
+    private static function text(string $name, mixed $value): string
+    {
+        if (!is_string($value)) {
+            throw new RouterException(sprintf("Config '%s' must be a string, got %s", $name, get_debug_type($value)));
+        }
+
+        return $value;
     }
 
     /**

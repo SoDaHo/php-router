@@ -155,6 +155,11 @@ application.
   `emit()` throws it. Up to 2.1.1 the emitter stopped without a word, and the client got
   less than the response promised.
 
+- `basePath` and `routesFile` in the config take a string (or `null` for their default);
+  another type is refused with a `RouterException` when the router is built. `basePath`
+  was cast (`true` became `'1'`, an array `'Array'` with a warning), a `routesFile` that is
+  no string failed only when the table was built, with a `TypeError` of PHP.
+
 ### Added
 - `Dispatcher::staticRoute()`: the static route of a method for a path, without a pass over
   the dynamic routes.
