@@ -188,11 +188,16 @@ application.
   because `run()` takes scheme and host from the client, CORS flags at 405, side effects of
   GET handlers under HEAD, `{path:any}` and files, the length of a request line, route names
   in debug messages); at `METHOD_NOT_ALLOWED` the route's attributes are those of another
-  method; `url()` leaves out parameters that are no placeholders without a word.
-- `RouteMatch::$path` names the dot segment among the paths that come as they were; the
-  private helpers of `Router` that build the table, require the routes file and set up the
-  URL generator, `RouteDispatcher::lookup()` and `resolveMiddleware()` say why they do what
-  they do.
+  method, and the example of a middleware for every request answers a CORS preflight from
+  the route of the method it asks for (`Access-Control-Request-Method`), no longer with
+  every method of the path; `url()` leaves out parameters that are no placeholders without
+  a word; the table of exceptions names every case (`DuplicateRouteException` for two
+  routes with one name as well).
+- `RouteMatch::$path` (and the README) names the dot segment among the paths that come as
+  they were; the private helpers of `Router` that build the table, require the routes file
+  and set up the URL generator, `RouteDispatcher::lookup()`, `resolveMiddleware()`,
+  `RfcResponder::formatError()` and its type URI, and `FileStream::seek()`, `read()` and
+  `getContents()` say why they do what they do.
 
 ### Development
 - CI pins its actions to a commit and its container image to a digest (the comment names
@@ -211,7 +216,9 @@ application.
 
 ### Upgrading from 2.1.1
 Most of what 2.2.0 refuses never worked as meant; it is refused now instead of doing the
-wrong thing quietly. What to look at:
+wrong thing quietly. Under strict SemVer several of these changes would be a major release;
+this version follows the decision of the owner of 10 October 2026 to ship them as 2.2.0.
+What to look at:
 
 - **A refusal while the table is built is a 500 for every request.** A route the table
   cannot take (a duplicate name, a fragment with a named group, a middleware key given
@@ -239,9 +246,11 @@ wrong thing quietly. What to look at:
 - **Route names.** Give every route its own name.
 - **`{path:any}` and empty segments.** `/files//x` no longer reaches `/files/{path:any}`;
   `url()` refuses values with an empty segment.
-- **Redirects.** A `RedirectHandler` built by hand with a target that leaves scheme or host
-  to a placeholder throws when it is built; a value that would make a `.` or `..` segment is
-  a 500 instead of a redirect.
+- **Redirects.** A `RedirectHandler` built by hand throws when it is built where its target
+  leaves scheme or host to a placeholder, has a control character other than a tab
+  (`"/new\r\nX: 1"`), a placeholder that is not `{name}` (`'/new/{id:int}'`), or where its
+  status is no 3xx status — what `redirect()` refused for it already. A value that would
+  make a `.` or `..` segment is a 500 instead of a redirect.
 - **HEAD.** A dynamic `head()` route no longer answers for a path a static `get()` route
   takes.
 - **`get('')` in a group** (trailing slash mode `strict`) is the group's own address now;

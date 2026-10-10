@@ -64,6 +64,12 @@ final class RfcResponder implements ResponderInterface
         return $body;
     }
 
+    /**
+     * Problem details of RFC 9457: "type" from the error code, "title" from the message,
+     * "detail" and "instance" from the details where they name them, every other key of the
+     * details as an extension member — but never "type", "title" or "status" from the
+     * details (Response adds the status of the response).
+     */
     public function formatError(string $message, ?string $code = null, ?array $details = null): array
     {
         $body = [
@@ -114,6 +120,11 @@ final class RfcResponder implements ResponderInterface
         return 'application/json';
     }
 
+    /**
+     * The "type" URI of an error code: 'about:blank' where there is no code or no base URI
+     * (RFC 9457: no type of its own), otherwise the base URI and the code as a slug
+     * ('NOT_FOUND' becomes '…/not-found').
+     */
     private function buildTypeUri(?string $code): string
     {
         if ($code === null) {

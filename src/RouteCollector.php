@@ -598,8 +598,8 @@ final class RouteCollector
 
     /**
      * What can be said about a route pattern as soon as it is written — before a request
-     * finds out the hard way. Cheap: this runs for every route of every request, the
-     * table is built anew each time.
+     * finds out the hard way. Cheap: this runs for every route each time the table is
+     * built — under PHP-FPM, once per request.
      *
      * @throws RouterException When no request could match the pattern, or when it would match by accident
      */

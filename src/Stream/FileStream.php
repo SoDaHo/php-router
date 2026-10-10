@@ -190,6 +190,10 @@ final class FileStream implements StreamInterface
         return $this->seekable && is_resource($this->handle);
     }
 
+    /**
+     * Move within the slice, not the file: positions count from $start, and nothing before
+     * the slice or beyond its length can be reached — a 206 must not send other bytes.
+     */
     public function seek(int $offset, int $whence = SEEK_SET): void
     {
         if (!$this->isSeekable()) {
@@ -238,6 +242,11 @@ final class FileStream implements StreamInterface
         return is_resource($this->handle);
     }
 
+    /**
+     * Up to $length bytes, never past the end of the slice. A read that comes back empty
+     * although bytes were expected marks the stream exhausted (the file shrank), so that a
+     * loop on eof() ends — and the emitter reports a body that ended short.
+     */
     public function read(int $length): string
     {
         if (!is_resource($this->handle)) {
@@ -272,6 +281,10 @@ final class FileStream implements StreamInterface
         return $data;
     }
 
+    /**
+     * The rest of the slice as one string — which holds it in memory as a whole: for large
+     * files read() in a loop instead (the emitter does).
+     */
     public function getContents(): string
     {
         if (!is_resource($this->handle)) {

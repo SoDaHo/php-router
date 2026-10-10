@@ -406,8 +406,17 @@ public function process($request, $handler): ResponseInterface
         return Response::html($this->notFoundPage, 404);   // answer instead of the router
     }
 
-    if ($request->getMethod() === 'OPTIONS' && $match->route?->getAttribute('cors')) {
-        return $this->preflight($match->allowedMethods());
+    // A CORS preflight asks for one method: look the route of that method up and take its
+    // word alone — the route at METHOD_NOT_ALLOWED is one of the path, not the asked one
+    if ($request->getMethod() === 'OPTIONS' && $match->status === RouteMatch::METHOD_NOT_ALLOWED) {
+        $wanted = $request->getHeaderLine('Access-Control-Request-Method');
+        $target = in_array($wanted, $match->allowedMethods(), true)
+            ? $this->router->match($request->withMethod($wanted))   // the Router, injected
+            : null;
+
+        if ($target?->route?->getAttribute('cors') === true) {
+            return $this->preflight($wanted);
+        }
     }
 
     return $handler->handle($request);
@@ -1005,10 +1014,11 @@ where the log is yours alone; show neither to a client.
 
 | Exception | When |
 |-----------|------|
+| `RouterException` | Everything the router refuses: a route, pattern, fragment of `addPattern()`, middleware key or redirect target where it is written; a config value; a change to a route once the table is built; a placeholder named like an attribute of the request, a container entry that is no middleware, a redirect rendering that would change scheme or host or make a dot segment, a status line or header line that is none, a body that stalls or ends short of its `Content-Length` — while a request is handled each of these goes to the `error` hook, as a 500 where nothing was sent yet |
 | `NotFoundException` | Never thrown by the router (it answers 404 itself); for your own code |
 | `MethodNotAllowedException` | Never thrown by the router (it answers 405 itself); for your own code |
-| `RouteNotFoundException` | Named route doesn't exist (URL generation) |
-| `DuplicateRouteException` | Same method+pattern registered twice |
+| `RouteNotFoundException` | Named route doesn't exist (URL generation); `getDebugMessage()` lists every route name |
+| `DuplicateRouteException` | Same method+pattern registered twice, or two routes with the same name (when the table is built, and in `new UrlGenerator()`) |
 
 ## Trailing Slash Handling
 
@@ -1206,7 +1216,7 @@ return $rewritten
 ```
 
 `$match->path` is the path without the base path — except for a request outside the base
-path (and one with a hidden separator or a control character), where it is the whole path: with a base path,
+path (and one with a hidden separator, a control character or a dot segment), where it is the whole path: with a base path,
 compare against the request's own path instead. And with an app at `/` every `GET` path belongs to an app; there is nothing
 left for such a middleware to answer.
 
