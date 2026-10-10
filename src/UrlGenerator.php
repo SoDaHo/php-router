@@ -37,13 +37,13 @@ final class UrlGenerator
      * @param array<string, string>|null $patterns The collector's pattern shortcuts (RouteCollector::getPatterns());
      *                                             null: the built-in ones
      *
-     * @throws Exception\DuplicateRouteException When two of the Route objects have the same name
+     * @throws Exception\DuplicateRouteException When two of the Route objects have different patterns and the same name
      */
     public function __construct(array $routes = [], ?array $patterns = null)
     {
         $this->patterns = $patterns ?? new RouteCollector()->getPatterns();
 
-        // Two routes under one name: the last one would win without a word
+        // Two routes of different patterns under one name: the last one would win without a word
         RouteCollector::assertNamesOnce(array_filter($routes, static fn (mixed $route): bool => $route instanceof Route));
 
         foreach ($routes as $key => $value) {

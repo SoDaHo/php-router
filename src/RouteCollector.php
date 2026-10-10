@@ -704,7 +704,7 @@ final class RouteCollector
      * Compile routes for the Dispatcher — and freeze them (see Route): from here on a route
      * serves requests and cannot be changed any more.
      *
-     * @throws DuplicateRouteException When two routes have the same name
+     * @throws DuplicateRouteException When two routes of different patterns have the same name
      * @throws RouterException When a route uses a type nobody defined or a fragment of its own does not compile
      *
      * @return array{0: array<string, array<string, Route>>, 1: array<string, array<int, array{regex: string, route: Route, casts: array<string, string>}>>} [staticRoutes, dynamicRoutes]
@@ -821,7 +821,7 @@ final class RouteCollector
 
             if (isset($patterns[$name]) && $patterns[$name] !== $route->pattern) {
                 throw new DuplicateRouteException(
-                    'Route name is already taken: a name belongs to one route',
+                    'Route name is already taken by a different pattern: a name belongs to one address',
                     debugMessage: sprintf('%s: %s and %s', $name, $patterns[$name], $route->pattern),
                 );
             }

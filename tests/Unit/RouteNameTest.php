@@ -13,12 +13,13 @@ use Sodaho\Router\Router;
 use Sodaho\Router\UrlGenerator;
 
 /**
- * A name belongs to one route. Two routes under one name gave url() the address of the
- * last — 'oauth.callback' could lead to a debug route defined further down.
+ * A name belongs to one address. Two routes of different patterns under one name gave
+ * url() the address of the last — 'oauth.callback' could lead to a debug route defined
+ * further down.
  */
 class RouteNameTest extends TestCase
 {
-    private const TAKEN = 'Route name is already taken: a name belongs to one route';
+    private const TAKEN = 'Route name is already taken by a different pattern: a name belongs to one address';
 
     public function testTwoRoutesUnderOneNameAreRefusedWhenTheTableIsBuilt(): void
     {
