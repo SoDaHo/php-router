@@ -424,8 +424,13 @@ class ResponseTest extends TestCase
 
         $this->assertSame(500, json_decode((string) Response::serverError()->getBody(), true)['status']);
 
-        // A status the application passed stays as it is (whether it may is a question of its own)
-        $this->assertSame(418, json_decode((string) Response::error('Bad', 400, null, ['status' => 418])->getBody(), true)['status']);
+        // A status in the details does not replace the response's (up to 2.1.1 it did: a 400
+        // that said 200), nor do type and title
+        $claimed = json_decode((string) Response::error('Bad', 400, 'BAD', ['status' => 200, 'type' => 'about:blank', 'title' => 'Fine', 'field' => 'x'])->getBody(), true);
+        $this->assertSame(
+            ['type' => 'https://api.example.com/errors/bad', 'title' => 'Bad', 'status' => 400, 'field' => 'x'],
+            $claimed,
+        );
 
         // Success responses are no problem details
         $this->assertArrayNotHasKey('status', json_decode((string) Response::success(['a' => 1])->getBody(), true));

@@ -1271,8 +1271,8 @@ use Sodaho\Router\Service\RfcResponder;
 // RFC 9457 Problem Details format
 Response::setResponder(new RfcResponder('https://api.example.com/errors'));
 
-// Error responses now use RFC 9457 ("status" is the status code of the response,
-// unless the details name one):
+// Error responses now use RFC 9457 ("type" from the error code, "title" from the
+// message, "status" the status code of the response — never what the details say):
 // {
 //   "type": "https://api.example.com/errors/not-found",
 //   "title": "User not found",
@@ -1313,7 +1313,9 @@ A responder shapes the array; the body is always that array **encoded as JSON**,
 the content type the responder names. It cannot produce XML or another format that is not
 JSON — `application/xml` would only label a JSON body. Build such responses yourself
 (`Response::text()`, or a PSR-7 response of your own). A responder is not told the status
-of the response; for `RfcResponder` the router adds `status` itself.
+of the response; for `RfcResponder` the router adds `status` itself — and the details of an
+error cannot replace `type`, `title` or `status` (a 400 whose details say `"status": 200`
+goes out with `"status": 400`; `detail`, `instance` and every other key are taken).
 
 **Reset in tests:**
 ```php

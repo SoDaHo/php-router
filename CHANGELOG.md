@@ -115,6 +115,13 @@
   add up as before.
 
 ### Fixed
+- `RfcResponder`: the details of an error no longer replace `type`, `title` or `status` —
+  RFC 9457 gives them a meaning of their own, and `Response::error('Bad', 400, details:
+  ['status' => 200])` said in a 400 that the request went well. `type` comes from the error
+  code, `title` from the message, `status` is always the status code of the response (added
+  by `Response`); the three keys of the details are dropped, `detail`, `instance` and every
+  other key are taken as before. An application that passed its own `status` in the details
+  gets the response's.
 - README: a checklist for an authentication server (an `error` hook, rewriting middleware
   before a guard, identities under class-name keys, absolute links from `absoluteUrl()`
   because `run()` takes scheme and host from the client, CORS flags at 405, side effects of

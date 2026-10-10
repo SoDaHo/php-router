@@ -137,50 +137,34 @@ class RfcResponderTest extends TestCase
         ], $result);
     }
 
-    public function testFormatErrorWithStatus(): void
-    {
-        $responder = new RfcResponder('https://api.example.com/errors');
-        $result = $responder->formatError(
-            'Not found',
-            'NOT_FOUND',
-            ['status' => 404]
-        );
-
-        $this->assertSame([
-            'type' => 'https://api.example.com/errors/not-found',
-            'title' => 'Not found',
-            'status' => 404,
-        ], $result);
-    }
-
     /**
-     * @return array<string, array{0: mixed, 1: mixed}>
+     * @return array<string, array{0: array<string, mixed>}>
      */
-    public static function statusValues(): array
+    public static function detailsThatNameAStemMember(): array
     {
         return [
-            'a status code' => [422, 422],
-            'a status code as a string' => ['422', 422],
-            // 1.x cast everything numeric: 404.7 became 404, '1e3' became 1000, and a float
-            // too large for an integer became a number that had nothing to do with it
-            // (PHP 8.5 warns about that cast)
-            'a float' => [404.7, 404.7],
-            'a float too large for an integer' => [1e30, 1e30],
-            'a string in scientific notation' => ['1e3', '1e3'],
-            'a string with a blank' => [' 404', ' 404'],
-            'a string with a line break' => ["404\n", "404\n"],
-            'four digits' => ['4040', '4040'],
-            'no number at all' => ['abc', 'abc'],
-            'true' => [true, true],
+            // Up to 2.1.1 each of these replaced the member: a 400 that said "status": 200
+            'status' => [['status' => 200]],
+            'status as a string' => [['status' => '422']],
+            'status that is no status code' => [['status' => 'abc']],
+            'type' => [['type' => 'https://elsewhere.example/ok']],
+            'title' => [['title' => 'Everything is fine']],
+            'all three' => [['type' => 'about:blank', 'title' => 'Fine', 'status' => 200]],
         ];
     }
 
-    #[\PHPUnit\Framework\Attributes\DataProvider('statusValues')]
-    public function testStatusIsANumberOnlyWhenItIsAStatusCode(mixed $given, mixed $expected): void
+    /**
+     * "type", "title" and "status" are the responder's and the response's: what the details
+     * say under those names does not replace them (A10). "status" is added by Response.
+     *
+     * @param array<string, mixed> $details
+     */
+    #[\PHPUnit\Framework\Attributes\DataProvider('detailsThatNameAStemMember')]
+    public function testDetailsDoNotReplaceTypeTitleOrStatus(array $details): void
     {
-        $result = new RfcResponder()->formatError('Failed', null, ['status' => $given, 'other' => 1]);
+        $result = new RfcResponder('https://api.example.com/errors')->formatError('Not found', 'NOT_FOUND', $details + ['other' => 1]);
 
-        $this->assertSame(['type' => 'about:blank', 'title' => 'Failed', 'status' => $expected, 'other' => 1], $result);
+        $this->assertSame(['type' => 'https://api.example.com/errors/not-found', 'title' => 'Not found', 'other' => 1], $result);
     }
 
     public function testFormatErrorWithExtensionMembers(): void
@@ -190,7 +174,6 @@ class RfcResponderTest extends TestCase
             'Validation failed',
             'VALIDATION_ERROR',
             [
-                'status' => 422,
                 'fields' => ['email' => 'Invalid email format'],
             ]
         );
@@ -198,7 +181,6 @@ class RfcResponderTest extends TestCase
         $this->assertSame([
             'type' => 'https://api.example.com/errors/validation-error',
             'title' => 'Validation failed',
-            'status' => 422,
             'fields' => ['email' => 'Invalid email format'],
         ], $result);
     }
@@ -223,7 +205,6 @@ class RfcResponderTest extends TestCase
             'title' => 'Insufficient funds',
             'detail' => 'Your current balance is 30, but the item costs 50.',
             'instance' => '/accounts/12345/transactions/67890',
-            'status' => 403,
             'balance' => 30,
             'cost' => 50,
         ], $result);

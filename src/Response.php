@@ -530,9 +530,10 @@ final class Response
 
         // RFC 9457: "status" is the status code of the response. formatError() is not told
         // it (its signature has no status, and a new parameter would break every responder
-        // of an application), so it is added here, behind "title" — only where the
-        // application passed none: what it passed in the details stays as it is.
-        if ($status >= 400 && self::getResponder() instanceof RfcResponder && !array_key_exists('status', $data)) {
+        // of an application), so it is added here, behind "title" — always: RfcResponder
+        // takes none from the details.
+        if ($status >= 400 && self::getResponder() instanceof RfcResponder) {
+            unset($data['status']);
             $at = array_search('title', array_keys($data), true);
             $data = $at === false
                 ? $data + ['status' => $status]

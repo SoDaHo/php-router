@@ -18,8 +18,11 @@ use Sodaho\Router\Contract\ResponderInterface;
  *   "instance": "/users/123"
  * }
  *
- * "status" is the status code of the response: formatError() is not told it, so
- * Response adds it where the details do not name one.
+ * "type", "title" and "status" are the responder's and the response's, never the details':
+ * "type" comes from the error code, "title" from the message, and "status" is the status
+ * code of the response — formatError() is not told it, so Response adds it. A details
+ * array that names one of them does not replace it ("status": 200 in a 400 said the request
+ * went well).
  *
  * Success format uses simple JSON (RFC 9457 only defines error format):
  * {"data": {...}, "message": "..."}
@@ -82,14 +85,10 @@ final class RfcResponder implements ResponderInterface
                 unset($details['instance']);
             }
 
-            // If 'status' key exists, use it as the status field: a status code, as a
-            // number. Anything else stays what the application passed (below) — a float
-            // or a string like '1e3' is not turned into a number it never was.
-            if (isset($details['status'])) {
-                $status = $details['status'];
-                $body['status'] = is_string($status) && preg_match('/^\d{3}$/D', $status) === 1 ? (int) $status : $status;
-                unset($details['status']);
-            }
+            // The members RFC 9457 gives a meaning of their own stay the responder's and
+            // the response's: a 'type', 'title' or 'status' in the details would claim
+            // another kind of problem, or another status, than the response has
+            unset($details['type'], $details['title'], $details['status']);
 
             // Remaining details become extension members
             if (!empty($details)) {
