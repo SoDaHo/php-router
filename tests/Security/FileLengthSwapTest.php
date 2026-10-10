@@ -61,8 +61,11 @@ class FileLengthSwapTest extends TestCase
     {
         $mismatches = [];
         $seen = [];
+        // The second range's right answers, by status: each call opens the file anew, so
+        // which file the first one got says nothing about the second one's
+        $answers = [];
 
-        $this->whileTheFileIsReplaced(function () use (&$mismatches, &$seen): void {
+        $this->whileTheFileIsReplaced(function () use (&$mismatches, &$seen, &$answers): void {
             for ($i = 0; $i < 3000; $i++) {
                 // From the 6th byte to the end: a range of either file
                 $response = Response::file($this->dir . '/file.bin', range: 'bytes=5-');
@@ -79,7 +82,9 @@ class FileLengthSwapTest extends TestCase
                 $response = Response::file($this->dir . '/file.bin', range: 'bytes=15-');
                 $body = (string) $response->getBody();
                 $actual = [$response->getStatusCode(), $response->getHeaderLine('Content-Range'), $response->getHeaderLine('Content-Length'), $body];
-                if ($actual !== [206, 'bytes 15-19/20', '5', 'bbbbb'] && $actual !== [416, 'bytes */10', '0', '']) {
+                if ($actual === [206, 'bytes 15-19/20', '5', 'bbbbb'] || $actual === [416, 'bytes */10', '0', '']) {
+                    $answers[$actual[0]] = true;
+                } else {
                     $mismatches[] = json_encode($actual);
                 }
             }
@@ -88,6 +93,8 @@ class FileLengthSwapTest extends TestCase
         $this->assertSame([], array_slice($mismatches, 0, 5), 'Content-Range, Content-Length or status did not describe the file that was sent');
         $this->assertArrayHasKey('b', $seen, 'the long file was never sent');
         $this->assertArrayHasKey('c', $seen, 'the short file was never sent');
+        $this->assertArrayHasKey(206, $answers, 'the second range never got the long file (206)');
+        $this->assertArrayHasKey(416, $answers, 'the second range never got the short file (416)');
     }
 
     /**
