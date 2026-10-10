@@ -79,7 +79,9 @@ application.
   `(?P<_route_params>…)` replaced the route's own parameter list; a verb ended or steered
   the match of the whole route (`'a(*ACCEPT)'` matched `/files/abcd` with the value `a`).
   Lookbehinds, groups that do not capture and groups without a name stay allowed — what
-  those capture never reaches the parameters.
+  those capture never reaches the parameters. The fragment is read as PCRE reads it: what is
+  escaped (`\cX` with the character behind it — `\c[` is no class), quoted (`\Q…\E`) or in
+  a character class is no group.
 - A route is frozen once the route table is built from it (`RouteCollector::getData()`, so
   the first request, `match()` or `url()`): `attribute()`, `middleware()`, `name()` and
   assigning `$route->attributes`, `$route->middleware` or `$route->name` throw a

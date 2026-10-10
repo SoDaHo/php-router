@@ -137,8 +137,8 @@ final class RouteCollector
      * named group ((?P<n>…), (?<n>…), (?'n'…) — not a lookbehind (?<=, (?<!), 'verb' for
      * anything that begins with '(*' ((*ACCEPT), (*SKIP), (*pla:…)), null for none.
      *
-     * Read as PCRE reads it: what is escaped, quoted (\Q…\E) or in a character class is no
-     * parenthesis. (A comment, (?#…), never gets here: its '#' is refused before.) A group
+     * Read as PCRE reads it: what is escaped (\cX with the character behind it), quoted
+     * (\Q…\E) or in a character class is no parenthesis. (A comment, (?#…), never gets here: its '#' is refused before.) A group
      * that does not capture or one without a name stays allowed — no number reaches the
      * parameters (see Dispatcher).
      *
@@ -161,7 +161,7 @@ final class RouteCollector
                     continue;
                 }
 
-                $i += 2;
+                $i += self::escapeLength($fragment, $i);
 
                 continue;
             }
@@ -187,6 +187,16 @@ final class RouteCollector
     }
 
     /**
+     * How many characters the escape at $at takes: '\cX' three — the character behind '\c'
+     * is part of it, whatever it is ('\c[' is ESC, not the start of a class); every other
+     * escape two (what follows a '\x{', a '\p{' is no parenthesis or bracket).
+     */
+    private static function escapeLength(string $fragment, int $at): int
+    {
+        return ($fragment[$at + 1] ?? '') === 'c' ? 3 : 2;
+    }
+
+    /**
      * Where a character class that opens at $start ends (the position behind its ']'). A ']'
      * right behind '[' or '[^' is a member, an escaped one as well, and so is the ']' that
      * closes a POSIX class ([:alpha:]) inside it.
@@ -206,7 +216,7 @@ final class RouteCollector
 
         while ($i < $length) {
             if ($fragment[$i] === '\\') {
-                $i += 2;
+                $i += self::escapeLength($fragment, $i);
 
                 continue;
             }

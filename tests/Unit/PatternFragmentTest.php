@@ -43,6 +43,10 @@ class PatternFragmentTest extends TestCase
             'skip and fail' => ['x(*SKIP)(*F)|y', self::VERB],
             'lookahead spelled as a verb' => ['(*pla:a)a', self::VERB],
             'option that belongs at the start of a pattern' => ['(*UTF)a', self::VERB],
+            // '\c[' is one character (ESC), not an escape and the start of a class: read as
+            // two, the '[' hid what follows from the check
+            'named group behind \c[' => ['(?:\c[)?(?<extra>[a-z]+)', self::NAMED],
+            'verb behind \c[' => ['(?:\c[)?a(*ACCEPT)', self::VERB],
         ];
     }
 
@@ -77,6 +81,8 @@ class PatternFragmentTest extends TestCase
             'POSIX class inside a character class' => ['[[:digit:](*]+', '/x/1(*', '/x/a'],
             'quoted text' => ['\Q(*ACCEPT)\E', '/x/(*ACCEPT)', '/x/a'],
             'reference to a placeholder by name' => ['(?P=a)', '/x/x', '/x/y'],
+            // '\c]' in a class is one character: the class goes on to the next ']'
+            'parenthesis in a class behind \c]' => ['[\c](?<n>x)]+', '/x/(n', '/x/a'],
         ];
     }
 
