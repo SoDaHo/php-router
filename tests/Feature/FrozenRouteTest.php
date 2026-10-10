@@ -149,8 +149,9 @@ class FrozenRouteTest extends TestCase
     {
         $route = new RouteCollector()->get('/a', 'handler');
 
+        // The class and the property, not the wording of the engine: that may change with PHP
         $this->expectException(\Error::class);
-        $this->expectExceptionMessage('Indirect modification of Sodaho\Router\Route::$attributes is not allowed');
+        $this->expectExceptionMessageMatches('/Route::\$attributes\b/');
 
         $route->attributes['k'] = 'v';
     }
