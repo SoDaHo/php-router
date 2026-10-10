@@ -206,7 +206,11 @@ group (`(?P<year>…)`, `(?<year>…)`, `(?'year'…)`) would be a parameter of 
 uses the pattern, and a `(*…)` construct (`(*ACCEPT)`, `(*SKIP)`, `(*COMMIT)`) ends or
 steers the match of the whole route — `addPattern()` refuses both. Lookbehinds
 (`(?<=…)`, `(?<!…)`), groups that do not capture and groups without a name stay allowed;
-what a group without a name captures never becomes a parameter. Refer to other
+what a group without a name captures never becomes a parameter. Extended mode is not
+supported in a fragment: an option setting that turns `x` or `xx` on (`(?x)`, `(?xx:…)`,
+`(?ix)`) is refused — PCRE ignores blanks from there on, under `xx` in a character class
+as well, where the check for named groups and verbs reads them as written; other options
+(`(?i)`, `(?s)` …) stay allowed. Refer to other
 placeholders by name, not by number: `\1` counts the groups of the whole route. Keep it free of nested quantifiers
 (`(a+)+`): where PCRE gives up on an expression (the backtrack limit, the JIT stack), the
 request is answered with 500 and the `error` hook gets a `RouterException` naming the PCRE

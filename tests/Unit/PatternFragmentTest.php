@@ -16,12 +16,14 @@ use Sodaho\Router\RouteDispatcher;
  * A fragment of addPattern() acts within the group of its placeholder and nowhere else: a
  * named group of its own would be a parameter of every route that uses it, a verb
  * ((*ACCEPT)) would end or steer the match of the whole route. Both are refused where the
- * pattern is added; what the fragment may still do is read as PCRE reads it.
+ * pattern is added; what the fragment may still do is read as PCRE reads it — up to the
+ * options x and xx (extended mode), which change the reading and are refused as well.
  */
 class PatternFragmentTest extends TestCase
 {
     private const NAMED = 'Pattern fragment must not contain a named group: it may refer to the placeholders of its route by name ((?P=other)), not name one itself';
     private const VERB = 'Pattern fragment must not contain a (*...) construct: a verb such as (*ACCEPT) ends or steers the match of the whole route';
+    private const EXTENDED = 'Pattern fragment must not turn on extended mode ((?x), (?xx)): extended mode is not supported in a pattern fragment';
 
     /**
      * @return array<string, array{0: string, 1: string}>
@@ -55,6 +57,16 @@ class PatternFragmentTest extends TestCase
             // the lookalike —, so the class closes at the first ']', and what follows acts
             'named group behind a POSIX lookalike' => ['[[:a[:](?<n>x)]', self::NAMED],
             'verb behind a POSIX lookalike' => ['[[:a[:]a(*ACCEPT)]', self::VERB],
+            // Under x and xx PCRE ignores blanks — under xx in a class as well, so that the ']'
+            // behind '[ ' is a member and the class goes on: '(?xx)[ ](?<n>x)]' names nothing,
+            // and was refused as if it did. 2.1.1 took these; the reading is not followed
+            'extended mode' => ['(?x)a b', self::EXTENDED],
+            'extended mode with classes, a group spelled in one' => ['(?xx)[ ](?<n>x)]', self::EXTENDED],
+            'extended mode with classes, a verb spelled in one' => ['(?xx)[ ](*ACCEPT)]', self::EXTENDED],
+            'extended mode with classes for a group of its own' => ['(?xx:[ ](?<n>x)])', self::EXTENDED],
+            'extended mode among other options' => ['(?ix)a b', self::EXTENDED],
+            'extended mode after a reset of the options' => ['(?^x)a b', self::EXTENDED],
+            'extended mode behind a class' => ['[a-z](?x) b', self::EXTENDED],
         ];
     }
 
@@ -93,6 +105,13 @@ class PatternFragmentTest extends TestCase
             'verb spelled in a class behind a quoted bracket' => ['[\Q]\E(*ACCEPT)]+', '/x/](*', '/x/a'],
             // … and so is a ']' right behind '[', '\Q\E' or '\E' in front of it skipped
             'bracket behind an empty quote at the start of a class' => ['[\Q\E](?<n>x)]+', '/x/](n', '/x/a'],
+            // Options that leave the reading as it is; x turned off as well (no route has it on)
+            'other options' => ['(?i)[a-z]+', '/x/AB', '/x/1'],
+            'extended mode turned off' => ['(?-x)a b', '/x/a b', '/x/ab'],
+            // … and an option setting that is none: in a class, escaped, quoted
+            'option setting spelled in a class' => ['[(?x)]+', '/x/(x', '/x/a'],
+            'option setting spelled with escaped parentheses' => ['\(?x\)', '/x/(x)', '/x/a'],
+            'option setting quoted' => ['\Q(?x)\E', '/x/(?x)', '/x/x'],
             'quoted text' => ['\Q(*ACCEPT)\E', '/x/(*ACCEPT)', '/x/a'],
             'reference to a placeholder by name' => ['(?P=a)', '/x/x', '/x/y'],
             // '\c]' in a class is one character: the class goes on to the next ']'

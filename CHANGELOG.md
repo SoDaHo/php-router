@@ -89,7 +89,11 @@ from SemVer by the owner's decision of 2026-10-10. See "Upgrading from
   escaped (`\cX` with the character behind it — `\c[` is no class, `\c\` escapes nothing),
   quoted (`\Q…\E`) or in a character class is no group — and a class ends where PCRE ends
   it: a `]` quoted in it does not end it (`[\Q]\E(?<n>x)]` is one class), and `[:a[:]` is
-  no POSIX class there, so in `[[:a[:](?<n>x)]` the group is one.
+  no POSIX class there, so in `[[:a[:](?<n>x)]` the group is one. Except in extended mode,
+  which is not supported in a fragment: an option setting that turns `x` or `xx` on
+  (`(?x)`, `(?xx)`, `(?xx:…)`, `(?ix)`) is refused, as PCRE ignores blanks from there on —
+  under `xx` in a class as well, where `(?xx)[ ](?<n>x)]` is one class. Other options
+  (`(?i)`, `(?s)`, `(?m)`, `(?u)`, `(?n)`, `(?J)` …) and turning `x` off stay allowed.
 - A route is frozen once the route table is built from it (`RouteCollector::getData()`, so
   the first request, `match()` or `url()`): `attribute()`, `middleware()`, `name()` and
   assigning `$route->attributes`, `$route->middleware` or `$route->name` throw a
@@ -293,7 +297,9 @@ look at:
   one to build yourself.
 - **`addPattern()` fragments.** Turn a named group into a group without a name or one that
   does not capture (`(?:…)`), drop `(*…)` verbs; refer to other placeholders by name
-  (`(?P=other)`).
+  (`(?P=other)`). Drop the options `x` and `xx` (`(?x)`, `(?xx)`, `(?xx:…)`, also among
+  others: `(?ix)`), which 2.1.1 took: write the fragment without the blanks extended mode
+  ignored.
 - **Routes changed at runtime.** Code that calls `attribute()`, `middleware()` or `name()`
   on a route after the table is built — in a middleware, a handler — throws now; keep what
   belongs to one request in a request attribute. In the routes file, write the arrays

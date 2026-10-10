@@ -127,6 +127,15 @@ final class RouteCollector
                 debugMessage: $name,
             );
         }
+        // The options x and xx make PCRE read what follows otherwise — blanks ignored, under
+        // xx in a character class as well ('(?xx)[ ](?<n>x)]' is one class) — and the check
+        // above reads it as written: not followed, refused
+        if ($construct === 'extended') {
+            throw new RouterException(
+                'Pattern fragment must not turn on extended mode ((?x), (?xx)): extended mode is not supported in a pattern fragment',
+                debugMessage: $name,
+            );
+        }
 
         $this->patterns[$name] = $regex;
         return $this;
@@ -135,14 +144,19 @@ final class RouteCollector
     /**
      * The first construct in a fragment that would act beyond its own group: 'name' for a
      * named group ((?P<n>…), (?<n>…), (?'n'…) — not a lookbehind (?<=, (?<!), 'verb' for
-     * anything that begins with '(*' ((*ACCEPT), (*SKIP), (*pla:…)), null for none.
+     * anything that begins with '(*' ((*ACCEPT), (*SKIP), (*pla:…)), null for none — or
+     * that this reading cannot follow: 'extended' for an option setting that turns x or xx
+     * on ((?x), (?xx:…), (?ix), (?^x)), from where PCRE ignores blanks.
      *
-     * Read as PCRE reads it: what is escaped (\cX with the character behind it), quoted
-     * (\Q…\E) or in a character class is no parenthesis. (A comment, (?#…), never gets here: its '#' is refused before.) A group
-     * that does not capture or one without a name stays allowed — no number reaches the
-     * parameters (see Dispatcher).
+     * Read as PCRE reads it without those options: what is escaped (\cX with the character
+     * behind it), quoted (\Q…\E) or in a character class is no parenthesis. (A comment,
+     * (?#…), never gets here: its '#' is refused before.) Read from left to right and given
+     * up at the first such construct: an option holds from where it is set on, so what
+     * stands in front of it is read rightly. Turning x off ((?-x)) changes nothing — no
+     * route expression has it on. A group that does not capture or one without a name stays
+     * allowed — no number reaches the parameters (see Dispatcher).
      *
-     * @return 'name'|'verb'|null
+     * @return 'name'|'verb'|'extended'|null
      */
     private static function constructOfItsOwn(string $fragment): ?string
     {
@@ -178,6 +192,12 @@ final class RouteCollector
 
             if ($character === '(' && preg_match('/\G\(\?(?:P<|<(?![=!])|\')/', $fragment, $match, 0, $i) === 1) {
                 return 'name';
+            }
+
+            // An option setting, (?letters) or (?letters:…), with x among the letters it
+            // turns on (in front of a '-'); after '^' as well, which turns the others off
+            if ($character === '(' && preg_match('/\G\(\?\^?[A-Za-z]*x[A-Za-z]*(?:-[A-Za-z]*)?[:)]/', $fragment, $match, 0, $i) === 1) {
+                return 'extended';
             }
 
             $i++;
