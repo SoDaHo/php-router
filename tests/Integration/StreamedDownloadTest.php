@@ -237,63 +237,6 @@ class StreamedDownloadTest extends TestCase
     }
 
     #[RunInSeparateProcess]
-    public function testStalledBodyIsGivenUpOnAfterThreeEmptyReadsAndReported(): void
-    {
-        // A stream that never reports eof and never returns bytes must not pin the worker
-        // until max_execution_time — the empty-read limit is the brake. And the client got
-        // less than the response promised: that is reported, not passed off as a whole answer.
-        $GLOBALS['stalled_reads'] = 0;
-        $this->createRoutes(
-            <<<'PHP'
-                <?php
-                use Sodaho\Router\RouteCollector;
-                use Nyholm\Psr7\Response as Psr7Response;
-                use Psr\Http\Message\StreamInterface;
-
-                return function (RouteCollector $r) {
-                    $r->get('/stall', function ($req) {
-                        $body = new class implements StreamInterface {
-                            public function __toString(): string { return ''; }
-                            public function close(): void {}
-                            public function detach() { return null; }
-                            public function getSize(): ?int { return null; }
-                            public function tell(): int { return 0; }
-                            public function eof(): bool { return false; }
-                            public function isSeekable(): bool { return false; }
-                            public function seek(int $o, int $w = SEEK_SET): void {}
-                            public function rewind(): void {}
-                            public function isWritable(): bool { return false; }
-                            public function write(string $s): int { return 0; }
-                            public function isReadable(): bool { return true; }
-                            // Self-limiting: with the brake in place emit() gives up long
-                            // before this. Without it, the test FAILS loudly instead of
-                            // hanging the suite until someone kills CI.
-                            public function read(int $length): string {
-                                if (++$GLOBALS['stalled_reads'] > 100) {
-                                    throw new RuntimeException('emit() kept reading a stalled body');
-                                }
-                                return '';
-                            }
-                            public function getContents(): string { return ''; }
-                            public function getMetadata(?string $key = null) { return $key === null ? [] : null; }
-                        };
-                        return new Psr7Response(200, [], $body);
-                    });
-                };
-                PHP
-        );
-
-        [$sent, $reported] = $this->serveReporting('/stall');
-
-        $this->assertSame('', $sent);
-        $this->assertSame(3, $GLOBALS['stalled_reads'], 'three empty reads, then the brake');
-        $this->assertCount(1, $reported);
-        $this->assertInstanceOf(RouterException::class, $reported[0]);
-        $this->assertSame('Response body stalled before its end: three reads in a row gave nothing', $reported[0]->getMessage());
-        $this->assertSame('0 bytes sent', $reported[0]->getDebugMessage());
-    }
-
-    #[RunInSeparateProcess]
     public function testBodyThatEndsShortOfItsContentLengthIsReported(): void
     {
         $this->createRoutes(
@@ -387,8 +330,8 @@ class StreamedDownloadTest extends TestCase
     {
         // Pump/append streams return '' while eof() is still false. Breaking on the first
         // empty read would silently cut the body short. Two empty reads in a row, twice:
-        // four in total — more than the limit of three, which only counts CONSECUTIVE ones.
-        // A counter that is not reset after a chunk would stop before 'C'.
+        // the wait for the next byte starts anew after each chunk (EmitIdleTimeoutTest has
+        // the rest of the idle rule).
         $this->createRoutes(
             <<<'PHP'
                 <?php

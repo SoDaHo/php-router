@@ -165,12 +165,17 @@ from SemVer by the owner's decision of 2026-10-10. See "Upgrading from
   did not mention it): string keys are kept as the application gave them. Code that hands
   it on as a `list` under PHPStan sees the wider type.
 
-- `run()` and `emit()` say so when a response body does not arrive whole: a body that gives
-  nothing three reads in a row before its end (the brake against a stream that never
-  reports its end) and one that ends short of its `Content-Length` end in a
-  `RouterException` — `run()` reports it to the `error` hook with the status that went out,
-  `emit()` throws it. Up to 2.1.1 the emitter stopped without a word, and the client got
-  less than the response promised.
+- `run()` and `emit()` wait for the next byte of a body that gives `''` before its end, and
+  say so when a response body does not arrive whole. Up to 2.1.1 the emitter stopped
+  without a word at the third empty read in a row — PSR-7 gives `''` while the next bytes
+  are on their way, so `'A', '', '', '', 'B'` went out as `A`, a whole answer for every
+  report. Now the pause between empty reads grows from none to 50 ms, and a body that gives
+  no byte for `emitIdleTimeout` seconds (30; the brake against a stream that never reports
+  its end), or ends short of its `Content-Length` after a first byte, ends in a
+  `RouterException`: `run()` reports it to the `error` hook with the status that went out,
+  `emit()` throws it. A body that sent no byte (the answer to `HEAD`, which keeps the
+  `Content-Length` of the `GET`, also through `emit()` without `withBody: false`) and the
+  body of a 1xx, 204 or 304 are no short bodies (RFC 9110, 8.6).
 
 - `basePath` and `routesFile` in the config take a string (or `null` for their default);
   another type is refused with a `RouterException` when the router is built. `basePath`
@@ -181,6 +186,9 @@ from SemVer by the owner's decision of 2026-10-10. See "Upgrading from
   `RouterException`: `-1` went out as `Retry-After: -1`, no delay a client can wait for.
 
 ### Added
+- `emitIdleTimeout` config option: how many seconds `run()`/`emit()` wait for the next byte
+  of a response body that has not ended — above 0 and up to 3600, a fraction as well;
+  default 30.
 - `Dispatcher::staticRoute()`: the static route of a method for a path, without a pass over
   the dynamic routes.
 - `Response::REDIRECT_STATUSES`: the statuses a redirect goes out with (301, 302, 303, 307,
@@ -311,8 +319,10 @@ look at:
   parser takes, a port of digits (not an empty one), no user information or backslash —
   also for `UrlGenerator::setBaseUrl()` on a generator built by hand.
 - **`RfcResponder`**: `type`, `title` and `status` in the details are dropped.
-- **`emit()`** can throw after the headers went out: when the body stalls or ends short of
-  its `Content-Length` (`run()` reports it instead).
+- **`emit()`** can throw after the headers went out: when the body gives no byte for
+  `emitIdleTimeout` seconds (30) or ends short of its `Content-Length` after a first byte
+  (`run()` reports it instead). 2.1.1 stopped silently at the third empty read in a row; a
+  body that pauses longer than 30 seconds needs a higher `emitIdleTimeout`.
 - **A response's protocol version** has to be a version (`1.1`, `2`), and every header line
   a token name and a value without control characters other than a tab — a response that
   breaks this gets the router's 500 from `run()`, an exception from `emit()`.

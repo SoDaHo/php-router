@@ -818,6 +818,7 @@ open.)
 | `routesFile` | - | `null` | Routes file, as `loadRoutes()` sets it — a string, or `null` for none; another type is refused |
 | `implicitHead` | - | `true` | Answer `HEAD` through the `GET` route (see [HTTP Methods](#http-methods)) |
 | `emitChunkSize` | - | `8192` | Bytes `run()`/`emit()` read from the response body at a time; an integer, or a string of digits, from 1024 to 16777216 (see [Memory](#memory)) |
+| `emitIdleTimeout` | - | `30` | Seconds `run()`/`emit()` wait for the next byte of a body that has not ended (a read that gives `''` before the end); a number above 0 and up to 3600, a fraction as well (`0.5`), or a string of one. Then the body is given up on (see [PSR-15 Compatibility](#psr-15-compatibility)) |
 
 ## Hooks (Logging)
 
@@ -924,11 +925,16 @@ name that is no token (RFC 9110) and a header value with a control character oth
 tab are refused — PHP would drop such a status line and send its own 200, and refuse such a
 header line only after the lines in front of it went out (a `Location` among them makes
 the status a 302). `run()` answers 500 then (the `error`
-hook gets the `RouterException`), `emit()` throws it. A body that gives nothing three
-reads in a row before its end, or ends short of its `Content-Length`, is given up on with a
+hook gets the `RouterException`), `emit()` throws it. A read that gives `''` before the end
+of the body is waited past (PSR-7 allows it while the next bytes are on their way), with a
+pause that grows to 50 ms; a body that gives no byte for `emitIdleTimeout` seconds (30), or
+ends short of its `Content-Length` after a first byte, is given up on with a
 `RouterException` once the headers are out: `run()` reports it to the `error` hook (with the
-status that went out), `emit()` throws it — the client got less than the response promised. If output has already started,
-nothing can be sent any more: the `error` hook is called with `type: 'emit'`.
+status that went out), `emit()` throws it — the client got less than the response promised.
+A body that sent no byte is no short one (the answer to `HEAD` keeps the `Content-Length` of
+the `GET`, also through `emit($response)` as above), nor is that of a 1xx, 204 or 304. If
+output has already started, nothing can be sent any more: the `error` hook is called with
+`type: 'emit'`.
 
 ## Dependency Injection
 
@@ -1022,7 +1028,7 @@ where the log is yours alone; show neither to a client.
 
 | Exception | When |
 |-----------|------|
-| `RouterException` | Everything the router refuses: a route, pattern, fragment of `addPattern()`, middleware key or redirect target where it is written; a config value; a change to a route once the table is built; a placeholder named like an attribute of the request, a container entry that is no middleware, a redirect rendering that would change scheme or host or make a dot segment, a status line or header line that is none, a body that stalls or ends short of its `Content-Length` — while a request is handled each of these goes to the `error` hook, as a 500 where nothing was sent yet |
+| `RouterException` | Everything the router refuses: a route, pattern, fragment of `addPattern()`, middleware key or redirect target where it is written; a config value; a change to a route once the table is built; a placeholder named like an attribute of the request, a container entry that is no middleware, a redirect rendering that would change scheme or host or make a dot segment, a status line or header line that is none, a body that gives no byte for `emitIdleTimeout` seconds or ends short of its `Content-Length` — while a request is handled each of these goes to the `error` hook, as a 500 where nothing was sent yet |
 | `NotFoundException` | Never thrown by the router (it answers 404 itself); for your own code |
 | `MethodNotAllowedException` | Never thrown by the router (it answers 405 itself); for your own code |
 | `RouteNotFoundException` | Named route doesn't exist (URL generation); `getDebugMessage()` lists every route name |

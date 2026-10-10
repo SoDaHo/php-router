@@ -33,8 +33,14 @@ final class Router implements RouterInterface
     private const EMIT_CHUNK_SIZE_MIN = 1024;
     private const EMIT_CHUNK_SIZE_MAX = 16 * 1024 * 1024;
 
-    /** Consecutive empty reads tolerated before emit() gives up on a stalled body. */
-    private const EMIT_EMPTY_READ_LIMIT = 3;
+    /** Seconds without a byte from the response body before emit() gives up — the default of 'emitIdleTimeout'. */
+    private const EMIT_IDLE_TIMEOUT = 30;
+
+    /** Above this a stalled body holds a worker for more than an hour. */
+    private const EMIT_IDLE_TIMEOUT_MAX = 3600;
+
+    /** The longest pause between two empty reads, in microseconds: a body that stalls for a moment goes on soon after. */
+    private const EMIT_IDLE_PAUSE_MAX = 50_000;
 
     /**
      * Response fields that exist once per message. Only for these does the response replace
@@ -68,7 +74,7 @@ final class Router implements RouterInterface
         'origin-agent-cluster' => true,
     ];
 
-    /** @var array{debug: bool, basePath: string, baseUrl: ?string, trailingSlash: string, routesFile: ?string, implicitHead: bool, emitChunkSize: int} */
+    /** @var array{debug: bool, basePath: string, baseUrl: ?string, trailingSlash: string, routesFile: ?string, implicitHead: bool, emitChunkSize: int, emitIdleTimeout: float} */
     private array $config;
 
     /** @var array<string|object> Middleware for every request, outermost first (string keys as the application gave them) */
@@ -97,7 +103,7 @@ final class Router implements RouterInterface
     private bool $used = false;
 
     /** What the config array may contain. Anything else is a mistake and is refused. */
-    private const CONFIG_KEYS = ['debug', 'basePath', 'baseUrl', 'trailingSlash', 'routesFile', 'urlEncoding', 'implicitHead', 'emitChunkSize'];
+    private const CONFIG_KEYS = ['debug', 'basePath', 'baseUrl', 'trailingSlash', 'routesFile', 'urlEncoding', 'implicitHead', 'emitChunkSize', 'emitIdleTimeout'];
 
     /** Config key => environment variable, for fromEnv() */
     private const ENV_VARIABLES = [
@@ -114,15 +120,16 @@ final class Router implements RouterInterface
      * Only what $config says counts: the constructor does not look at the environment
      * (fromEnv() does). A key that is missing or null takes its default.
      *
-     * @param array{debug?: bool|int|string|null, basePath?: string|null, baseUrl?: string|false|0|null, trailingSlash?: string|null, routesFile?: string|null, urlEncoding?: bool|int|string|null, implicitHead?: bool|int|string|null, emitChunkSize?: int|string|null} $config
+     * @param array{debug?: bool|int|string|null, basePath?: string|null, baseUrl?: string|false|0|null, trailingSlash?: string|null, routesFile?: string|null, urlEncoding?: bool|int|string|null, implicitHead?: bool|int|string|null, emitChunkSize?: int|string|null, emitIdleTimeout?: int|float|string|null} $config
      *
      * @throws RouterException If $config has a key the router does not know, if 'debug',
      *                         'urlEncoding' or 'implicitHead' is neither a boolean nor
      *                         boolean-like nor empty ('' and 0 count as off; null is the
      *                         default), if 'urlEncoding' is off, if 'emitChunkSize' is not
      *                         an integer (or a string of digits) from 1024 to 16777216, if
-     *                         'baseUrl' is neither a string nor empty, or if 'basePath' or
-     *                         'routesFile' is given and no string
+     *                         'emitIdleTimeout' is no number of seconds above 0 and up to
+     *                         3600, if 'baseUrl' is neither a string nor empty, or if
+     *                         'basePath' or 'routesFile' is given and no string
      */
     public function __construct(array $config = [])
     {
@@ -146,6 +153,7 @@ final class Router implements RouterInterface
             'routesFile' => isset($config['routesFile']) ? self::text('routesFile', $config['routesFile']) : null,
             'implicitHead' => self::flag('implicitHead', $config['implicitHead'] ?? true),
             'emitChunkSize' => self::chunkSize($config['emitChunkSize'] ?? self::EMIT_CHUNK_SIZE),
+            'emitIdleTimeout' => self::idleTimeout($config['emitIdleTimeout'] ?? self::EMIT_IDLE_TIMEOUT),
         ];
     }
 
@@ -304,6 +312,33 @@ final class Router implements RouterInterface
     }
 
     /**
+     * How long emit() waits for the next byte of a body that has not ended: a number of
+     * seconds above 0 (a fraction as well), up to an hour — or a string of such a number.
+     * 0 would give up at the first empty read, which a stream may give while its next
+     * bytes are on their way.
+     *
+     * @throws RouterException If the value is no such number
+     */
+    private static function idleTimeout(mixed $value): float
+    {
+        $seconds = match (true) {
+            is_int($value), is_float($value) => (float) $value,
+            is_string($value) && preg_match('/^\d+(?:\.\d+)?$/D', $value) === 1 => (float) $value,
+            default => null,
+        };
+
+        // Written so that NAN fails as well: every comparison with it is false
+        if ($seconds === null || !($seconds > 0 && $seconds <= self::EMIT_IDLE_TIMEOUT_MAX)) {
+            throw new RouterException(sprintf(
+                "Config 'emitIdleTimeout' must be a number of seconds above 0 and at most %d",
+                self::EMIT_IDLE_TIMEOUT_MAX
+            ));
+        }
+
+        return $seconds;
+    }
+
+    /**
      * '/api', '/api/' and 'api' all mean the same prefix; the dispatcher compares against '/api'.
      */
     private static function normalizeBasePath(string $basePath, string $what = "Config 'basePath'"): string
@@ -357,7 +392,7 @@ final class Router implements RouterInterface
      * Factory method for fluent creation. Like the constructor it does not look at the
      * environment.
      *
-     * @param array{debug?: bool|int|string|null, basePath?: string|null, baseUrl?: string|false|0|null, trailingSlash?: string|null, routesFile?: string|null, urlEncoding?: bool|int|string|null, implicitHead?: bool|int|string|null, emitChunkSize?: int|string|null} $config
+     * @param array{debug?: bool|int|string|null, basePath?: string|null, baseUrl?: string|false|0|null, trailingSlash?: string|null, routesFile?: string|null, urlEncoding?: bool|int|string|null, implicitHead?: bool|int|string|null, emitChunkSize?: int|string|null, emitIdleTimeout?: int|float|string|null} $config
      */
     public static function create(array $config = []): self
     {
@@ -372,7 +407,7 @@ final class Router implements RouterInterface
      * ROUTER_URL_ENCODING (urlEncoding). A key that $config contains wins over its variable —
      * also with null, false or an empty value.
      *
-     * @param array{debug?: bool|int|string|null, basePath?: string|null, baseUrl?: string|false|0|null, trailingSlash?: string|null, routesFile?: string|null, urlEncoding?: bool|int|string|null, implicitHead?: bool|int|string|null, emitChunkSize?: int|string|null} $config Values that take precedence
+     * @param array{debug?: bool|int|string|null, basePath?: string|null, baseUrl?: string|false|0|null, trailingSlash?: string|null, routesFile?: string|null, urlEncoding?: bool|int|string|null, implicitHead?: bool|int|string|null, emitChunkSize?: int|string|null, emitIdleTimeout?: int|float|string|null} $config Values that take precedence
      *
      * @throws RouterException As the constructor; and if APP_DEBUG or ROUTER_URL_ENCODING is
      *                         read and its value is not boolean-like (APP_DEBUG=maybe), or
@@ -431,7 +466,7 @@ final class Router implements RouterInterface
      * Quick boot: create, load routes, and run. Reads no environment either — for that:
      * Router::fromEnv()->loadRoutes($routesFile)->run().
      *
-     * @param array{debug?: bool|int|string|null, basePath?: string|null, baseUrl?: string|false|0|null, trailingSlash?: string|null, routesFile?: string|null, urlEncoding?: bool|int|string|null, implicitHead?: bool|int|string|null, emitChunkSize?: int|string|null} $config
+     * @param array{debug?: bool|int|string|null, basePath?: string|null, baseUrl?: string|false|0|null, trailingSlash?: string|null, routesFile?: string|null, urlEncoding?: bool|int|string|null, implicitHead?: bool|int|string|null, emitChunkSize?: int|string|null, emitIdleTimeout?: int|float|string|null} $config
      * @param string $routesFile Path to routes file
      */
     public static function boot(array $config, string $routesFile): void
@@ -1061,8 +1096,9 @@ final class Router implements RouterInterface
      * @throws RouterException If the body cannot be read, the reason phrase has a control
      *                         character other than a tab, the protocol version is no
      *                         version, or a header line is none — before anything is sent;
-     *                         and after the headers, when the body stalls before its end
-     *                         or ends short of its Content-Length
+     *                         and after the headers, when the body gives no byte for
+     *                         'emitIdleTimeout' seconds before its end, or ends short of its
+     *                         Content-Length after a first byte
      */
     public function emit(ResponseInterface $response, bool $withBody = true): void
     {
@@ -1119,7 +1155,7 @@ final class Router implements RouterInterface
      *                         a header has a name that is no token or a value with a control
      *                         character other than a tab
      *
-     * @return array{status: string, headers: array<int|string, array<string>>, body: StreamInterface}
+     * @return array{status: string, code: int, headers: array<int|string, array<string>>, body: StreamInterface}
      */
     private function prepare(ResponseInterface $response, bool $withBody): array
     {
@@ -1196,11 +1232,11 @@ final class Router implements RouterInterface
             $body->rewind();
         }
 
-        return ['status' => $statusLine, 'headers' => $headers, 'body' => $body];
+        return ['status' => $statusLine, 'code' => $response->getStatusCode(), 'headers' => $headers, 'body' => $body];
     }
 
     /**
-     * @param array{status: string, headers: array<int|string, array<string>>, body: StreamInterface} $prepared
+     * @param array{status: string, code: int, headers: array<int|string, array<string>>, body: StreamInterface} $prepared
      */
     private function transmit(array $prepared, bool $withBody): void
     {
@@ -1240,34 +1276,51 @@ final class Router implements RouterInterface
         // never sit in memory as a whole.
         $body = $prepared['body'];
 
-        // An empty read does not mean "done" — pump/append streams return '' transiently
-        // while eof() is still false, and breaking on the first one would truncate the body
-        // (the old getContents() looped until eof). Give up only after several in a row,
-        // which still guards against a stream that never reports eof at all — and say so:
-        // the client got less than the response promised, which must not look like an
-        // answer that went out whole. So must a body that ends short of its Content-Length.
+        // An empty read does not mean "done": PSR-7 gives '' where no bytes are there yet
+        // (a pump or append stream, a source that is not ready) while eof() is still false,
+        // and breaking on it would truncate the body — so would giving up after a few reads
+        // in a row (2.1.1 stopped silently at the third). Waited for instead, with a pause
+        // that grows from none to EMIT_IDLE_PAUSE_MAX, until 'emitIdleTimeout' passed
+        // without a byte — which still guards against a stream that never reports eof — and
+        // then said: the client got less than the response promised, which must not look
+        // like an answer that went out whole.
         $expected = self::contentLength($prepared['headers']);
         $sent = 0;
-        $emptyReads = 0;
+        $pause = 0;
+        $idleSince = null;
         while (!$body->eof()) {
             $chunk = $body->read($this->config['emitChunkSize']);
             if ($chunk === '') {
-                if (++$emptyReads >= self::EMIT_EMPTY_READ_LIMIT) {
+                $now = hrtime(true);
+                $idleSince ??= $now;
+                if (($now - $idleSince) / 1e9 >= $this->config['emitIdleTimeout']) {
                     throw new RouterException(
-                        'Response body stalled before its end: three reads in a row gave nothing',
+                        'Response body stalled before its end: no byte within emitIdleTimeout',
                         debugMessage: sprintf('%d bytes sent', $sent),
                     );
                 }
 
+                if ($pause > 0) {
+                    usleep($pause);
+                }
+                $pause = min(max(2 * $pause, 1000), self::EMIT_IDLE_PAUSE_MAX);
+
                 continue;
             }
 
-            $emptyReads = 0;
+            $pause = 0;
+            $idleSince = null;
             $sent += strlen($chunk);
             echo $chunk;
         }
 
-        if ($expected !== null && $sent < $expected) {
+        // So must a body that ended short of its Content-Length — once it sent a byte: one
+        // that sent none is a response without a body (the answer to HEAD keeps the
+        // Content-Length of the GET, and emit() cannot know it answers HEAD), and a 1xx,
+        // 204 or 304 has none whatever its Content-Length says (RFC 9110, 8.6)
+        $code = $prepared['code'];
+        $bodiless = $code < 200 || $code === 204 || $code === 304;
+        if ($expected !== null && $sent > 0 && $sent < $expected && !$bodiless) {
             throw new RouterException(
                 'Response body ended before its Content-Length',
                 debugMessage: sprintf('%d of %d bytes sent', $sent, $expected),
@@ -1284,7 +1337,7 @@ final class Router implements RouterInterface
     private static function contentLength(array $headers): ?int
     {
         foreach ($headers as $name => $values) {
-            if (strtolower((string) $name) === 'content-length' && count($values) === 1 && ctype_digit($values[0])) {
+            if (strtolower((string) $name) === 'content-length' && count($values) === 1 && preg_match('/^\d+$/D', $values[0]) === 1) {
                 return (int) $values[0];
             }
         }

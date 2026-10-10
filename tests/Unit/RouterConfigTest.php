@@ -358,7 +358,7 @@ class RouterConfigTest extends TestCase
                 $this->fail("{$factory}() accepted it");
             } catch (RouterException $e) { // @phpstan-ignore catch.neverThrown (a variable static call PHPStan does not follow)
                 // The message names what is allowed — never a value, and the keys only in the debug message
-                $this->assertSame('Unknown config key. Known keys: debug, basePath, baseUrl, trailingSlash, routesFile, urlEncoding, implicitHead, emitChunkSize', $e->getMessage());
+                $this->assertSame('Unknown config key. Known keys: debug, basePath, baseUrl, trailingSlash, routesFile, urlEncoding, implicitHead, emitChunkSize, emitIdleTimeout', $e->getMessage());
                 $this->assertSame($debugMessage, $e->getDebugMessage());
                 $this->assertStringNotContainsString('secret-key', $e->getMessage() . $e->getDebugMessage());
             }
@@ -1215,6 +1215,50 @@ class RouterConfigTest extends TestCase
         } finally {
             unset($_ENV['ROUTER_EMIT_CHUNK_SIZE']);
             putenv('ROUTER_EMIT_CHUNK_SIZE');
+        }
+    }
+
+    // ==================== emitIdleTimeout ====================
+
+    /**
+     * @return array<string, array{0: mixed}>
+     */
+    public static function idleTimeoutsThatAreRefused(): array
+    {
+        return [
+            // 0 gave up at the first empty read, which a stream gives while bytes are on their way
+            'zero' => [0],
+            'zero as a float' => [0.0],
+            'zero as a string' => ['0'],
+            'negative' => [-1],
+            'above an hour' => [3601],
+            'just above an hour' => [3600.5],
+            'infinite' => [INF],
+            'not a number' => [NAN],
+            'a word' => ['long'],
+            'a number with a unit' => ['30s'],
+            'an exponent' => ['1e3'],
+            'a space in front' => [' 30'],
+            'a sign' => ['+30'],
+            'an empty string' => [''],
+            'true' => [true],
+            'an array' => [[30]],
+        ];
+    }
+
+    #[DataProvider('idleTimeoutsThatAreRefused')]
+    public function testIdleTimeoutOutsideItsRangeIsRefusedAtConstruction(mixed $value): void
+    {
+        $this->expectException(RouterException::class);
+        $this->expectExceptionMessage("Config 'emitIdleTimeout' must be a number of seconds above 0 and at most 3600");
+
+        Router::create(['emitIdleTimeout' => $value]);
+    }
+
+    public function testIdleTimeoutIsANumberOfSecondsUpToAnHour(): void
+    {
+        foreach ([30, 0.5, '0.5', '30', 3600, null] as $value) {
+            $this->assertInstanceOf(Router::class, Router::create(['emitIdleTimeout' => $value]), var_export($value, true));
         }
     }
 }
