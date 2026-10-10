@@ -51,7 +51,7 @@ final class RouteHandler implements RequestHandlerInterface
 
         // Controller class + method. A class name only: [$object, 'method'] is a callable
         // and is called on that object below — taken for a class name, it was a TypeError
-        // (a 500) or, without a container, a call on a new object of its class
+        // (a 500)
         if (is_array($this->handler) && count($this->handler) === 2 && is_string($this->handler[0] ?? null)) {
             [$class, $method] = $this->handler;
 

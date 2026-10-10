@@ -106,7 +106,10 @@ middleware and handler run, and the response goes out with its status and header
 without its body. `Allow` names `HEAD` right behind `GET`. The router does not change the
 method — middleware and handler see `HEAD` (unless a middleware of yours rewrites it) and
 are free to answer differently than for GET. Keep GET handlers free of side effects, or
-give them a `head()` route of their own: link scanners and mail clients ask with HEAD. No
+give them a `head()` route of their own: link scanners and mail clients ask with HEAD. For a
+static GET route that `head()` route has to be static as well — a dynamic one
+(`head('/{path:any}')`) no longer shields it: a static route wins over a dynamic one for
+HEAD as for GET, so the GET handler runs. Or turn `implicitHead` off. No
 response to a HEAD request leaves `handle()` with a body, whoever wrote it; that includes
 a request a middleware turned into HEAD, or out of it, on its way in.
 
@@ -1525,8 +1528,9 @@ Debug is off unless you switch it on: with `'debug' => true`, or with `APP_DEBUG
   the client wants.
 - **A CORS flag at 405 belongs to another route** — see [Looking a Route Up](#looking-a-route-up).
 - **Keep GET handlers free of side effects** or give them a `head()` route: HEAD runs the
-  GET route (`implicitHead`), and link scanners ask with HEAD. Token-consuming links belong
-  behind a POST.
+  GET route (`implicitHead`), and link scanners ask with HEAD. A dynamic `head()` no longer
+  shields a static GET route — give that route a static `head()` of its own, or turn
+  `implicitHead` off. Token-consuming links belong behind a POST.
 - **Take a `{path:any}` value for a file only after `realpath()` and a prefix check** — the
   router keeps `..`, `.` and empty segments out, not every name a file system understands.
 - **Limit the length of a request line in the web server.** The router has no limit of its

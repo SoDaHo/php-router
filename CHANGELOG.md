@@ -6,8 +6,11 @@
 
 What was wrong without a word is refused with a word now — where the routes are written or
 the table is built where that is possible, as a 500 with a report where only a request
-shows it. See "Upgrading from 2.1.1" at the end of this section for what that means for an
-application.
+shows it. 2.2.0 also changes behaviour 2.1.1 documented or pinned in its tests (`get('')`
+in a group, a middleware key that replaced another, a `status` taken from the details of an
+`RfcResponder` error, `urlEncoding` off, writing into a route's arrays in place); that is a
+deliberate deviation from SemVer by the owner's decision of 2026-10-10. See "Upgrading from
+2.1.1" at the end of this section for what all of it means for an application.
 
 ### Security
 - A route parameter never replaces an attribute the request carries already. Each
@@ -47,10 +50,10 @@ application.
 - `RedirectHandler` refuses in its constructor what `RouteCollector::redirect()` refused for
   it: a target with a control character other than a tab, a placeholder that is not
   `{name}` or one where scheme or host belong (`'{a}:{b}'`, `'https:{path}'`,
-  `'//{host}/x'`), and a status a client does not follow (see below). A handler built by hand — a handler
-  of a route of your own — got none of these checks; `'{a}:{b}'` was caught only as the
-  redirect went out. The scheme is read as RFC 3986 has it, in the constructor and where
-  the address goes out, by one function (`'1{x}:y'` is a path).
+  `'//{host}/x'`), and a status a client does not follow (see below). A handler built by
+  hand — a handler of a route of your own — got none of these checks; `'{a}:{b}'` was
+  caught only as the redirect went out. The scheme is read as RFC 3986 has it, in the
+  constructor and where the address goes out, by one function (`'1{x}:y'` is a path).
 - `run()` and `emit()` refuse a protocol version that is no version — a digit, and a dot
   and a digit for a minor one (`1.1`, `1.0`, `2`) — before anything is sent, as they refuse
   a reason phrase with a control character: `withProtocolVersion("1.1\r\nX-Injected: 1")`
@@ -237,10 +240,11 @@ application.
   `FileStream::fromHandle()`, `Response::fileFromHandle()`, `AppFolder::openWithin()`.
 
 ### Upgrading from 2.1.1
-Most of what 2.2.0 refuses never worked as meant; it is refused now instead of doing the
-wrong thing quietly. Under strict SemVer several of these changes would be a major release;
-this version follows the decision of the owner of 10 October 2026 to ship them as 2.2.0.
-What to look at:
+Much of what 2.2.0 refuses never worked as meant and is refused now instead of doing the
+wrong thing quietly; five changes break what 2.1.1 documented (see the top of this
+section). Under strict SemVer several of these changes would be a major release; this
+version follows the decision of the owner of 10 October 2026 to ship them as 2.2.0. What to
+look at:
 
 - **A refusal while the table is built is a 500 for every request.** A route the table
   cannot take (a duplicate name, a fragment with a named group, a middleware key given
@@ -276,7 +280,8 @@ What to look at:
   304 or 305 it took). A value that would
   make a `.` or `..` segment is a 500 instead of a redirect.
 - **HEAD.** A dynamic `head()` route no longer answers for a path a static `get()` route
-  takes.
+  takes — and no longer shields it: the GET handler runs for HEAD there, side effects
+  included. Give such a route a static `head()` of its own, or turn `implicitHead` off.
 - **`get('')` in a group** (trailing slash mode `strict`) is the group's own address now;
   write `get('/')` for the address with the slash (a pattern of blanks alone stays there).
 - **`Response::tooManyRequests()`** takes 0 or more seconds.
