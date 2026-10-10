@@ -1213,9 +1213,10 @@ final class Router implements RouterInterface
      */
     private function prepare(ResponseInterface $response, bool $withBody): array
     {
-        // Readability BEFORE anything is sent: a detached/closed body throws inside
-        // __toString(). Throwing after the headers went out would leave a half-sent
-        // response; throwing here lets the error handler still produce a proper 500.
+        // Readability BEFORE anything is sent: a detached or closed body says so through
+        // isReadable() (its __toString() throws or gives ''). Throwing after the headers
+        // went out would leave a half-sent response; throwing here lets the error handler
+        // still produce a proper 500.
         $unreadable = 'Response body is not readable (closed or detached before emit)';
         try {
             $body = $response->getBody();

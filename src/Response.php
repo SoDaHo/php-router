@@ -147,7 +147,7 @@ final class Response
             throw new \InvalidArgumentException('$perPage must be at least 1');
         }
 
-        // Page 0 would give 'from' -4; validate a page number from the request before it
+        // Page 0 would give 'from' 1 - $perPage; validate a page number from the request before it
         // gets here, or this is a 500
         if ($page < 1) {
             throw new \InvalidArgumentException('$page must be at least 1');

@@ -22,7 +22,6 @@ Sodaho\Router\Router::create()->loadRoutes(__DIR__ . '/../routes.php')->run();
 
 // routes.php
 use Sodaho\Router\{Response, RouteCollector};
-
 return function (RouteCollector $r) {
     $r->get('/users/{id:int}', fn ($request, int $id) => Response::success(['id' => $id]))->name('user.show');
     $r->post('/users', [UserController::class, 'store']);
@@ -41,12 +40,10 @@ return function (RouteCollector $r) {
 | `loadRoutes(string $file): self` | File returning `function (RouteCollector $r) {…}`. |
 | `setContainer(ContainerInterface $container): self` | PSR-11 container for classes by name. |
 | `setDebug(bool $debug): self` / `isDebug(): bool` | Debug mode, see [Security](#security). |
-| `setBasePath(string $basePath): self` | Prefix of every route (`/api`, `/api/`, `api`). |
-| `setBaseUrl(?string $baseUrl): self` | Base URL of `absoluteUrl()`; `null`, `''`, `'0'`: none. |
+| `setBasePath(string $basePath): self` / `setBaseUrl(?string $baseUrl): self` | See [Configuration](#configuration). |
 | `middleware(string\|array\|object $middleware): self` | Middleware for every request, first = outermost. |
 | `app(string $prefix, string $directory, array $options = []): self` | Web app folder, see [AppFolder](#appfolder). |
-| `setErrorHandler(callable $handler): self` | `fn (Throwable, request): ?ResponseInterface`. |
-| `on(string $event, callable $callback): static` | Hook, see [Hooks](#hooks). |
+| `setErrorHandler(callable $handler): self` / `on(string $event, callable $callback): static` | See below / Hooks. |
 | `match(ServerRequestInterface $request): RouteMatch` | Looks the request up, runs nothing. |
 | `handle(ServerRequestInterface $request): ResponseInterface` | PSR-15; does not throw. |
 | `url(string $name, array $params = []): string` / `absoluteUrl(…)` | See [UrlGenerator](#urlgenerator). |
@@ -58,10 +55,11 @@ return function (RouteCollector $r) {
   `setBasePath()`, `setBaseUrl()`, `loadRoutes()` and `clone` throw `RouterException`; `setContainer()`,
   `middleware()`, `app()`, `on()` and `setErrorHandler()` take effect for later requests.
 - The routes file is required once per `loadRoutes()`; its closure sees the router as `$this`. When the table cannot
-  be built (the file threw, a route was refused), each request goes to the error handler (default: the router's 500)
-  and to `error`, and the middleware, apps and hooks the file registered on the router are taken back.
-- The error handler answers what route middleware, handlers and middleware for every request throw; `null` or a
-  throw gives the router's 500.
+  be built (no routes file set or found, the file threw or returned no callable, the callable threw, a route was
+  refused), `match()` and `url()` throw, and each request goes to the error handler (default: the router's 500) and
+  to `error`. What the callable registered on the router (middleware, apps, hooks) is taken back.
+- The error handler, `fn (Throwable $e, ServerRequestInterface $request): ?ResponseInterface`, answers what route
+  middleware, handlers and middleware for every request throw; `null` or a throw gives the router's 500.
 - Order, outside in: middleware for every request, error handler, then 404, 405, 400 or the route middleware (groups
   outer to inner, then the route's own) and the handler.
 - Request attributes: `RouteMatch::class` on every request, `Route::class` on a hit, `_route_params` and each
@@ -85,9 +83,10 @@ return function (RouteCollector $r) {
 | `getData(): array` | `[static routes, dynamic routes]`; freezes the routes. |
 
 A handler is `[Controller::class, 'method']` (the container's entry, else `new` when the constructor needs no
-argument), a callable (`[$object, 'method']`, a closure, an invokable object) or a `RequestHandlerInterface`. It gets
-the request first and each placeholder as a named argument, and returns a `ResponseInterface`. A container entry
-that is no object of the named class (for middleware: no `MiddlewareInterface`) is a 500.
+argument), a callable (`[$object, 'method']`, a closure, an invokable object) or a `RequestHandlerInterface`.
+Controllers and callables get the request first and each placeholder as a named argument; a `RequestHandlerInterface`
+gets the request alone. A handler returns a `ResponseInterface`. A container entry that is no object of the named
+class (for middleware: no `MiddlewareInterface`) is a 500.
 
 | Type | Regular expression | Cast (failure: 400 `INVALID_PARAMETER`) |
 |---|---|---|
@@ -108,12 +107,12 @@ Refused with `RouterException` where the route is written:
 - `addPattern()`: a name other than `[A-Za-z0-9_]+`; a fragment with an unescaped `#`, a named group, a `(*…)` verb,
   a callout `(?C…)`, or an option that turns on `x` or `xx`.
 - When the table is built: an undefined type, an own fragment that does not compile or closes its group, two routes
-  of different patterns under one name (`DuplicateRouteException`).
+  of different patterns under one name (`DuplicateRouteException`, also from `new UrlGenerator()`).
 
 Matching: static routes (no placeholder) first, then dynamic routes in order of definition. A request path with
 `%2F`, `%5C`, a backslash, a control character or a `.`/`..` segment (also encoded) is a 404 before the table is
 asked. A 500 (reported to `error`): a parameter named like an attribute the request carries; a route expression PCRE
-gives up on (backtrack limit, JIT stack); a placeholder named like the handler's first parameter.
+gives up on (backtrack limit, JIT stack); a placeholder named like the first parameter of a controller or callable.
 
 Trailing slash mode `strict` (default): `/users` and `/users/` are two routes; in `group('/api')`, `get('')` is
 `/api` and `get('/')` is `/api/`. Mode `ignore`: trailing slashes of routes and requests are dropped (`/` stays).
@@ -125,7 +124,7 @@ Built by the collector: `__construct(array $methods, string $pattern, mixed $han
 
 | Signature | Description |
 |---|---|
-| `readonly array $methods`, `string $pattern`, `mixed $handler` | Set by the collector. |
+| Readonly: `array $methods`, `string $pattern`, `mixed $handler` | Set by the collector. |
 | `array $middleware`, `?string $name`, `array $attributes` | Assignable until the table is built. |
 | `middleware(string\|array\|object $middleware): self` | Appends middleware. |
 | `name(string $name): self` / `attribute(string $key, mixed $value): self` | Name for `url()`; attribute. |
@@ -133,16 +132,16 @@ Built by the collector: `__construct(array $methods, string $pattern, mixed $han
 
 - A string key names one middleware: the same key again in a route and its groups, or in the router's own list, is a
   `RouterException`. A route attribute wins over its groups.
-- Once the table is built, `middleware()`, `name()`, `attribute()` and assigning the properties throw
-  `RouterException`; writing into an array in place (`$route->attributes['k'] = …`) is an `Error`.
+- Once the table is built, `middleware()`, `name()`, `attribute()` and assigning `$middleware`, `$name` or
+  `$attributes` throw `RouterException`; writing into an array in place (`$route->attributes['k'] = …`) is an `Error`.
 
 ### RouteMatch
 
 | Signature | Description |
 |---|---|
 | `const FOUND`, `NOT_FOUND`, `METHOD_NOT_ALLOWED` | Values of `$status`. |
-| `readonly int $status`, `string $method`, `string $path` | `$path`: see below. |
-| `readonly ?Route $route`, `array $params`, `array $casts`, `bool $viaGet` | `$params` not cast; HEAD via GET. |
+| Readonly: `int $status`, `string $method`, `string $path` | `$path`: see below. |
+| Readonly: `?Route $route`, `array $params`, `array $casts`, `bool $viaGet` | `$params` not cast; HEAD via GET. |
 | `isFound(): bool` / `allowedMethods(): array` | Status `FOUND` / methods of the path, HEAD behind GET. |
 
 `$path` is the path the table was asked with (decoded, no base path); where the table was not asked, the request
@@ -162,8 +161,7 @@ for. `handle()` takes over a `RouteMatch` this router made for the same method a
 | `notFound(?string $resource = null, string\|int\|null $identifier = null)` | 404 |
 | `unauthorized(?string $message = null)` / `forbidden(?string $message = null)` | 401 / 403 |
 | `validationError(array $errors)` / `methodNotAllowed(array $allowedMethods)` | 422 / 405 with `Allow` |
-| `tooManyRequests(int $retryAfter)` | 429, `Retry-After` |
-| `serverError(?string $message = null, ?array $debug = null)` | 500 |
+| `tooManyRequests(int $retryAfter)` / `serverError(?string $message = null, ?array $debug = null)` | 429 / 500 |
 | `html(string $content, int $status = 200)` / `text(string $content, int $status = 200)` | HTML / text, UTF-8 |
 | `json(mixed $data, int $status = 200, string $contentType = 'application/json')` | `$data`, no envelope |
 | `redirect(string $url, int $status = 302)` | `REDIRECT_STATUSES`: 301, 302, 303, 307, 308 |
@@ -179,12 +177,14 @@ file(string $path, ?string $filename = null, string $contentType = 'application/
 - Each helper returns a `ResponseInterface`. `tooManyRequests()` below 0 and `redirect()` with another status
   throw `RouterException`; `paginated()` throws `InvalidArgumentException` for `$page` or `$perPage` below 1, `$total`
   below 0, a last item beyond `PHP_INT_MAX`.
-- `file()` sends a `FileStream` with `Content-Length`, `Accept-Ranges: bytes`, `X-Content-Type-Options: nosniff`;
-  length and range come from the opened file. `$range` is the raw `Range` header: one range `bytes=a-b`, `a-` or `-n`
-  gives 206, an unsatisfiable one 416, anything else the whole file. `$maxChunk` caps a 206 body. A path that is no
-  readable file and `$maxChunk` below 1 throw `RouterException`. It sends no `ETag` and does not look at `If-Range`.
+- `file()`: 200 or 206 with a `FileStream`, `Content-Length`, `Accept-Ranges: bytes`, `X-Content-Type-Options:
+  nosniff`, length and range from the opened file; 416 with an empty body, `Content-Range: bytes */<size>`,
+  `Accept-Ranges` and `Content-Length: 0`. `$range` is the raw `Range` header: one range `bytes=a-b`, `a-` or `-n`
+  gives 206, an unsatisfiable one 416, anything else 200. `$maxChunk` caps a 206 body. A path that is no readable
+  file and `$maxChunk` below 1 throw `RouterException`. No `ETag`; `If-Range` is not looked at.
 - Filenames of `download()` and `file()`: control and bidi characters dropped, `/` and `\` become `_`, 200 bytes at
-  most (extension kept), `.`, `..`, empty: `download`; ASCII `filename="…"`, valid UTF-8 also `filename*=UTF-8''…`.
+  most (an extension of up to 16 bytes with its dot kept), `.`, `..`, empty: `download`; ASCII `filename="…"`, valid
+  UTF-8 also `filename*=UTF-8''…`.
 
 | Responder (`Service\…`; body: the array as JSON) | Success | Error (4xx/5xx) |
 |---|---|---|
@@ -192,8 +192,9 @@ file(string $path, ?string $filename = null, string $contentType = 'application/
 | `RfcResponder(string $typeBaseUri = 'about:blank')` | `{"data", "message"?, "meta"?}` | RFC 9457 problem+json |
 
 `error` of `JsonResponder` holds `message`, `code`, `details`. `RfcResponder`: `type` from the code (`NOT_FOUND` →
-`<base>/not-found`, `about:blank` without code or base), `title` from the message, `status` of the response,
-`detail`, `instance` and other keys from the details; `type`, `title`, `status` of the details are dropped.
+`<base>/not-found`; `about:blank` without code or with the base `about:blank`, the default), `title` from the message,
+`status` of the response, `detail`, `instance` and other keys from the details; `type`, `title`, `status` of the
+details are dropped.
 
 `ResponderInterface`: `formatSuccess(mixed $data, ?string $message = null, ?array $meta = null): array`,
 `formatError(string $message, ?string $code = null, ?array $details = null): array`, `getContentType(): string`
@@ -203,7 +204,7 @@ file(string $path, ?string $filename = null, string $contentType = 'application/
 
 | Signature | Description |
 |---|---|
-| `__construct(array $routes = [], ?array $patterns = null)` | Routes; `$patterns`: `getPatterns()`. |
+| `__construct(array $routes = [], ?array $patterns = null)` | Routes; `$patterns` of `getPatterns()`. |
 | `setBasePath(string $basePath): void` | Put in front of every address. |
 | `setBaseUrl(?string $baseUrl): void` | `null`, `''`: none; else the rule of `baseUrl`. |
 | `setIgnoreTrailingSlash(bool $ignore): void` | The router's mode `ignore`. |
@@ -225,21 +226,22 @@ file(string $path, ?string $filename = null, string $contentType = 'application/
 | Signature | Description |
 |---|---|
 | `__construct(string $prefix, string $directory, array $options = [])` | Built by `app()`; options below. |
-| `readonly string $prefix` | Prefix without trailing slash, `''` for the root. |
-| `const TYPES`, `const HASHED` | Extension => Content-Type; regex of bundler names. |
+| `readonly string $prefix`, `const TYPES`, `const HASHED` | Prefix (`''`: root); extension => type; bundler regex. |
 | `owns(string $path): bool` | Whether the path lies under the prefix. |
 | `serve(ServerRequestInterface $request, string $path): ?ResponseInterface` | The file, the start page or `null`. |
 
-- Routes come first. Where none matches a GET or HEAD under the prefix: the folder's file, otherwise the start page;
-  a 404 where the last segment has a dot. The longest prefix decides; prefixes are relative to the base path.
+- Asked where the route table has no route for the path (`NOT_FOUND`); a path the table knows for another method
+  stays a 405. A GET or HEAD under the prefix gets the folder's file, otherwise the start page; a 404 where the last
+  segment has a dot. The longest prefix decides; prefixes are relative to the base path.
 - Not served: files outside the resolved folder, hidden names (leading dot), unreadable files, extensions not in
   `types`; paths with a control character, a backslash, `%2F`, `%5C`, `//`, or a segment that ends in a dot or
   space. A path with a colon is not looked up as a file.
 - The file is opened, then checked at the handle (resolved path, device and file number); `ETag`, length and body
-  come from that handle.
+  come from that handle. The checks assume a folder writable for the deployment alone: a directory on the way
+  swapped for a link and back between two checks is not detected, and a hard link is served as the file it names.
 - Files go out without `Content-Disposition`, with `nosniff` and the options' `Cache-Control`. `ETag`: a hash of the
-  content up to 64 KiB, above `W/` device, file number, time, size (none without file numbers). `If-None-Match`
-  gives 304; a `Range` counts for GET without `If-Range`.
+  content up to 64 KiB, above `W/` device, file number, time, size (none without file numbers). An `If-None-Match`
+  with the file's tag, or `*`, gives 304; a `Range` counts for GET without `If-Range`.
 
 ### RedirectHandler (`Middleware\RedirectHandler`)
 
@@ -254,37 +256,35 @@ file(string $path, ?string $filename = null, string $contentType = 'application/
   scheme and host before its first placeholder, the host closed by `/`, `?` or `#`). `redirect()` also refuses a
   placeholder that the source pattern lacks.
 - `handle()` encodes each value as a whole (`/` becomes `%2F`). It throws `RouterException` for a placeholder without
-  value, parameters that are no array of scalars, a rendering that changes scheme or host (an empty value before a
-  slash), and a value that makes a `.` or `..` segment.
+  value, parameters that are no array of finite scalar values, a rendering that changes scheme or host (an empty
+  value before a slash), and a value that makes a `.` or `..` segment.
 
 ### Other classes
 
-| Signature | Description |
-|---|---|
-| `Contract\RouterInterface`: `handle()`, `match()`, `url()`, `absoluteUrl()` | Type against it to wrap the router. |
-| `Traits\HasHooks::on(string $event, callable $callback): static` | Appends a callback. |
-| `Middleware\RouteHandler::__construct(mixed $handler, ?ContainerInterface $container = null)` | `handle()` runs it. |
-| `Middleware\MiddlewareHandler::__construct(MiddlewareInterface $middleware, RequestHandlerInterface $next)` | |
-| `Dispatcher::__construct(array $staticRoutes, array $dynamicRoutes)` | Matcher over `getData()`. |
-| `Dispatcher::dispatch(string $method, string $uri): array` | `[status, route or methods, params, casts]`. |
-| `Dispatcher::staticRoute(string $method, string $uri): ?Route` / `allowedMethods(string $uri): array` | |
-
-`Dispatcher` has the constants of `RouteMatch` and does not check paths. `RouteDispatcher` is the PSR-15 handler
-the router builds: `__construct(array $dispatchData, ?ContainerInterface $container = null, string $basePath = '',
-string $trailingSlash = 'strict', bool $debug = false)`, `setContainer()`, `setMiddleware()`, `setImplicitHead()`,
-`setApps()`, `setErrorResponder(?Closure)` (without one, exceptions leave `handle()`), `match()`, `handle()`.
-
-`Stream\FileStream` is a read-only PSR-7 stream over a file or a slice: `__construct(string $path, int $start = 0,
-?int $length = null)` throws `RouterException` for a file it cannot open or size; `read()`, `seek()`, `tell()`,
-`rewind()`, `eof()`, `getSize()`, `getContents()`, `__toString()`, `getMetadata()`, `close()`, `detach()`,
-`isReadable()`, `isSeekable()`; `isWritable()` is `false`, `write()` throws; `__destruct()` closes. The stream
-methods throw `RuntimeException`. Classes other than the exceptions are `final`.
+- `Contract\RouterInterface`: `handle()`, `match()`, `url()`, `absoluteUrl()`; type against it to wrap the router.
+- `Traits\HasHooks`: `on(string $event, callable $callback): static` appends a callback; `trigger()` is protected.
+- `Middleware\RouteHandler`: `__construct(mixed $handler, ?ContainerInterface $container = null)`, `handle()`.
+- `Middleware\MiddlewareHandler`: `__construct(MiddlewareInterface $middleware, RequestHandlerInterface $next)`,
+  `handle(ServerRequestInterface $request): ResponseInterface` (`$middleware->process($request, $next)`).
+- `Dispatcher` (constants as `RouteMatch`, no path checks): `__construct(array $staticRoutes, array $dynamicRoutes)`,
+  `dispatch(string $method, string $uri): array` (`[status, route or methods, params, casts]`),
+  `staticRoute(string $method, string $uri): ?Route`, `allowedMethods(string $uri): array`.
+- `RouteDispatcher`, the PSR-15 handler the router builds: `__construct(array $dispatchData, ?ContainerInterface
+  $container = null, string $basePath = '', string $trailingSlash = 'strict', bool $debug = false)`, `setContainer()`,
+  `setMiddleware()`, `setImplicitHead()`, `setApps()`, `setErrorResponder(?Closure)` (without one, exceptions leave
+  `handle()`), `match()`, `handle()`.
+- `Stream\FileStream`, a read-only PSR-7 stream over a file or a slice: `__construct(string $path, int $start = 0,
+  ?int $length = null)` throws `RouterException` for a file it cannot open, size or position; `read()`, `seek()`,
+  `tell()`, `rewind()`, `eof()`, `getSize()`, `getContents()`, `__toString()`, `getMetadata()`, `close()`,
+  `detach()`, `isReadable()`, `isSeekable()`; `isWritable()` is `false`, `write()` throws; `__destruct()` closes;
+  the stream methods throw `RuntimeException`. Classes other than the exceptions are `final`.
 
 ### run() and emit()
 
-Status, headers and body size are read before the first byte. Header lines go out first, the status line last.
-Fields that exist once per message (`Content-Type`, `Content-Length`, `Location`, `ETag`, …) replace what the host
-set; other fields (`Vary`, `Cache-Control`, `Set-Cookie`, …) are added. The body is read in `emitChunkSize` chunks.
+Status, headers and (with `withBody`) the body size are read before the first byte. Header lines go out first, the
+status line last. Fields that exist once per message (`Content-Type`, `Content-Length`, `Location`, `ETag`, …)
+replace what the host set; others (`Vary`, `Cache-Control`, `Set-Cookie`, …) are added. The body is read in
+`emitChunkSize` chunks.
 
 | Refused | When | `run()` | `emit()` |
 |---|---|---|---|
@@ -295,7 +295,7 @@ set; other fields (`Vary`, `Cache-Control`, `Set-Cookie`, …) are added. The bo
 | `Transfer-Encoding`; `Content-Length` not one value of at most 18 significant digits | before sending | 500 | throws |
 | `Content-Length` on 1xx or 204; one other than `0` on 205 | before sending | 500 | throws |
 | `withBody` true: a body of size other than 0 (or unknown) on 1xx, 204, 205, 304 | before sending | 500 | throws |
-| `withBody` true: `Content-Length` above 0, body size 0 | before sending | 500 | throws |
+| `withBody` true, a status with content: `Content-Length` above 0, body size 0 | before sending | 500 | throws |
 | No byte for `emitIdleTimeout` s; body shorter or longer than `Content-Length` | after headers | reported | throws |
 
 - `run()` reports each case to `error`. Output started before the router: nothing is sent, `error` gets type `emit`.
@@ -325,18 +325,17 @@ set; other fields (`Vary`, `Cache-Control`, `Set-Cookie`, …) are added. The bo
 - `implicitHead`: HEAD without a HEAD route runs the GET route (method stays `HEAD`), the body is cut, `Allow` lists
   HEAD behind GET. A static GET route wins over a dynamic HEAD route.
 
-`app()` options:
-
-| Key | Default | Allowed | Refused |
+| `app()` option | Default | Allowed | Refused |
 |---|---|---|---|
 | `index` | `'index.html'` | a file name | `/`, `\`, `:`, leading dot, control char, trailing dot or space |
-| `types` | `AppFolder::TYPES` | `extension => type`, `null` takes one off | not `[a-z0-9]+`; PHP sources |
+| `types` | `AppFolder::TYPES` | `ext => type`, `null` removes | no map; ext not `[a-z0-9]+`; bad type; PHP sources |
 | `immutable` | `null` | regex on the path below the prefix, e.g. `AppFolder::HASHED` | no valid regex |
 | `cacheIndex` | `'no-cache'` | Cache-Control of the start page; `null`: none | empty, control char |
 | `cacheImmutable` | `'public, max-age=31536000, immutable'` | for paths `immutable` matches | as `cacheIndex` |
 | `cacheOther` | `'no-cache'` | for every other file | as `cacheIndex` |
 
-An unknown option, a folder that does not exist and a prefix in use throw `RouterException`.
+`RouterException` for an unknown option, a missing folder, a prefix in use, and a prefix that is no plain path (a
+segment with a leading dot, a separator or control character, a trailing dot or space).
 
 ## Hooks
 
@@ -364,8 +363,8 @@ An unknown option, a folder that does not exist and a prefix in use throw `Route
 | `MethodNotAllowedException` | For applications; the router answers 405 itself | `getAllowedMethods(): array` |
 
 - All extend `RouterException`, `__construct(string $message = 'Router error', int $code = 0, ?Throwable $previous =
-  null, ?string $debugMessage = null)`. The message says what is wrong; `getDebugMessage()` holds path, pattern or
-  address.
+  null, ?string $debugMessage = null)`; `MethodNotAllowedException` defaults `$message` to `'Method not allowed'` and
+  takes `array $allowedMethods = []` fifth. The message says what is wrong; `getDebugMessage()` holds the details.
 - `handle()` does not throw: what a handler, middleware, the routes file, the error handler, the responder or the
   request object throws becomes a 500 and goes to `error`. Where the responder fails too, the 500 is plain text.
 
@@ -386,7 +385,7 @@ An unknown option, a folder that does not exist and a prefix in use throw `Route
 
 `composer test` (PHPUnit; suites `test:unit`, `test:integration`, `test:feature`, `test:security`), `composer analyse`
 (PHPStan: src level max, tests level 8), `composer cs` (dry run), `composer validate --strict`. No environment
-variables; integration tests start `PHP_BINARY -S 127.0.0.1:<free port>` and `PHP_BINARY -r`.
+variables; tests start `PHP_BINARY -S 127.0.0.1:<free port>` and `PHP_BINARY -r`.
 
 ## Upgrading
 
