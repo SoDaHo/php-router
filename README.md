@@ -152,7 +152,7 @@ $r->get('/codes/{code:alphanum}', $handler); // Alphanumeric
 | `slug` | `[a-z0-9-]+` | `{slug:slug}` → my-post |
 | `uuid` | `[0-9a-fA-F]{8}-...` | `{id:uuid}` → 550e8400-... |
 | `ulid` | `[0-9A-Za-z]{26}` | `{id:ulid}` → 01ARZ3NDEKTSV4RRFFQ69G5FAV |
-| `any` | `(?:[^/]+(?:/[^/]+)*(?:/(?=\z))?)?` | `{path:any}` → anything/here — no empty segment (see below) |
+| `any` | `(?:[^/]+(?:/[^/]+)*(?:/(?=\z))?)?` | `{path:any}` → `a/b`, no empty segment (see below) |
 
 ### Slashes in a Parameter
 
@@ -230,7 +230,7 @@ $r->get('/a/{id}/b/{id}', $handler);         // the same placeholder twice
 $r->get('/caf%C3%A9', $handler);             // a pattern is written decoded: '/café'
 $r->get('/search?q={q}', $handler);          // a pattern is a path: no '?' or '#'
 $r->addPattern('hex', '[0-9a-f#]+');         // unescaped '#'
-$r->redirect('/old/{id}', '/new/{slug}');    // the target uses a placeholder its source does not have
+$r->redirect('/old/{id}', '/new/{slug}');    // a placeholder of the target the source lacks
 $r->redirect('/go/{to}', 'https:{to}');      // a placeholder where scheme or host belong
 ```
 
@@ -378,8 +378,8 @@ class OwnershipMiddleware implements MiddlewareInterface
 {
     public function process($request, $handler): ResponseInterface
     {
-        $orderId = $request->getAttribute('id');              // from the path: what the client wrote
-        $user = $request->getAttribute(Identity::class);      // from your auth middleware: who it is
+        $orderId = $request->getAttribute('id');          // from the path: what the client wrote
+        $user = $request->getAttribute(Identity::class);  // from your auth middleware: who it is
 
         if (!$this->orders->belongsTo($orderId, $user)) {
             return Response::forbidden();
@@ -453,7 +453,10 @@ route that runs.
 ```php
 use Sodaho\Router\RouteMatch;
 
-$router->setErrorHandler(function (Throwable $e, ServerRequestInterface $request): ?ResponseInterface {
+$router->setErrorHandler(function (
+    Throwable $e,
+    ServerRequestInterface $request,
+): ?ResponseInterface {
     $format = $request->getAttribute(RouteMatch::class)?->route?->getAttribute('format');
 
     return $format === 'oauth'
@@ -534,12 +537,13 @@ $url = $router->absoluteUrl('user.show', ['id' => 5]);
 ```
 
 A name belongs to one address: two routes of different patterns with the same name end the
-building of the route table with a `DuplicateRouteException` (routes of one pattern may share
-a name — `get('/login')` and `post('/login')` as `login`) (the first request is a 500 and reported, `url()`
-and `match()` throw), naming both patterns in `getDebugMessage()` — `url()` used to give the
-address of whichever came last. A name that no route has throws a `RouteNotFoundException`;
-its message names only the name asked for, its `getDebugMessage()` lists every route name
-of the application — keep it out of responses and logs that others read.
+building of the route table with a `DuplicateRouteException` (routes of one pattern may
+share a name — `get('/login')` and `post('/login')` as `login`) (the first request is a 500
+and reported, `url()` and `match()` throw), naming both patterns in `getDebugMessage()` —
+`url()` used to give the address of whichever came last. A name that no route has throws a
+`RouteNotFoundException`; its message names only the name asked for, its `getDebugMessage()`
+lists every route name of the application — keep it out of responses and logs that others
+read.
 
 Values are encoded (`rawurlencode()`, always — see `urlEncoding`), and so is the literal
 text of route pattern and base path (`/my app/{x}` goes out as `/my%20app/…`; what a path
@@ -562,13 +566,20 @@ query string (append one yourself, e.g. with
 `http_build_query()`):
 
 ```php
-$router->url('files', ['path' => 'my dir/a b.txt']);   // /files/{path:any} → /files/my%20dir/a%20b.txt
-$router->url('user.show', ['id' => 'a/b']);            // RouterException: the placeholder is one segment
-$router->url('post.show', ['id' => '12a']);            // /posts/{id:int} → RouterException: the address would end in 404
-$router->url('files', ['path' => '../secret']);        // RouterException: a client would resolve the '..'
-$router->url('export', ['name' => '..']);              // /export/{name}.json → /export/...json: no segment of its own, fine
-$router->url('files', ['path' => 'a\\b']);             // RouterException: no route accepts a backslash
-$router->url('page', ['path' => '/evil.example/x']);   // /{path:any} → RouterException: an empty segment (and '//' would name a host)
+// /files/{path:any} → /files/my%20dir/a%20b.txt
+$router->url('files', ['path' => 'my dir/a b.txt']);
+// RouterException: the placeholder is one segment
+$router->url('user.show', ['id' => 'a/b']);
+// /posts/{id:int} → RouterException: the address would end in 404
+$router->url('post.show', ['id' => '12a']);
+// RouterException: a client would resolve the '..'
+$router->url('files', ['path' => '../secret']);
+// /export/{name}.json → /export/...json: no segment of its own, fine
+$router->url('export', ['name' => '..']);
+// RouterException: no route accepts a backslash
+$router->url('files', ['path' => 'a\\b']);
+// /{path:any} → RouterException: an empty segment (and '//' would name a host)
+$router->url('page', ['path' => '/evil.example/x']);
 ```
 
 ## Redirect Routes
@@ -925,41 +936,42 @@ $response = $router->handle($request);  // Returns ResponseInterface
 $router->emit($response, withBody: $request->getMethod() !== 'HEAD');
 ```
 
-What `run()` and `emit()` do with headers the host application set before them: a field that exists once
-per message (`Content-Type`, `Location`, `Content-Length`, `ETag`, ...) is replaced by the
-response's value; every other field is a list and the response's lines are added — a
-`Vary: Cookie` or the `Cache-Control: no-store` of `session_start()` stays in place; so does
-every field the router does not know. `X-Frame-Options`, `Strict-Transport-Security` and
-`Access-Control-Allow-Origin` are added as well, not replaced — set them in one place. The
-status is the response's, whatever its headers are — PHP would turn a 403 with
-`WWW-Authenticate` into a 401 and a 200 with a `Location` into a 302; a redirect is a 3xx
-status (`Response::redirect()`). Status line and header lines are checked before anything
-is sent: a status code outside 100 to 599, a reason phrase with a control character other
-than a tab, a protocol version that is no version (a digit, and a dot and a digit for a
-minor one: `1.1`, `1.0`, `2`), a header name that is no token (RFC 9110) and a header
-value with a control character other than a tab are refused — PHP would drop such a status
-line and send its own 200, and refuse such a header line only after the lines in front of
-it went out (a `Location` among them makes the status a 302). So are the fields that say where the body ends, where they say nothing
-one can rely on: a `Content-Length` that is not exactly one value of digits (`abc`, `3, 3`,
-two of them) and any `Transfer-Encoding` — the emitter applies no transfer coding, the body
-goes out as it is (the web server frames it). A `Content-Length` above 0 in front of a body
-whose size is 0 is refused too. A 1xx, 204, 205 or 304 has no content (RFC 9110): its body
-is never read — one whose size is 0 goes out without it, any other one (also one of unknown
-size) is refused, and so is a `Content-Length` on a 1xx or 204 (also `0`) or one other than
-`0` on a 205; a 304 keeps the length of its representation. `run()` answers 500 then (the
-`error` hook gets the `RouterException`), `emit()` throws it. A read that gives `''` before the end
-of the body is waited past (PSR-7 allows it while the next bytes are on their way), with a
-pause that grows to 50 ms and never reaches past the deadline; a body that gives no byte
-for `emitIdleTimeout` seconds (30) — counted from the first read that gave nothing; a byte
-that comes after that is too late —, or ends short of its `Content-Length` (also without a
-byte), is given up on with a
-`RouterException` once the headers are out: `run()` reports it to the `error` hook (with the
-status that went out), `emit()` throws it — the client got less than the response promised.
-A body longer than its `Content-Length` is sent up to it, never beyond (a kept-alive client
-would read the rest as the next response), and ends the same way. The answer to `HEAD`
-keeps the `Content-Length` of the `GET` without a body: `run()` sends it without reading the
-body, `emit()` with `withBody: false` as above. If output has already started, nothing can
-be sent any more: the `error` hook is called with `type: 'emit'`.
+What `run()` and `emit()` do with headers the host application set before them: a field that
+exists once per message (`Content-Type`, `Location`, `Content-Length`, `ETag`, ...) is
+replaced by the response's value; every other field is a list and the response's lines are
+added — a `Vary: Cookie` or the `Cache-Control: no-store` of `session_start()` stays in
+place; so does every field the router does not know. `X-Frame-Options`,
+`Strict-Transport-Security` and `Access-Control-Allow-Origin` are added as well, not
+replaced — set them in one place. The status is the response's, whatever its headers are —
+PHP would turn a 403 with `WWW-Authenticate` into a 401 and a 200 with a `Location` into a
+302; a redirect is a 3xx status (`Response::redirect()`). Status line and header lines are
+checked before anything is sent: a status code outside 100 to 599, a reason phrase with a
+control character other than a tab, a protocol version that is no version (a digit, and a
+dot and a digit for a minor one: `1.1`, `1.0`, `2`), a header name that is no token (RFC
+9110) and a header value with a control character other than a tab are refused — PHP would
+drop such a status line and send its own 200, and refuse such a header line only after the
+lines in front of it went out (a `Location` among them makes the status a 302). So are the
+fields that say where the body ends, where they say nothing one can rely on: a
+`Content-Length` that is not exactly one value of digits (`abc`, `3, 3`, two of them) and
+any `Transfer-Encoding` — the emitter applies no transfer coding, the body goes out as it is
+(the web server frames it). A `Content-Length` above 0 in front of a body whose size is 0 is
+refused too. A 1xx, 204, 205 or 304 has no content (RFC 9110): its body is never read — one
+whose size is 0 goes out without it, any other one (also one of unknown size) is refused,
+and so is a `Content-Length` on a 1xx or 204 (also `0`) or one other than `0` on a 205; a
+304 keeps the length of its representation. `run()` answers 500 then (the `error` hook gets
+the `RouterException`), `emit()` throws it. A read that gives `''` before the end of the
+body is waited past (PSR-7 allows it while the next bytes are on their way), with a pause
+that grows to 50 ms and never reaches past the deadline; a body that gives no byte for
+`emitIdleTimeout` seconds (30) — counted from the first read that gave nothing; a byte that
+comes after that is too late —, or ends short of its `Content-Length` (also without a byte),
+is given up on with a `RouterException` once the headers are out: `run()` reports it to the
+`error` hook (with the status that went out), `emit()` throws it — the client got less than
+the response promised. A body longer than its `Content-Length` is sent up to it, never
+beyond (a kept-alive client would read the rest as the next response), and ends the same
+way. The answer to `HEAD` keeps the `Content-Length` of the `GET` without a body: `run()`
+sends it without reading the body, `emit()` with `withBody: false` as above. If output has
+already started, nothing can be sent any more: the `error` hook is called with
+`type: 'emit'`.
 
 ## Dependency Injection
 

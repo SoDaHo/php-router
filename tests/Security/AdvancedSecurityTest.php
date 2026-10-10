@@ -12,7 +12,7 @@ use Sodaho\Router\RouteDispatcher;
 use Sodaho\Router\Router;
 
 /**
- * Advanced Security Tests for "Schindluder" Scenarios.
+ * Advanced security tests: requests and routes written to abuse the router.
  */
 class AdvancedSecurityTest extends TestCase
 {

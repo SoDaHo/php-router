@@ -1114,15 +1114,15 @@ final class Router implements RouterInterface
      * @throws RouterException If the body cannot be read, the status code is not from 100
      *                         to 599, the reason phrase has a control character other
      *                         than a tab, the protocol version is no version, a header
-     *                         line is none, the response carries a
-     *                         Transfer-Encoding, a Content-Length that is not one value of
-     *                         digits, or one above 0 for a body that is empty, or a 1xx,
-     *                         204, 205 or 304 has a Content-Length its status rules out or
-     *                         a body that is not empty — before anything is sent (the body
-     *                         of such a status is never read); and after the headers, when
-     *                         the body gives no byte for 'emitIdleTimeout' seconds before
-     *                         its end, ends short of its Content-Length, or goes beyond it
-     *                         (what goes beyond is not sent)
+     *                         line is none, the response carries a Transfer-Encoding, a
+     *                         Content-Length that is not one value of digits, or one above
+     *                         0 for a body that is empty, or a 1xx, 204, 205 or 304 has a
+     *                         Content-Length its status rules out or a body that is not
+     *                         empty — before anything is sent (the body of such a status
+     *                         is never read); and after the headers, when the body gives
+     *                         no byte for 'emitIdleTimeout' seconds before its end, ends
+     *                         short of its Content-Length, or goes beyond it (what goes
+     *                         beyond is not sent)
      */
     public function emit(ResponseInterface $response, bool $withBody = true): void
     {
@@ -1175,14 +1175,14 @@ final class Router implements RouterInterface
      *
      * @throws RouterException If the response body cannot be read (closed or detached), the
      *                         status code is not from 100 to 599, the reason phrase has a
-     *                         control character other than a tab, the
-     *                         protocol version is no version (a digit, a dot and a digit), a
-     *                         header has a name that is no token or a value with a control
-     *                         character other than a tab, or the framing fields say nothing
-     *                         one can rely on (see framing()), or a Content-Length above 0
-     *                         stands in front of a body that is empty, or a 1xx, 204, 205
-     *                         or 304 has a Content-Length its status rules out or a body
-     *                         that is not empty (or of unknown size)
+     *                         control character other than a tab, the protocol version is
+     *                         no version (a digit, a dot and a digit), a header has a name
+     *                         that is no token or a value with a control character other
+     *                         than a tab, the framing fields say nothing one can rely on
+     *                         (see framing()), a Content-Length above 0 stands in front of
+     *                         a body that is empty, or a 1xx, 204, 205 or 304 has a
+     *                         Content-Length its status rules out or a body that is not
+     *                         empty (or of unknown size)
      *
      * @return array{status: string, code: int, headers: array<int|string, array<string>>, body: StreamInterface, length: ?int}
      */
@@ -1380,6 +1380,11 @@ final class Router implements RouterInterface
     }
 
     /**
+     * Sends what prepare() read: the header lines, then the status line (last, see below),
+     * then the body in chunks — held to its Content-Length and to 'emitIdleTimeout'. What
+     * fails here fails after the headers went out: nothing can be answered any more, run()
+     * only reports it.
+     *
      * @param array{status: string, code: int, headers: array<int|string, array<string>>, body: StreamInterface, length: ?int} $prepared
      */
     private function transmit(array $prepared, bool $withBody): void

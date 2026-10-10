@@ -75,7 +75,6 @@ from SemVer by the owner's decision of 2026-10-10. See "Upgrading from
   answers 500 and the `error` hook gets the `RouterException`, `emit()` throws it. So is a
   status code outside 100 to 599 (RFC 9110, 15): Nyholm's objects refuse one, the PSR-7
   objects of other makes may not, and a 99 or a 600 went out as a status line.
-
 - `run()` and `emit()` check every header line before anything is sent: a name that is no
   token of RFC 9110 and a value with a control character other than a tab are refused with
   a `RouterException` (`run()` answers 500, `emit()` throws). Such a line — from a PSR-7
@@ -213,7 +212,6 @@ from SemVer by the owner's decision of 2026-10-10. See "Upgrading from
   `array<string|object>` since 2.1.1 (it said `array<int, string|object>` before, and 2.1.1
   did not mention it): string keys are kept as the application gave them. Code that hands
   it on as a `list` under PHPStan sees the wider type.
-
 - `run()` and `emit()` wait for the next byte of a body that gives `''` before its end, and
   say so when a response body does not arrive whole. Up to 2.1.1 the emitter stopped
   without a word at the third empty read in a row — PSR-7 gives `''` while the next bytes
@@ -233,13 +231,11 @@ from SemVer by the owner's decision of 2026-10-10. See "Upgrading from
   (see "Security"). A body longer than its `Content-Length` went out whole — a kept-alive
   client read the rest as the start of the next response; it is sent up to the length now,
   never beyond, and ends the same way.
-
 - `basePath` and `routesFile` in the config take a string (or `null` for their default;
   `basePath` also `false`, what `getenv()` gives without the variable, as `baseUrl` does);
   another type is refused with a `RouterException` when the router is built. `basePath`
   was cast (`true` became `'1'`, an array `'Array'` with a warning), a `routesFile` that is
   no string failed only when the table was built, with a `TypeError` of PHP.
-
 - Four messages of a `RouterException` no longer name what the application wrote — they
   are static, the name is in `getDebugMessage()` as for the other refusals of 2.2.0:
   `Placeholder is used twice in one route pattern` (debug `{id} in /a/{id}/b/{id}`),
@@ -247,7 +243,6 @@ from SemVer by the owner's decision of 2026-10-10. See "Upgrading from
   fit the pattern of the route: the address would not lead back to it` (debug the route's
   name and the address it would have been) and `Controller requires constructor
   parameters. …` (debug the class).
-
 - `Response::tooManyRequests()` refuses a negative number of seconds with a
   `RouterException`: `-1` went out as `Retry-After: -1`, no delay a client can wait for.
 
@@ -298,8 +293,9 @@ from SemVer by the owner's decision of 2026-10-10. See "Upgrading from
 - `RouteMatch::$path` (and the README) names the dot segment among the paths that come as
   they were; the private helpers of `Router` that build the table, require the routes file
   and set up the URL generator, `RouteDispatcher::lookup()`, `resolveMiddleware()`,
-  `RfcResponder::formatError()` and its type URI, and `FileStream::seek()`, `read()` and
-  `getContents()` say why they do what they do.
+  `RfcResponder::formatError()` and its type URI, `FileStream::seek()`, `read()` and
+  `getContents()`, the part of `Router` that sends a prepared response and the four methods
+  of `JsonResponder` say why they do what they do.
 
 ### Development
 - CI pins its actions to a commit and its container image to a digest (the comment names

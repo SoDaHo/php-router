@@ -1286,6 +1286,7 @@ class RouterConfigTest extends TestCase
     }
 }
 
+/** A controller for the routes files of these tests: an answer, a parameter, an exception. */
 final class RouterConfigController
 {
     public function root(): \Psr\Http\Message\ResponseInterface
