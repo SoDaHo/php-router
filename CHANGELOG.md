@@ -11,7 +11,7 @@ Changes behaviour that 2.1.1 documented.
 - A redirect whose value makes a `.` or `..` path segment is a 500; it was sent.
 - `url()` refuses a `.` or `..` segment in the whole address, base path included; it checked the route's part only.
 - `new RedirectHandler()` refuses a control character but tab, a placeholder not `{name}` or in scheme or host.
-- `RedirectHandler::handle()` refuses a placeholder without value and parameters that are no array of scalars (500).
+- `RedirectHandler::handle()` refuses a placeholder without value and params not an array of finite scalars (500).
 - `run()`/`emit()` refuse a protocol version that is no version and a status code outside 100–599.
 - `run()`/`emit()` refuse a header name that is no token and a header value with a control character other than tab.
 - `run()`/`emit()` refuse `Transfer-Encoding` and a `Content-Length` not one value of at most 18 significant digits.
@@ -25,7 +25,7 @@ Changes behaviour that 2.1.1 documented.
 - A middleware key given a second time throws `RouterException`; the second entry replaced the first.
 - A container entry for middleware that is no `MiddlewareInterface` is a 500; the class was built with its defaults.
 - A container entry for a controller that is no object of the named class is a 500; any object was called.
-- Two routes of different patterns under one name throw `DuplicateRouteException` when the table is built.
+- One name on two patterns: `DuplicateRouteException` when the table is built and in `new UrlGenerator()`.
 - With `implicitHead`, a static GET route wins over a dynamic HEAD route.
 - Mode `strict`: `get('')` in a group registers the group's own address (`/api`); it registered `/api/`.
 - `Response::redirect()`, redirect routes, `RedirectHandler` take 301, 302, 303, 307, 308; they took any (3xx) status.
