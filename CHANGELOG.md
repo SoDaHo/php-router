@@ -59,6 +59,12 @@
   under the length of the other one — a corrupt download.
 
 ### Changed
+- In the trailing slash mode `strict`, `get('')` inside a group registers the group's own
+  address: `/api` in `group('/api', …)`, while `get('/')` stays `/api/`. Up to 2.1.1 both
+  registered `/api/` (the second was a duplicate), and `/api` could not be registered in
+  the group at all. **A route written as `get('')` in a group moves from `/api/` to `/api`**
+  — write `get('/')` to keep `/api/`. Outside a group and in the mode `ignore` nothing
+  changes.
 - `Response::redirect()` refuses a status that is no 3xx status with a `RouterException`
   (`Redirect status must be a 3xx status`), as redirect routes do since 2.1.1: a `Location`
   with a 200 is no redirect — the client shows the empty body. 2.0.0 promised a 3xx status

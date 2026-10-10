@@ -284,10 +284,10 @@ $r->group('/api', function (RouteCollector $r) {
 // → /api/v1/users
 ```
 
-In the trailing slash mode `strict` (the default), a route inside a group is written
-behind the prefix: `get('')` and `get('/')` in `group('/api', …)` both register `/api/`
-(the second one is a duplicate), and the address `/api` itself cannot be registered in
-the group. Register it outside: `$r->get('/api', $handler)`.
+In the trailing slash mode `strict` (the default), `/api` and `/api/` are two addresses:
+inside `group('/api', …)`, `get('')` registers the group's own address `/api` and
+`get('/')` registers `/api/`. (Up to 2.1.1 both registered `/api/`.) In the mode `ignore`
+both are `/api`.
 
 ## Route Attributes
 
