@@ -1123,6 +1123,10 @@ final class Router implements RouterInterface
      *                         no byte for 'emitIdleTimeout' seconds before its end, ends
      *                         short of its Content-Length, or goes beyond it (what goes
      *                         beyond is not sent)
+     * @throws \Throwable What a getter of the response or of its body throws (the status,
+     *                    the headers, the size of the body — asked unless $withBody is
+     *                    false), as it is; only the body's readability is said as a
+     *                    RouterException. run() answers 500 for it
      */
     public function emit(ResponseInterface $response, bool $withBody = true): void
     {

@@ -418,7 +418,9 @@ look at:
   `emitIdleTimeout` seconds (30), ends short of its `Content-Length` (also without a byte),
   or is longer than it — sent up to it, not beyond (`run()` reports it instead). 2.1.1
   stopped silently at the third empty read in a row; a body that pauses longer than 30
-  seconds needs a higher `emitIdleTimeout`.
+  seconds needs a higher `emitIdleTimeout`. Before anything is sent, `emit()` and `run()`
+  ask the body for its size now (unless for `HEAD`): a stream whose `getSize()` throws
+  fails `emit()` with that exception, `run()` answers 500.
 - **The answer to `HEAD` through `emit()`** needs `withBody: false`
   (`$router->emit($response, withBody: $request->getMethod() !== 'HEAD')`): it keeps the
   `Content-Length` of the `GET` with an empty body, which `emit($response)` refuses now
