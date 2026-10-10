@@ -560,10 +560,10 @@ final class RouteDispatcher implements RequestHandlerInterface
 
     /**
      * Whether handle() returned this response as the answer to a request that was HEAD at
-     * any step on its way in, its body cut (implicitHead): it keeps the Content-Length of
-     * the GET and goes out without a body — with withBody false. Router::run() asks this,
-     * because the method the request came in with does not say it when a middleware passed
-     * it on as HEAD.
+     * any step on its way in, its body cut (implicitHead): it keeps the response's headers,
+     * including a Content-Length where there is one, and goes out without a body — with
+     * withBody false. Router::run() asks this, because the method the request came in with
+     * does not say it when a middleware passed it on as HEAD.
      *
      * @internal Used by Router::run()
      */

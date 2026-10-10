@@ -753,10 +753,11 @@ final class Router implements RouterInterface
         // handle() does not throw: what goes wrong is a 500 already
         $response = $this->handle($request);
 
-        // An answer to HEAD goes out without its body, and keeps the GET's Content-Length —
-        // also when the request came in as a POST that a middleware passed on as HEAD: the
-        // dispatcher cut that answer's body (implicitHead), and only it can say so. The
-        // dispatcher is null where the routes could not be loaded: no middleware ran then.
+        // An answer to HEAD goes out without its body, and keeps its headers, including a
+        // Content-Length where it has one — also when the request came in as a POST that a
+        // middleware passed on as HEAD: the dispatcher cut that answer's body (implicitHead),
+        // and only it can say so. The dispatcher is null where the routes could not be
+        // loaded: no middleware ran then.
         $withBody = $request->getMethod() !== 'HEAD' && $this->dispatcher?->answersHead($response) !== true;
 
         // Once output has started, the response is not even looked at
