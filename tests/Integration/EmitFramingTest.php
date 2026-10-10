@@ -129,6 +129,16 @@ class EmitFramingTest extends TestCase
         $this->assertSame(['abcdef', null], $this->emit(new Psr7Response(200, ['Content-Length' => '0006'], 'abcdef')));
     }
 
+    /**
+     * Up to 18 significant digits: zeros in front do not count (19 digits that are a 6), the
+     * 19th significant one is refused (see framingThatSaysNothingToRelyOn()).
+     */
+    public function testLengthCountsItsSignificantDigits(): void
+    {
+        $this->assertSame(['abcdef', null], $this->emit(new Psr7Response(200, ['Content-Length' => '0000000000000000006'], 'abcdef')));
+        $this->assertSame(['', null], $this->emit(new Psr7Response(200, ['Content-Length' => '999999999999999999'], ''), withBody: false));
+    }
+
     public function testRunAnswersA500ForAResponseWhoseFramingSaysNothingToRelyOn(): void
     {
         foreach ([[['Content-Length' => ['3', '5']], self::LENGTH_REFUSED], [['Transfer-Encoding' => ['chunked']], self::CODING_REFUSED]] as [$fields, $message]) {

@@ -1343,7 +1343,8 @@ final class Router implements RouterInterface
      * @param array<int|string, array<string>> $headers
      *
      * @throws RouterException If the response has a Transfer-Encoding, or a Content-Length
-     *                         that is not exactly one value of digits (up to 18 of them)
+     *                         that is not exactly one value of digits (up to 18 significant
+     *                         ones: zeros in front do not count)
      */
     private static function framing(array $headers): ?int
     {
@@ -1370,8 +1371,9 @@ final class Router implements RouterInterface
             return null;
         }
 
-        // Digits only, one value — and no more than PHP counts to: 19 digits and more would
-        // be cut to PHP_INT_MAX
+        // Digits only, one value — and no more than PHP surely counts to: up to 18 significant
+        // digits (zeros in front do not count, '0000000000000000006' is 6); with 19 and more,
+        // (int) may cut the value to PHP_INT_MAX
         if (count($lengths) !== 1 || preg_match('/^\d+$/D', $lengths[0]) !== 1 || strlen(ltrim($lengths[0], '0')) > 18) {
             throw new RouterException(
                 'Response Content-Length must be exactly one value of digits',

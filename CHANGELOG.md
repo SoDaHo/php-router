@@ -85,13 +85,13 @@ from SemVer by the owner's decision of 2026-10-10. See "Upgrading from
 - `run()` and `emit()` refuse framing fields that say nothing one can rely on, before
   anything is sent: a `Content-Length` that is not exactly one value of digits (`abc`,
   `3, 3`, two fields `3` and `5`, one under two spellings of its name, a sign, a blank, 19
-  digits or more) and any `Transfer-Encoding` of the response's own — the emitter applies
-  no transfer coding, and one next to a `Content-Length` is two framings a sender must not
-  combine (RFC 9112, 6). Such a length was treated as no length and sent as it was, with a
-  body of any length behind it, and `Transfer-Encoding: chunked` went out in front of raw
-  bytes: a kept-alive client or a proxy could read the rest as the next response. A
-  `Content-Length` above 0 in front of a body that is empty is refused as well (see
-  "Changed").
+  significant digits or more — zeros in front do not count) and any `Transfer-Encoding` of
+  the response's own — the emitter applies no transfer coding, and one next to a
+  `Content-Length` is two framings a sender must not combine (RFC 9112, 6). Such a length
+  was treated as no length and sent as it was, with a body of any length behind it, and
+  `Transfer-Encoding: chunked` went out in front of raw bytes: a kept-alive client or a
+  proxy could read the rest as the next response. A `Content-Length` above 0 in front of a
+  body that is empty is refused as well (see "Changed").
 - A 1xx, 204, 205 or 304 goes out without content. The emitter read and sent their bodies
   all the same (a 304 with `abc` sent `abc`) — bytes a kept-alive client reads as the
   start of the next response. Such a body is not read now, not even rewound: one whose
