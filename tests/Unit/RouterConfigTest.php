@@ -1046,6 +1046,69 @@ class RouterConfigTest extends TestCase
         }
     }
 
+    /**
+     * @return array<string, array{0: string}>
+     */
+    public static function baseUrlsThatAreNoAddressOfAHost(): array
+    {
+        return [
+            // Up to 2.1.1 put in front of every address as they are
+            'no scheme' => ['example.com'],
+            'scheme-relative' => ['//evil.example'],
+            'another scheme' => ['javascript:alert(1)'],
+            'ftp' => ['ftp://files.example'],
+            'no host' => ['https://'],
+            'no host, a path' => ['https:///path'],
+            'a query' => ['https://app.example?x=1'],
+            'a query behind a path' => ['https://app.example/base?x=1'],
+            'a fragment' => ['https://app.example/#top'],
+        ];
+    }
+
+    /**
+     * An absolute address begins with the base URL: one that is no http(s) address of a
+     * host made every address relative ('example.com/users/5'), another host's or a script
+     * ('javascript:alert(1)/users/5'), or put the path behind a query or a fragment
+     */
+    #[DataProvider('baseUrlsThatAreNoAddressOfAHost')]
+    public function testBaseUrlThatIsNoAddressOfAHostIsRefused(string $value): void
+    {
+        $_ENV['APP_URL'] = $value;
+        try {
+            Router::fromEnv();
+            $this->fail('Accepted through APP_URL');
+        } catch (RouterException $e) {
+            $this->assertSame('Environment variable APP_URL must be an address of a host: http:// or https://, the host, a path at most — no query or fragment', $e->getMessage());
+            $this->assertSame($value, $e->getDebugMessage());
+        } finally {
+            unset($_ENV['APP_URL']);
+        }
+
+        foreach ([
+            'config' => fn () => Router::create(['baseUrl' => $value]),
+            'setBaseUrl' => fn () => Router::create()->setBaseUrl($value),
+        ] as $way => $create) {
+            try {
+                $create();
+                $this->fail('Accepted through ' . $way);
+            } catch (RouterException $e) {
+                $this->assertSame("Config 'baseUrl' must be an address of a host: http:// or https://, the host, a path at most — no query or fragment", $e->getMessage(), $way);
+            }
+        }
+    }
+
+    public function testBaseUrlOfAHostIsTaken(): void
+    {
+        foreach ([
+            'https://app.example' => 'https://app.example/users/5',
+            'HTTP://app.example:8080/' => 'HTTP://app.example:8080/users/5',
+            'https://app.example/base/' => 'https://app.example/base/users/5',
+            'https://[::1]:8443' => 'https://[::1]:8443/users/5',
+        ] as $baseUrl => $address) {
+            $this->assertSame($address, $this->router(['baseUrl' => $baseUrl])->absoluteUrl('users.show', ['id' => 5]), $baseUrl);
+        }
+    }
+
     // ==================== emitChunkSize ====================
 
     /**

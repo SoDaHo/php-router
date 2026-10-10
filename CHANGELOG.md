@@ -59,6 +59,12 @@
   under the length of the other one — a corrupt download.
 
 ### Changed
+- `baseUrl` (config, `setBaseUrl()`, `APP_URL` through `fromEnv()`) has to be an address of
+  a host: `http://` or `https://`, the host, a path at most. `example.com` made every
+  absolute address relative (`example.com/users/5`), `//evil.example` or
+  `javascript:alert(1)` an address elsewhere, and a query or fragment put the path behind
+  it; such a value is refused with a `RouterException` when it is given (the message names
+  `APP_URL` where it came from there).
 - With `implicitHead` (the default) a static GET route wins over a dynamic HEAD route, as
   a static route wins over a dynamic one for every method: `HEAD /users/me` is answered by
   `get('/users/me')` like the GET, no longer by `head('/users/{id}')` with `id` = `me`.

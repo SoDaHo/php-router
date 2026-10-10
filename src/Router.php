@@ -219,12 +219,14 @@ final class Router implements RouterInterface
      * The base URL as the router keeps it, null for none. Empty means none: null, '' and,
      * as in 1.x, false ('baseUrl' => getenv('APP_URL') without the variable), 0 and '0'.
      * Any other string is put in front of the address as it is (a slash at its end is
-     * dropped) — unless it has a control character or a blank, which no address has: a line
-     * break made every absolute address a Location header the response refuses. Anything
-     * else is refused.
+     * dropped) — so it has to be what an address can begin with: http or https, '://' and
+     * a host, then a path at most. No control character or blank (a line break made every
+     * absolute address a Location header the response refuses), no query or fragment (the
+     * path would land behind them), not 'example.com' (that made every address relative,
+     * 'example.com/users/5') and no other scheme. Anything else is refused.
      *
-     * @throws RouterException If the value is neither a string nor empty, or has a control
-     *                         character or a blank
+     * @throws RouterException If the value is neither a string nor empty, has a control
+     *                         character or a blank, or is no http(s) address of a host
      */
     private static function baseUrl(mixed $value, string $what = "Config 'baseUrl'"): ?string
     {
@@ -240,6 +242,13 @@ final class Router implements RouterInterface
             throw new RouterException(
                 $what . ' must not contain a control character or a blank',
                 debugMessage: (string) json_encode($value, JSON_INVALID_UTF8_SUBSTITUTE),
+            );
+        }
+
+        if (preg_match('~^https?://[^/?#]+(?:/[^?#]*)?\z~i', $value) !== 1) {
+            throw new RouterException(
+                $what . ' must be an address of a host: http:// or https://, the host, a path at most — no query or fragment',
+                debugMessage: $value,
             );
         }
 
