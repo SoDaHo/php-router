@@ -91,7 +91,7 @@ $r->head('/users', $handler);
 // Multiple methods
 $r->match(['GET', 'POST'], '/search', $handler);
 
-// All methods
+// The seven common methods: GET, POST, PUT, PATCH, DELETE, OPTIONS, HEAD
 $r->any('/webhook', $handler);
 ```
 

@@ -233,6 +233,28 @@ class RouteCollectorTest extends TestCase
         $this->assertContains('DELETE', $route->methods);
         $this->assertContains('OPTIONS', $route->methods);
         $this->assertContains('HEAD', $route->methods);
+        $this->assertCount(7, $route->methods);
+    }
+
+    /**
+     * any() is the seven common methods, not every method there is: another one is a 405
+     * that names the seven (match() takes any method that is a token)
+     */
+    public function testAnyIsTheSevenCommonMethodsAndNoOthers(): void
+    {
+        $this->collector->any('/wildcard', fn () => \Sodaho\Router\Response::text('any'));
+        $dispatcher = new \Sodaho\Router\RouteDispatcher($this->collector->getData());
+
+        foreach (['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'] as $method) {
+            $this->assertSame(200, $dispatcher->handle(new \Nyholm\Psr7\ServerRequest($method, '/wildcard'))->getStatusCode(), $method);
+        }
+
+        foreach (['PROPFIND', 'TRACE', 'CONNECT'] as $method) {
+            $response = $dispatcher->handle(new \Nyholm\Psr7\ServerRequest($method, '/wildcard'));
+
+            $this->assertSame(405, $response->getStatusCode(), $method);
+            $this->assertSame('GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS', $response->getHeaderLine('Allow'), $method);
+        }
     }
 
     public function testRedirectRoute(): void

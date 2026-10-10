@@ -388,7 +388,9 @@ final class RouteCollector
     }
 
     /**
-     * Register route for all HTTP methods.
+     * Register a route for the seven common methods: GET, POST, PUT, PATCH, DELETE, OPTIONS
+     * and HEAD — not for every method there is (TRACE, CONNECT, PROPFIND and the like get a
+     * 405). Name the others with match().
      *
      * @param string $pattern URL pattern
      * @param mixed $handler Controller class, callable, or RequestHandler

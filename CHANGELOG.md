@@ -180,6 +180,9 @@ application.
   work grow with the square of the path's segments — a path of some 800 segments reaches
   PCRE's default backtrack limit and is answered with 500 (reported, never "no match"); a
   test pins it.
+- README and the docblock of `any()` say what it is: the seven common methods (GET, POST,
+  PUT, PATCH, DELETE, OPTIONS, HEAD), not "all methods" — TRACE, CONNECT, PROPFIND and the
+  like get a 405, as they always did; a test pins it. Other methods go through `match()`.
 - README: a checklist for an authentication server (an `error` hook, rewriting middleware
   before a guard, identities under class-name keys, absolute links from `absoluteUrl()`
   because `run()` takes scheme and host from the client, CORS flags at 405, side effects of
