@@ -70,6 +70,15 @@ final class Dispatcher
     }
 
     /**
+     * The static route (no placeholder) of a method for this URI, null for none — one look
+     * into the table, without a pass over the dynamic routes.
+     */
+    public function staticRoute(string $method, string $uri): ?Route
+    {
+        return $this->staticRoutes[$method][$uri] ?? null;
+    }
+
+    /**
      * @return array{0: int, 1: Route, 2: array<string, string>, 3: array<string, string>}|null
      */
     private function dispatchDynamic(string $method, string $uri): ?array

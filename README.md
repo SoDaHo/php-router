@@ -106,6 +106,11 @@ give them a `head()` route of their own: link scanners and mail clients ask with
 response to a HEAD request leaves `handle()` with a body, whoever wrote it; that includes
 a request a middleware turned into HEAD, or out of it, on its way in.
 
+A HEAD route of its own (`$r->head()`) answers HEAD for its path — except where a static
+GET route takes the path and the HEAD route is a dynamic one: a static route wins over a
+dynamic one for every method, so `HEAD /users/me` is answered like `GET /users/me` by the
+static GET route, not by `head('/users/{id}')` with `id` = `me`.
+
 With `'implicitHead' => false` HEAD needs a route of its own (`$r->head()`), a GET route
 answers 405 as it did in 1.x, and `handle()` leaves bodies alone (`run()` never sends one
 for a HEAD request, either way).

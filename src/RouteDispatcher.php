@@ -214,6 +214,14 @@ final class RouteDispatcher implements RequestHandlerInterface
             : $request->withoutAttribute(Route::class);
     }
 
+    /**
+     * The one lookup behind match() and every request: a path that is the address of no
+     * route (hasNoRoute()) is refused before anything else, then the base path, then the
+     * table. With implicitHead a HEAD goes to the GET route of the path where it has no
+     * route of its own — or only a dynamic one where a static GET route takes the path, as
+     * a static route wins over a dynamic one for every method. Read once: the path that
+     * was checked is the path that is looked up.
+     */
     private function lookup(ServerRequestInterface $request): RouteMatch
     {
         $method = $request->getMethod();
@@ -243,6 +251,16 @@ final class RouteDispatcher implements RequestHandlerInterface
             $asGet = $this->dispatcher->dispatch('GET', $path);
             if ($asGet[0] === Dispatcher::FOUND) {
                 $result = $asGet;
+                $viaGet = true;
+            }
+        } elseif ($result[0] === Dispatcher::FOUND && $method === 'HEAD' && $this->implicitHead
+            && str_contains($this->ensureRoute($result[1])->pattern, '{')) {
+            // A static route wins over a dynamic one — for HEAD as for GET: a HEAD to
+            // /users/me is answered like the GET to it, by the static GET route, not by a
+            // dynamic HEAD route /users/{id} with id 'me'
+            $static = $this->dispatcher->staticRoute('GET', $path);
+            if ($static !== null) {
+                $result = [Dispatcher::FOUND, $static, [], []];
                 $viaGet = true;
             }
         }

@@ -43,6 +43,11 @@
   answers 500 and the `error` hook gets the `RouterException`, `emit()` throws it.
 
 ### Changed
+- With `implicitHead` (the default) a static GET route wins over a dynamic HEAD route, as
+  a static route wins over a dynamic one for every method: `HEAD /users/me` is answered by
+  `get('/users/me')` like the GET, no longer by `head('/users/{id}')` with `id` = `me`.
+  A HEAD route still answers where no static GET route takes its path; without
+  `implicitHead` nothing changes. New: `Dispatcher::staticRoute()`.
 - Two routes with the same name are refused with a `DuplicateRouteException` when the route
   table is built (and by `new UrlGenerator()` for a list of `Route` objects): the first
   request is answered with 500 and reported, `url()` and `match()` throw. `url()` gave the
