@@ -138,7 +138,10 @@ application.
   (`https://:443`, `https://[::1`, `https://@`), a port that is no number or outside
   1–65535, an IPv4 address the parser writes otherwise (`https://127.1`). Such a value is
   refused with a `RouterException` when it is given (the message names `APP_URL` where it
-  came from there). A `UrlGenerator` built by hand still takes its base URL unchecked.
+  came from there). The rule lives in `UrlGenerator::setBaseUrl()`, which the router
+  delegates to: a generator built by hand refuses the same values (it took any string, and
+  `javascript:alert(1)//` made every absolute address a script); `null` and `''` mean none
+  there.
 - `RfcResponder`: the details of an error no longer replace `type`, `title` or `status` —
   RFC 9457 gives them a meaning of their own, and `Response::error('Bad', 400, details:
   ['status' => 200])` said in a 400 that the request went well. `type` comes from the error
@@ -262,7 +265,8 @@ What to look at:
 - **`basePath` and `routesFile`** in the config take a string or `null`; `true`, a number
   or an array are refused when the router is built.
 - **`baseUrl` / `APP_URL`** has to be `http(s)://host[:port][/path]`, the host written as a
-  browser reads it, without user information or backslash.
+  browser reads it, without user information or backslash — also for
+  `UrlGenerator::setBaseUrl()` on a generator built by hand.
 - **`RfcResponder`**: `type`, `title` and `status` in the details are dropped.
 - **`emit()`** can throw after the headers went out: when the body stalls or ends short of
   its `Content-Length` (`run()` reports it instead).

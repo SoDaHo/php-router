@@ -71,13 +71,84 @@ final class UrlGenerator
     }
 
     /**
-     * Set the base URL for absolute URL generation.
+     * Set the base URL for absolute URL generation: an http(s) address of a host (see
+     * checkBaseUrl()), or null or '' for none. It is put in front of every absolute address
+     * as it is — 'javascript:alert(1)//' made every one a script.
      *
      * @param string|null $baseUrl Base URL (e.g., 'https://example.com')
+     *
+     * @throws RouterException When the value is no http(s) address of a host
      */
     public function setBaseUrl(?string $baseUrl): void
     {
-        $this->baseUrl = $baseUrl !== null ? rtrim($baseUrl, '/') : null;
+        if ($baseUrl === null || $baseUrl === '') {
+            $this->baseUrl = null;
+
+            return;
+        }
+
+        self::checkBaseUrl($baseUrl);
+        $this->baseUrl = rtrim($baseUrl, '/');
+    }
+
+    /**
+     * What a base URL has to be, whoever gives it (the router's config, setBaseUrl(),
+     * APP_URL, a generator built by hand): what an address can begin with — http or https,
+     * '://' and a host, then a port and a path at most. No control character or blank (a
+     * line break made every absolute address a Location header the response refuses), no
+     * query or fragment (the path would land behind them), not 'example.com' (every address
+     * relative) and no other scheme. And read as a browser reads it (WHATWG URL), it names
+     * the host it is written with: no user information, no backslash
+     * ('https://evil\@trusted.example' is the host 'evil' for a browser), no authority that
+     * is no host ('https://:443', 'https://[::1').
+     *
+     * @internal Router asks it with the name of where the value came from ($what)
+     *
+     * @throws RouterException When the value is no http(s) address of a host
+     */
+    public static function checkBaseUrl(string $value, string $what = 'Base URL'): void
+    {
+        if (preg_match('/[\x00-\x20\x7F]/', $value) === 1) {
+            throw new RouterException(
+                $what . ' must not contain a control character or a blank',
+                debugMessage: (string) json_encode($value, JSON_INVALID_UTF8_SUBSTITUTE),
+            );
+        }
+
+        if (!self::isAddressOfAHost($value)) {
+            throw new RouterException(
+                $what . ' must be an address of a host: http:// or https://, the host, a port and a path at most — no user information, query or fragment',
+                debugMessage: $value,
+            );
+        }
+    }
+
+    /**
+     * Whether a base URL is an http(s) address of a host, as written and as a browser reads
+     * it: http or https, '://', an authority without user information or backslash, a path
+     * at most — and the WHATWG parser of PHP finds in it the host the text names (in its
+     * ASCII or its Unicode form), on a port from 1 to 65535 if one is given.
+     */
+    private static function isAddressOfAHost(string $value): bool
+    {
+        if (preg_match('~^https?://([^/?#\\\\@]+)(?:/[^?#\\\\]*)?\z~i', $value, $written) !== 1) {
+            return false;
+        }
+
+        $url = \Uri\WhatWg\Url::parse($value);
+        if ($url === null) {
+            return false;
+        }
+
+        $port = $url->getPort();
+        if ($port !== null && ($port < 1 || $port > 65535)) {
+            return false;
+        }
+
+        // The host as written: the authority without a port (an IPv6 host keeps its brackets)
+        $host = (string) preg_replace('~:\d*\z~', '', $written[1]);
+
+        return $url->getAsciiHost() === strtolower($host) || $url->getUnicodeHost() === $host;
     }
 
     /**

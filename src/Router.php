@@ -242,49 +242,11 @@ final class Router implements RouterInterface
             throw new RouterException($what . ' must be a string, or empty for none');
         }
 
-        if (preg_match('/[\x00-\x20\x7F]/', $value) === 1) {
-            throw new RouterException(
-                $what . ' must not contain a control character or a blank',
-                debugMessage: (string) json_encode($value, JSON_INVALID_UTF8_SUBSTITUTE),
-            );
-        }
-
-        if (!self::isAddressOfAHost($value)) {
-            throw new RouterException(
-                $what . ' must be an address of a host: http:// or https://, the host, a port and a path at most — no user information, query or fragment',
-                debugMessage: $value,
-            );
-        }
+        // The rule belongs to the URL generator, which puts the value in front of every
+        // address — a generator built by hand gets it as well (UrlGenerator::setBaseUrl())
+        UrlGenerator::checkBaseUrl($value, $what);
 
         return $value;
-    }
-
-    /**
-     * Whether a base URL is an http(s) address of a host, as written and as a browser reads
-     * it: http or https, '://', an authority without user information or backslash, a path
-     * at most — and the WHATWG parser of PHP finds in it the host the text names (in its
-     * ASCII or its Unicode form), on a port from 1 to 65535 if one is given.
-     */
-    private static function isAddressOfAHost(string $value): bool
-    {
-        if (preg_match('~^https?://([^/?#\\\\@]+)(?:/[^?#\\\\]*)?\z~i', $value, $written) !== 1) {
-            return false;
-        }
-
-        $url = \Uri\WhatWg\Url::parse($value);
-        if ($url === null) {
-            return false;
-        }
-
-        $port = $url->getPort();
-        if ($port !== null && ($port < 1 || $port > 65535)) {
-            return false;
-        }
-
-        // The host as written: the authority without a port (an IPv6 host keeps its brackets)
-        $host = (string) preg_replace('~:\d*\z~', '', $written[1]);
-
-        return $url->getAsciiHost() === strtolower($host) || $url->getUnicodeHost() === $host;
     }
 
     /**
