@@ -488,7 +488,12 @@ path changed since. Only a `RouteMatch` this router made is taken over.
 
 At `METHOD_NOT_ALLOWED` — which is what a CORS preflight is for a path without an OPTIONS
 route — `route` is a route registered for that path: the GET route if there is one,
-otherwise that of the first allowed method. Tell the cases apart by `status`.
+otherwise that of the first allowed method. Tell the cases apart by `status`. Its attributes
+are those of that route, not of the method the preflight asks about: a `cors` flag on
+`GET /account` is no permission for `POST /account`. A preflight that reads the flag from
+`$match->route` and answers with all of `allowedMethods()` frees every method of the path —
+look up the route of the method in `Access-Control-Request-Method` instead
+(`$router->match($request->withMethod($wanted))`).
 
 ## Named Routes & URL Generation
 
@@ -528,7 +533,8 @@ in front of `/users/{id}` with `id => 'me'`). A slash that the placeholder takes
 `null` is no value. And the address as a whole has no `.` or `..` segment, no path that
 begins with `//` below the base path, begins with a single `/` and contains no backslash,
 whatever route pattern and base path are made of. Parameters that are not placeholders of
-the route are left out: `url()` writes no query string (append one yourself, e.g. with
+the route are left out without a word — a misspelled key is not noticed: `url()` writes no
+query string (append one yourself, e.g. with
 `http_build_query()`):
 
 ```php
@@ -1478,6 +1484,34 @@ APP_DEBUG=false
 Debug is off unless you switch it on: with `'debug' => true`, or with `APP_DEBUG` through
 `Router::fromEnv()`. To keep it off regardless of the environment, pass `'debug' => false`
 — a key you pass always wins.
+
+### Checklist for an Authentication Server
+
+- **Register an `error` hook.** Without one, an exception becomes a 500 and leaves no trace
+  (see [Hooks](#hooks-logging)).
+- **Rewrite before you guard.** A middleware for every request that changes method or path
+  (a method override, a stripped prefix) has the route looked up again for what lies
+  further in — the middleware before it saw the route of the request as it came. Add a
+  rewriting middleware first (outermost), so that a guard behind it decides about the
+  route that runs.
+- **Keep identities under class-name keys** (`Identity::class`). A route parameter never
+  replaces an attribute that is set (the request ends in a 500), and no placeholder can be
+  named like a class.
+- **Build absolute links from `absoluteUrl()`** with a configured `baseUrl` (`APP_URL`).
+  `run()` builds the request's URI with scheme and host from what the client sent (`Host`,
+  `X-Forwarded-Proto`); a reset or login link made from `$request->getUri()` points where
+  the client wants.
+- **A CORS flag at 405 belongs to another route** — see [Looking a Route Up](#looking-a-route-up).
+- **Keep GET handlers free of side effects** or give them a `head()` route: HEAD runs the
+  GET route (`implicitHead`), and link scanners ask with HEAD. Token-consuming links belong
+  behind a POST.
+- **Take a `{path:any}` value for a file only after `realpath()` and a prefix check** — the
+  router keeps `..`, `.` and empty segments out, not every name a file system understands.
+- **Limit the length of a request line in the web server.** The router has no limit of its
+  own: nginx `large_client_header_buffers` (8k per line by default), Apache
+  `LimitRequestLine` (8190).
+- **Route names in exceptions:** `RouteNotFoundException::getDebugMessage()` lists every
+  route name — keep debug messages out of responses.
 
 ## Testing
 

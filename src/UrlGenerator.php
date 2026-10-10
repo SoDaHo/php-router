@@ -111,7 +111,9 @@ final class UrlGenerator
     }
 
     /**
-     * Generate a relative URL for a named route.
+     * Generate a relative URL for a named route. Parameters that are no placeholders of the
+     * route are left out without a word — no query string, and a misspelled key is not
+     * noticed.
      *
      * @param string $name Route name
      * @param array<string, string|int|float|bool> $params Route parameters

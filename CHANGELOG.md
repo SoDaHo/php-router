@@ -114,6 +114,18 @@
   and a check the route relied on no longer ran. Numbered entries and keys of their own
   add up as before.
 
+### Fixed
+- README: a checklist for an authentication server (an `error` hook, rewriting middleware
+  before a guard, identities under class-name keys, absolute links from `absoluteUrl()`
+  because `run()` takes scheme and host from the client, CORS flags at 405, side effects of
+  GET handlers under HEAD, `{path:any}` and files, the length of a request line, route names
+  in debug messages); at `METHOD_NOT_ALLOWED` the route's attributes are those of another
+  method; `url()` leaves out parameters that are no placeholders without a word.
+- `RouteMatch::$path` names the dot segment among the paths that come as they were; the
+  private helpers of `Router` that build the table, require the routes file and set up the
+  URL generator, `RouteDispatcher::lookup()` and `resolveMiddleware()` say why they do what
+  they do.
+
 ## [2.1.1] - 2026-10-09
 
 ### Security

@@ -883,7 +883,13 @@ final class Router implements RouterInterface
     // ==================== Internal ====================
 
     /**
-     * @throws RouterException If no routes are loaded or routes file is invalid
+     * The route table, built at the first use — the first request, match(), url() — from
+     * the routes file and the configuration of that moment, then kept: what goes into it
+     * cannot change afterwards (assertNotInUse()). Where it cannot be built (no routes
+     * file, a route refused), nothing is kept, and the next use tries again.
+     *
+     * @throws RouterException If no routes are loaded or routes file is invalid, or a route
+     *                         is refused when the table is built
      */
     private function getDispatcher(): RouteDispatcher
     {
@@ -957,6 +963,11 @@ final class Router implements RouterInterface
         return $this->routes;
     }
 
+    /**
+     * The callable a routes file returns — or what requiring it threw, kept as the result:
+     * a file that declares a function or a class cannot be required a second time, so a
+     * failure is not retried by requiring it again but thrown again (loadRoutesFile()).
+     */
     private function requireRoutes(string $file): \Closure|\Throwable
     {
         try {
@@ -974,6 +985,11 @@ final class Router implements RouterInterface
             : new RouterException('Route file must return callable: return function(RouteCollector $r) { ... };');
     }
 
+    /**
+     * The URL generator, built once from the routes of the table and the configuration that
+     * went into it (base path, trailing slash mode, base URL) — so that url() writes the
+     * addresses the table answers. Kept only once it is set up completely.
+     */
     private function getUrlGenerator(): UrlGenerator
     {
         if ($this->urlGenerator === null) {
