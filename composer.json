@@ -1,6 +1,6 @@
 {
     "name": "sodaho/php-router",
-    "description": "Lightweight PHP Router for REST APIs and SPAs. Standardized JSON responses, middleware.",
+    "description": "PSR-7/PSR-15 router with route groups, middleware, named routes, JSON response helpers and a response emitter.",
     "type": "library",
     "license": "MIT",
     "keywords": ["router", "psr-7", "psr-11", "psr-15", "api", "rest", "middleware", "json", "php"],
