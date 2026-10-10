@@ -64,6 +64,19 @@ class EmitLongBodyTest extends TestCase
         $this->assertInstanceOf(RouterException::class, $thrown);
     }
 
+    public function testDataBehindALengthThatEndsWithAReadThrows(): void
+    {
+        // The first read ends exactly at the length; what the next one gives is beyond it —
+        // not one byte of it goes out
+        $body = str_repeat('a', 1024) . 'b';
+        [$sent, $thrown] = $this->emit(new Psr7Response(200, ['Content-Length' => '1024'], $body), ['emitChunkSize' => 1024]);
+
+        $this->assertSame(str_repeat('a', 1024), $sent);
+        $this->assertInstanceOf(RouterException::class, $thrown);
+        $this->assertSame('Response body is longer than its Content-Length', $thrown->getMessage());
+        $this->assertSame('1024 bytes sent, more followed', $thrown->getDebugMessage());
+    }
+
     public function testBodyOfItsLengthGoesOutWhole(): void
     {
         $this->assertSame(['abcdef', null], $this->emit(new Psr7Response(200, ['Content-Length' => '6'], 'abcdef')));

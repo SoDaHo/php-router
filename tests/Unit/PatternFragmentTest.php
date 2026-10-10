@@ -105,6 +105,8 @@ class PatternFragmentTest extends TestCase
             'verb spelled in a class behind a quoted bracket' => ['[\Q]\E(*ACCEPT)]+', '/x/](*', '/x/a'],
             // … and so is a ']' right behind '[', '\Q\E' or '\E' in front of it skipped
             'bracket behind an empty quote at the start of a class' => ['[\Q\E](?<n>x)]+', '/x/](n', '/x/a'],
+            'bracket behind an empty quote at the start of a negated class' => ['[^\Q\E](?<n>x)]+', '/x/ab', '/x/n'],
+            'bracket behind a lone \E at the start of a class' => ['[\E](?<n>x)]+', '/x/](n', '/x/a'],
             // Options that leave the reading as it is; x turned off as well (no route has it on)
             'other options' => ['(?i)[a-z]+', '/x/AB', '/x/1'],
             'extended mode turned off' => ['(?-x)a b', '/x/a b', '/x/ab'],
