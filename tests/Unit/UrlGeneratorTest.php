@@ -390,9 +390,7 @@ class UrlGeneratorTest extends TestCase
     public static function valuesThatWouldNameAHost(): array
     {
         return [
-            'slash in front' => ['/{path:any}', ['path' => '/evil.example/x'], '//evil.example/x'],
-            'two slashes in front' => ['/{path:any}', ['path' => '//evil.example/x'], '///evil.example/x'],
-            'a slash alone' => ['/{path:any}', ['path' => '/'], '//'],
+            // (A value of {path:any} that begins with a slash does not even fit: an empty segment)
             'empty value in front of a literal' => ['/{path:any}/edit', ['path' => ''], '//edit'],
             'empty value in front of another placeholder' => ['/{a:any}/{b}', ['a' => '', 'b' => 'evil.example'], '//evil.example'],
         ];
@@ -534,12 +532,27 @@ class UrlGeneratorTest extends TestCase
         $this->assertSame('/n/0/10/FALSE', $fine->url('r', ['id' => '0', 'x' => '10', 'flag' => 'FALSE']));
     }
 
-    public function testEmptySegmentsInsideTheAddressStay(): void
+    /**
+     * {path:any} takes no empty segment (a request with one has no such route): a value
+     * that begins with a slash, has two in a row or ends with two does not lead back. Up
+     * to 2.1.1 '/evil.example/x' failed only for the '//' in front of the address.
+     */
+    public function testValueWithAnEmptySegmentGivesNoAddress(): void
     {
-        $generator = new UrlGenerator([new Route(['GET'], '/files/{path:any}', 'handler', [], 'files')]);
+        $generator = new UrlGenerator([new Route(['GET'], '/{path:any}', 'handler', [], 'page')]);
 
-        $this->assertSame('/files/a//b', $generator->url('files', ['path' => 'a//b']));
-        $this->assertSame('/files//a', $generator->url('files', ['path' => '/a']));
+        foreach (['a//b', '/a', '/evil.example/x', '//evil.example/x', '/', 'a//'] as $value) {
+            try {
+                $generator->url('page', ['path' => $value]);
+                $this->fail('An address was generated for ' . $value);
+            } catch (RouterException $e) {
+                $this->assertSame('The parameters do not fit the pattern of route "page": the address would not lead back to it', $e->getMessage());
+                $this->assertSame('/' . $value, $e->getDebugMessage());
+            }
+        }
+
+        $this->assertSame('/a/b/', $generator->url('page', ['path' => 'a/b/']));
+        $this->assertSame('/', $generator->url('page', ['path' => '']));
     }
 
     /**

@@ -13,6 +13,14 @@
   where the attribute is `null`, and also for an attribute the request brought into
   `handle()`. `_route_params` and `RouteMatch::$params` stay complete; `match()` is not
   touched. See README, "Accessing Parameters".
+- `{path:any}` takes no empty segment: its value never begins with a slash and never holds
+  two in a row. `/files//etc/passwd` gave `/files/{path:any}` the value `/etc/passwd` — an
+  absolute path for every helper that takes one as such (`Path::makeAbsolute()` of
+  symfony/filesystem left the folder with it), past the dot-segment rule of 2.1.1. Such a
+  path no longer matches the route (404 where no other route takes it), and `url()` refuses
+  such a value (`a//b`, `/a`) as one that does not lead back. A slash at the end of the
+  value stays where the path ends with it (`/files/docs/` gives `docs/`), an empty value
+  as well. The built-in pattern is `(?:[^/]+(?:/[^/]+)*(?:/(?=\z))?)?` instead of `.*`.
 
 ### Changed
 - URL encoding can no longer be turned off. `'urlEncoding' => false` (or `0`, `'off'`,

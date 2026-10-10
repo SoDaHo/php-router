@@ -105,11 +105,19 @@ class RedirectTest extends TestCase
         $collector->redirect('/go/{path:any}', $target);
         $dispatcher = new RouteDispatcher($collector->getData());
 
-        foreach (['/go/evil.example', '/go/evil.example/x', '/go///evil.example', '/go//evil.example', '/go/https:evil.example', '/go/'] as $path) {
+        foreach (['/go/evil.example', '/go/evil.example/x', '/go/https:evil.example', '/go/'] as $path) {
             $location = $dispatcher->handle(new ServerRequest('GET', $path))->getHeaderLine('Location');
 
             $this->assertStringNotContainsString('evil.example/', $location, 'a slash of the value is %2F');
             $this->assertSchemeAndHost($location, $path, $scheme, $host);
+        }
+
+        // A value with an empty segment does not even reach the route: {path:any} takes none
+        foreach (['/go///evil.example', '/go//evil.example'] as $path) {
+            $response = $dispatcher->handle(new ServerRequest('GET', $path));
+
+            $this->assertSame(404, $response->getStatusCode(), $path);
+            $this->assertFalse($response->hasHeader('Location'), $path);
         }
     }
 

@@ -367,7 +367,6 @@ class EncodedSeparatorTest extends TestCase
         return [
             'several segments, each encoded on its own' => ['files', ['path' => 'my dir/b c.txt'], '/files/my%20dir/b%20c.txt', 'files: my dir/b c.txt'],
             'one segment' => ['files', ['path' => 'a b'], '/files/a%20b', 'files: a b'],
-            'empty segments' => ['files', ['path' => 'a//b'], '/files/a//b', 'files: a//b'],
             'own pattern that takes a slash' => ['pair', ['pair' => '1/2'], '/pairs/1/2', 'pair: 1/2'],
             'own pattern with alternatives' => ['side', ['side' => 'right/out'], '/sides/right/out', 'side: right/out'],
             'dots that are no segment of their own' => ['files', ['path' => '.env/a..b/...'], '/files/.env/a..b/...', 'files: .env/a..b/...'],
@@ -429,7 +428,11 @@ class EncodedSeparatorTest extends TestCase
             'value that is the current segment' => ['tag', ['tag' => '.'], $dots, '/tags/.'],
             // A segment that only pattern and value together make
             'empty value in front of a dot of the pattern' => ['end', ['a' => ''], sprintf($fit, 'end'), '/end/.'],
-            'slash in front of a dot of the pattern' => ['pre', ['p' => 'x/'], $dots, '/pre/x/.'],
+            // ({path:any} takes a slash at its end only where the path ends)
+            'slash in front of a dot of the pattern' => ['pre', ['p' => 'x/'], sprintf($fit, 'pre'), '/pre/x/.'],
+            // {path:any} takes no empty segment: a value with one does not lead back
+            'empty segment inside' => ['files', ['path' => 'a//b'], sprintf($fit, 'files'), '/files/a//b'],
+            'slash in front' => ['files', ['path' => '/etc/passwd'], sprintf($fit, 'files'), '/files//etc/passwd'],
             'dot in front of a dot of the pattern' => ['end', ['a' => '.'], $dots, '/end/..'],
         ];
     }
@@ -477,9 +480,21 @@ class EncodedSeparatorTest extends TestCase
 
         // strict: the slash at the end is part of the value, and arrives
         $strict = $this->router();
-        foreach (['a/' => '/files/a/', '' => '/files/', '/' => '/files//', 'a//' => '/files/a//'] as $value => $url) {
+        foreach (['a/' => '/files/a/', '' => '/files/'] as $value => $url) {
             $this->assertSame($url, $strict->url('files', ['path' => (string) $value]));
             $this->assertSame('files: ' . $value, $this->body($strict->handle(new ServerRequest('GET', $url))));
+        }
+
+        // … but not an empty segment ({path:any} takes none), in either mode
+        foreach (['/' => '/files//', 'a//' => '/files/a//'] as $value => $candidate) {
+            try {
+                $strict->url('files', ['path' => (string) $value]);
+                $this->fail('An address was generated');
+            } catch (RouterException $e) {
+                $this->assertSame($fit, $e->getMessage());
+                $this->assertSame($candidate, $e->getDebugMessage());
+            }
+            $this->assertSame(404, $strict->handle(new ServerRequest('GET', $candidate))->getStatusCode());
         }
 
         // ignore: the router drops the slashes at the end of the path before it looks the

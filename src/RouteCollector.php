@@ -74,7 +74,11 @@ final class RouteCollector
         'slug'     => '[a-z0-9-]+',
         'uuid'     => '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}',
         'ulid'     => '[0-9A-Za-z]{26}',
-        'any'      => '.*',
+        // Anything, slashes included — but no empty segment: not '/etc' (a value that
+        // begins with a slash is an absolute path for whatever takes it as one: Path::
+        // makeAbsolute('/etc/passwd', '/srv/files')), not 'a//b'. One slash at its end only
+        // where the path ends with it. A path with an empty segment there has no such route.
+        'any'      => '(?:[^/]+(?:/[^/]+)*(?:/(?=\z))?)?',
     ];
 
     /** @var array<string, string> The built-in shortcuts and those added with addPattern() */

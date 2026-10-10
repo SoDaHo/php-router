@@ -140,7 +140,7 @@ $r->get('/codes/{code:alphanum}', $handler); // Alphanumeric
 | `slug` | `[a-z0-9-]+` | `{slug:slug}` → my-post |
 | `uuid` | `[0-9a-fA-F]{8}-...` | `{id:uuid}` → 550e8400-... |
 | `ulid` | `[0-9A-Za-z]{26}` | `{id:ulid}` → 01ARZ3NDEKTSV4RRFFQ69G5FAV |
-| `any` | `.*` | `{path:any}` → anything/here |
+| `any` | `(?:[^/]+(?:/[^/]+)*(?:/(?=\z))?)?` | `{path:any}` → anything/here — no empty segment (see below) |
 
 ### Slashes in a Parameter
 
@@ -166,6 +166,15 @@ client resolves such segments before it asks, so what arrives with one was writt
 hand — and a placeholder would take it: `{name}` the value `..`, `{path:any}` a value
 that climbs out of its folder (`../../etc/passwd`). Dots that are not a segment of their
 own stay a name like any other: `/files/...`, `/files/..a`, `/files/.env`.
+
+**`{path:any}` takes no empty segment:** its value never begins with a slash and never
+holds two in a row, so `/files//etc/passwd` and `/files/a//b` do not match
+`/files/{path:any}` (404 where no other route takes them). Up to 2.1.1 the first gave the
+value `/etc/passwd` — an absolute path for every helper that takes one as such
+(`Path::makeAbsolute('/etc/passwd', '/srv/files')` is `/etc/passwd`). One slash at the end
+of the value stays where the path ends with it (`/files/docs/` gives `docs/` in the mode
+`strict`), and the value may be empty (`/files/`). Still: build a file path from a value
+only after `realpath()` and a prefix check — on Windows `C:/…` is absolute as well.
 
 ### Custom Patterns
 
@@ -513,7 +522,7 @@ $router->url('post.show', ['id' => '12a']);            // /posts/{id:int} → Ro
 $router->url('files', ['path' => '../secret']);        // RouterException: a client would resolve the '..'
 $router->url('export', ['name' => '..']);              // /export/{name}.json → /export/...json: no segment of its own, fine
 $router->url('files', ['path' => 'a\\b']);             // RouterException: no route accepts a backslash
-$router->url('page', ['path' => '/evil.example/x']);   // /{path:any} → RouterException: '//evil.example/x' would name a host
+$router->url('page', ['path' => '/evil.example/x']);   // /{path:any} → RouterException: an empty segment (and '//' would name a host)
 ```
 
 ## Redirect Routes
