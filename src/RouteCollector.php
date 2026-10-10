@@ -198,18 +198,30 @@ final class RouteCollector
 
     /**
      * Where a character class that opens at $start ends (the position behind its ']'). A ']'
-     * right behind '[' or '[^' is a member, an escaped one as well, and so is the ']' that
-     * closes a POSIX class ([:alpha:]) inside it — taken as one only without '[' or ']' in
-     * it: for PCRE a ']' or a '[' with the terminator behind it ends the lookalike, so
-     * '[:a[:]' is none and the class ends at its ']' (a name with a '[' compiles nowhere).
+     * right behind '[' or '[^' is a member — PCRE skips '\Q\E' and '\E' in front of it, and
+     * the '^' among them —, an escaped one as well, so is one quoted by \Q…\E ('[\Q]\E(x)]'
+     * is one class), and so is the ']' that closes a POSIX class ([:alpha:]) inside it — taken
+     * as one only without '[' or ']' in it: for PCRE a ']' or a '[' with the terminator behind
+     * it ends the lookalike, so '[:a[:]' is none and the class ends at its ']' (a name with a
+     * '[' compiles nowhere).
      */
     private static function endOfClass(string $fragment, int $start): int
     {
         $length = strlen($fragment);
         $i = $start + 1;
+        $negated = false;
 
-        if (($fragment[$i] ?? '') === '^') {
-            $i++;
+        while (true) {
+            if (substr($fragment, $i, 4) === '\Q\E') {
+                $i += 4;
+            } elseif (substr($fragment, $i, 2) === '\E') {
+                $i += 2;
+            } elseif (!$negated && ($fragment[$i] ?? '') === '^') {
+                $negated = true;
+                $i++;
+            } else {
+                break;
+            }
         }
 
         if (($fragment[$i] ?? '') === ']') {
@@ -218,6 +230,14 @@ final class RouteCollector
 
         while ($i < $length) {
             if ($fragment[$i] === '\\') {
+                // Quoted up to \E (or the end), a ']' as well; any other escape takes one character
+                if (($fragment[$i + 1] ?? '') === 'Q') {
+                    $end = strpos($fragment, '\E', $i + 2);
+                    $i = $end === false ? $length : $end + 2;
+
+                    continue;
+                }
+
                 $i += self::escapeLength($fragment, $i);
 
                 continue;

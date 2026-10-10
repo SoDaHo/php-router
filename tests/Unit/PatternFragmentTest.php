@@ -88,6 +88,11 @@ class PatternFragmentTest extends TestCase
             'parenthesis in a character class' => ['[(?P<x>*]+', '/x/(P*', '/x/a'],
             'POSIX class inside a character class' => ['[[:digit:](*]+', '/x/1(*', '/x/a'],
             'named group spelled in a class behind a POSIX class' => ['[[:digit:](?<n>x)]+', '/x/1(n', '/x/a'],
+            // A ']' quoted by \Q…\E in a class is a member: the class goes on to the next ']'
+            'named group spelled in a class behind a quoted bracket' => ['[\Q]\E(?<n>x)]+', '/x/](n', '/x/a'],
+            'verb spelled in a class behind a quoted bracket' => ['[\Q]\E(*ACCEPT)]+', '/x/](*', '/x/a'],
+            // … and so is a ']' right behind '[', '\Q\E' or '\E' in front of it skipped
+            'bracket behind an empty quote at the start of a class' => ['[\Q\E](?<n>x)]+', '/x/](n', '/x/a'],
             'quoted text' => ['\Q(*ACCEPT)\E', '/x/(*ACCEPT)', '/x/a'],
             'reference to a placeholder by name' => ['(?P=a)', '/x/x', '/x/y'],
             // '\c]' in a class is one character: the class goes on to the next ']'
