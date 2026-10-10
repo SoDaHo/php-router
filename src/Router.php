@@ -1111,9 +1111,10 @@ final class Router implements RouterInterface
      *                       must be, for an answer to HEAD that keeps the Content-Length of
      *                       the GET: emit() cannot tell it from a body that is missing
      *
-     * @throws RouterException If the body cannot be read, the reason phrase has a control
-     *                         character other than a tab, the protocol version is no
-     *                         version, a header line is none, the response carries a
+     * @throws RouterException If the body cannot be read, the status code is not from 100
+     *                         to 599, the reason phrase has a control character other
+     *                         than a tab, the protocol version is no version, a header
+     *                         line is none, the response carries a
      *                         Transfer-Encoding, a Content-Length that is not one value of
      *                         digits, or one above 0 for a body that is empty, or a 1xx,
      *                         204, 205 or 304 has a Content-Length its status rules out or
@@ -1173,7 +1174,8 @@ final class Router implements RouterInterface
      *
      *
      * @throws RouterException If the response body cannot be read (closed or detached), the
-     *                         reason phrase has a control character other than a tab, the
+     *                         status code is not from 100 to 599, the reason phrase has a
+     *                         control character other than a tab, the
      *                         protocol version is no version (a digit, a dot and a digit), a
      *                         header has a name that is no token or a value with a control
      *                         character other than a tab, or the framing fields say nothing
@@ -1199,6 +1201,14 @@ final class Router implements RouterInterface
 
         if (!$readable) {
             throw new RouterException($unreadable);
+        }
+
+        // The status is a number of three digits from 100 to 599 (RFC 9110, 15) — read once.
+        // The PSR-7 objects of other makes may not check it; a 99 or a 600 went out as it
+        // was, a status line no client can read as one.
+        $code = $response->getStatusCode();
+        if ($code < 100 || $code > 599) {
+            throw new RouterException('Response status code must be from 100 to 599', debugMessage: (string) $code);
         }
 
         // RFC 9112: reason-phrase = *( HTAB / SP / VCHAR / obs-text ). The PSR-7 objects do
@@ -1227,7 +1237,7 @@ final class Router implements RouterInterface
         $statusLine = sprintf(
             'HTTP/%s %d %s',
             $protocolVersion,
-            $response->getStatusCode(),
+            $code,
             $reasonPhrase
         );
 
@@ -1253,7 +1263,6 @@ final class Router implements RouterInterface
         }
 
         $length = self::framing($headers);
-        $code = $response->getStatusCode();
         $bodiless = self::bodiless($code);
 
         // A response without content says so in its framing as well (RFC 9110, 8.6): a 1xx

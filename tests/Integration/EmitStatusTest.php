@@ -385,6 +385,75 @@ class EmitStatusTest extends TestCase
 
     private const HEADER_REFUSED = 'Response header must have a token as its name and a value without a control character other than a tab';
 
+    private const STATUS_REFUSED = 'Response status code must be from 100 to 599';
+
+    /**
+     * A response whose status is $status — Nyholm's objects refuse one outside 100 to 599,
+     * the objects of other makes may not —, with a Location in front: had a header gone
+     * out before the refusal, PHP's status would be a 302.
+     */
+    private static function withStatus(int $status): \Psr\Http\Message\ResponseInterface
+    {
+        // @phpstan-ignore class.extendsFinalByPhpDoc (a response that misbehaves on purpose)
+        return new class ($status) extends \Nyholm\Psr7\Response {
+            public function __construct(private readonly int $status)
+            {
+                parent::__construct(200, ['Location' => '/there'], 'body');
+            }
+
+            public function getStatusCode(): int
+            {
+                return $this->status;
+            }
+        };
+    }
+
+    /**
+     * @return array<string, array{0: int}>
+     */
+    public static function statusCodesThatAreNone(): array
+    {
+        return ['status 99' => [99], 'status 600' => [600], 'status 0' => [0], 'status 1000' => [1000], 'a negative status' => [-200]];
+    }
+
+    #[DataProvider('statusCodesThatAreNone')]
+    public function testEmitRefusesAStatusCodeOutside100To599BeforeAnythingIsSent(int $status): void
+    {
+        ob_start();
+        try {
+            Router::create()->emit(self::withStatus($status));
+            $this->fail('The response was sent');
+        } catch (\Sodaho\Router\Exception\RouterException $e) {
+            $this->assertSame(self::STATUS_REFUSED, $e->getMessage());
+            $this->assertSame((string) $status, $e->getDebugMessage());
+        } finally {
+            $sent = (string) ob_get_clean();
+        }
+
+        $this->assertSame('', $sent);
+        $this->assertFalse(http_response_code());
+    }
+
+    public function testRunAnswersA500ForAStatusCodeOutside100To599(): void
+    {
+        [$sent, $reports] = $this->runWith(fn () => self::withStatus(600));
+
+        $this->assertSame('Internal Server Error', $sent);
+        $this->assertSame(500, http_response_code());
+        $this->assertSame([self::STATUS_REFUSED . ' | 500'], $reports);
+    }
+
+    public function testStatusCodesAtTheEdgesGoOut(): void
+    {
+        foreach ([100, 599] as $status) {
+            ob_start();
+            Router::create()->emit(self::withStatus($status)->withoutHeader('Location'), withBody: false);
+            ob_end_clean();
+
+            $this->assertSame($status, http_response_code());
+        }
+    }
+
     /**
      * @return array<string, array{0: array<string, list<string>>}>
      */

@@ -61,7 +61,9 @@ from SemVer by the owner's decision of 2026-10-10. See "Upgrading from
   and a digit for a minor one (`1.1`, `1.0`, `2`) — before anything is sent, as they refuse
   a reason phrase with a control character: `withProtocolVersion("1.1\r\nX-Injected: 1")`
   made PHP drop the status line and send its own 200, a 403 went out as a 200. `run()`
-  answers 500 and the `error` hook gets the `RouterException`, `emit()` throws it.
+  answers 500 and the `error` hook gets the `RouterException`, `emit()` throws it. So is a
+  status code outside 100 to 599 (RFC 9110, 15): Nyholm's objects refuse one, the PSR-7
+  objects of other makes may not, and a 99 or a 600 went out as a status line.
 
 - `run()` and `emit()` check every header line before anything is sent: a name that is no
   token of RFC 9110 and a value with a control character other than a tab are refused with
@@ -377,9 +379,10 @@ look at:
   `Content-Length` of the `GET` with an empty body, which `emit($response)` refuses now
   before anything is sent — the README showed `emit($response)` alone for it. `run()`
   is not affected.
-- **A response's protocol version** has to be a version (`1.1`, `2`), and every header line
-  a token name and a value without control characters other than a tab — a response that
-  breaks this gets the router's 500 from `run()`, an exception from `emit()`. So does a
+- **A response's protocol version** has to be a version (`1.1`, `2`), its status code from
+  100 to 599, and every header line a token name and a value without control characters
+  other than a tab — a response that breaks this gets the router's 500 from `run()`, an
+  exception from `emit()`. So does a
   response with a `Transfer-Encoding` of its own, or a `Content-Length` that is not exactly
   one value of digits: drop the `Transfer-Encoding` (the web server applies one where it
   needs one) and set one `Content-Length` or none.

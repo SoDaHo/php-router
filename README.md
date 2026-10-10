@@ -928,12 +928,12 @@ every field the router does not know. `X-Frame-Options`, `Strict-Transport-Secur
 status is the response's, whatever its headers are — PHP would turn a 403 with
 `WWW-Authenticate` into a 401 and a 200 with a `Location` into a 302; a redirect is a 3xx
 status (`Response::redirect()`). Status line and header lines are checked before anything
-is sent: a reason phrase with a control character other than a tab, a protocol version that
-is no version (a digit, and a dot and a digit for a minor one: `1.1`, `1.0`, `2`), a header
-name that is no token (RFC 9110) and a header value with a control character other than a
-tab are refused — PHP would drop such a status line and send its own 200, and refuse such a
-header line only after the lines in front of it went out (a `Location` among them makes
-the status a 302). So are the fields that say where the body ends, where they say nothing
+is sent: a status code outside 100 to 599, a reason phrase with a control character other
+than a tab, a protocol version that is no version (a digit, and a dot and a digit for a
+minor one: `1.1`, `1.0`, `2`), a header name that is no token (RFC 9110) and a header
+value with a control character other than a tab are refused — PHP would drop such a status
+line and send its own 200, and refuse such a header line only after the lines in front of
+it went out (a `Location` among them makes the status a 302). So are the fields that say where the body ends, where they say nothing
 one can rely on: a `Content-Length` that is not exactly one value of digits (`abc`, `3, 3`,
 two of them) and any `Transfer-Encoding` — the emitter applies no transfer coding, the body
 goes out as it is (the web server frames it). A `Content-Length` above 0 in front of a body
@@ -1047,7 +1047,7 @@ where the log is yours alone; show neither to a client.
 
 | Exception | When |
 |-----------|------|
-| `RouterException` | Everything the router refuses: a route, pattern, fragment of `addPattern()`, middleware key or redirect target where it is written; a config value; a change to a route once the table is built; a placeholder named like an attribute of the request, a container entry that is no middleware, a redirect rendering that would change scheme or host or make a dot segment, a status line or header line that is none, a `Transfer-Encoding` or a `Content-Length` that is not one value of digits, a body or `Content-Length` a 1xx, 204, 205 or 304 must not have, a body that gives no byte for `emitIdleTimeout` seconds, ends short of its `Content-Length` or goes beyond it — while a request is handled each of these goes to the `error` hook, as a 500 where nothing was sent yet |
+| `RouterException` | Everything the router refuses: a route, pattern, fragment of `addPattern()`, middleware key or redirect target where it is written; a config value; a change to a route once the table is built; a placeholder named like an attribute of the request, a container entry that is no middleware, a redirect rendering that would change scheme or host or make a dot segment, a status line or header line that is none (a status code outside 100 to 599 among them), a `Transfer-Encoding` or a `Content-Length` that is not one value of digits, a body or `Content-Length` a 1xx, 204, 205 or 304 must not have, a body that gives no byte for `emitIdleTimeout` seconds, ends short of its `Content-Length` or goes beyond it — while a request is handled each of these goes to the `error` hook, as a 500 where nothing was sent yet |
 | `NotFoundException` | Never thrown by the router (it answers 404 itself); for your own code |
 | `MethodNotAllowedException` | Never thrown by the router (it answers 405 itself); for your own code |
 | `RouteNotFoundException` | Named route doesn't exist (URL generation); `getDebugMessage()` lists every route name |
