@@ -17,6 +17,9 @@ use Sodaho\Router\Exception\RouterException;
  */
 final class UrlGenerator
 {
+    /** Values that do not lead back to their route — the route's name is in the debug message */
+    private const NO_FIT = 'The parameters do not fit the pattern of the route: the address would not lead back to it';
+
     /** @var array<string, string> Named routes: name => pattern */
     private array $namedRoutes = [];
 
@@ -310,7 +313,7 @@ final class UrlGenerator
             }
 
             if (!array_key_exists($parameter, $params)) {
-                throw new RouterException(sprintf('Missing parameter "%s" for URL generation', $parameter));
+                throw new RouterException('Missing parameter for URL generation', debugMessage: sprintf('%s: {%s}', $name, $parameter));
             }
             if ($params[$parameter] === null) {
                 throw new RouterException(sprintf('Parameter "%s" for URL generation is null', $parameter));
@@ -374,8 +377,8 @@ final class UrlGenerator
 
             if ($result !== 1 || array_intersect_key($captured, $values) !== $values) {
                 throw new RouterException(
-                    sprintf('The parameters do not fit the pattern of route "%s": the address would not lead back to it', $name),
-                    debugMessage: $candidate,
+                    self::NO_FIT,
+                    debugMessage: sprintf('%s: %s', $name, $candidate),
                 );
             }
 
@@ -386,8 +389,8 @@ final class UrlGenerator
                     RouteDispatcher::castValue($type, $values[$parameter], $parameter);
                 } catch (\TypeError) {
                     throw new RouterException(
-                        sprintf('The parameters do not fit the pattern of route "%s": the address would not lead back to it', $name),
-                        debugMessage: $candidate,
+                        self::NO_FIT,
+                        debugMessage: sprintf('%s: %s', $name, $candidate),
                     );
                 }
             }

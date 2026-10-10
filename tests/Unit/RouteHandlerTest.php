@@ -203,11 +203,14 @@ class RouteHandlerTest extends TestCase
         // Controller with required constructor parameter and no container
         $handler = new RouteHandler([ControllerWithRequiredParams::class, 'index']);
 
-        $this->expectException(RouterException::class);
-        $this->expectExceptionMessage('requires constructor parameters');
-        $this->expectExceptionMessage('ControllerWithRequiredParams');
-
-        $handler->handle(new ServerRequest('GET', '/test'));
+        try {
+            $handler->handle(new ServerRequest('GET', '/test'));
+            $this->fail('The controller was built');
+        } catch (RouterException $e) {
+            // The class is named in the debug message, not in the message
+            $this->assertSame('Controller requires constructor parameters. Register it in a PSR-11 container or use setContainer().', $e->getMessage());
+            $this->assertSame(ControllerWithRequiredParams::class, $e->getDebugMessage());
+        }
     }
 
     public function testControllerWithOptionalParamsWorksWithoutContainer(): void

@@ -123,10 +123,8 @@ final class RouteHandler implements RequestHandlerInterface
 
         // Constructor has required parameters -> needs DI container
         throw new RouterException(
-            sprintf(
-                'Controller "%s" requires constructor parameters. Register it in a PSR-11 container or use setContainer().',
-                $class
-            )
+            'Controller requires constructor parameters. Register it in a PSR-11 container or use setContainer().',
+            debugMessage: $class,
         );
     }
 

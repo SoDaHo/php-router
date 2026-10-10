@@ -240,6 +240,14 @@ from SemVer by the owner's decision of 2026-10-10. See "Upgrading from
   was cast (`true` became `'1'`, an array `'Array'` with a warning), a `routesFile` that is
   no string failed only when the table was built, with a `TypeError` of PHP.
 
+- Four messages of a `RouterException` no longer name what the application wrote — they
+  are static, the name is in `getDebugMessage()` as for the other refusals of 2.2.0:
+  `Placeholder is used twice in one route pattern` (debug `{id} in /a/{id}/b/{id}`),
+  `Missing parameter for URL generation` (debug `users.show: {id}`), `The parameters do not
+  fit the pattern of the route: the address would not lead back to it` (debug the route's
+  name and the address it would have been) and `Controller requires constructor
+  parameters. …` (debug the class).
+
 - `Response::tooManyRequests()` refuses a negative number of seconds with a
   `RouterException`: `-1` went out as `Retry-After: -1`, no delay a client can wait for.
 
@@ -423,6 +431,9 @@ look at:
   or 204 must not carry a `Content-Length` at all, **also not `Content-Length: 0`**, which
   some middleware add to every response (let them skip these statuses); a 205 may carry
   `0` only. A 304 keeps the length of its representation.
+- **Messages:** code that compared or parsed the message of a duplicate placeholder, a
+  missing parameter of `url()`, parameters that do not fit their route or a controller that
+  needs constructor parameters finds the name in `getDebugMessage()` now.
 - **PHPStan:** `Route::$middleware` is `array<string|object>`; the three route properties
   have `set` hooks (no writes into them in place).
 

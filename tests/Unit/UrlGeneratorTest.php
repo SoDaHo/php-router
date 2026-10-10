@@ -122,9 +122,14 @@ class UrlGeneratorTest extends TestCase
         ];
         $generator = new UrlGenerator($routes);
 
-        $this->expectException(RouterException::class);
-        $this->expectExceptionMessage('Missing parameter "id"');
-        $generator->url('users.show', []);
+        try {
+            $generator->url('users.show', []);
+            $this->fail('An address was generated');
+        } catch (RouterException $e) {
+            // The message names no parameter; the debug message names route and placeholder
+            $this->assertSame('Missing parameter for URL generation', $e->getMessage());
+            $this->assertSame('users.show: {id}', $e->getDebugMessage());
+        }
     }
 
     public function testHasRoute(): void
@@ -280,7 +285,7 @@ class UrlGeneratorTest extends TestCase
         $generator = new UrlGenerator($routes);
 
         $this->expectException(RouterException::class);
-        $this->expectExceptionMessage('Missing parameter "flag"');
+        $this->expectExceptionMessage('Missing parameter for URL generation');
         $generator->url('users.activate', []);
     }
 
@@ -369,7 +374,7 @@ class UrlGeneratorTest extends TestCase
         // A plain placeholder is one segment: a value with a slash has no address.
         // (1.x wrote %2F — the router refuses such a request since 2.0.)
         $this->expectException(RouterException::class);
-        $this->expectExceptionMessage('The parameters do not fit the pattern of route "files.show"');
+        $this->expectExceptionMessage('The parameters do not fit the pattern of the route');
 
         $generator->url('files.show', ['path' => 'dir/file.txt']);
     }
@@ -522,7 +527,7 @@ class UrlGeneratorTest extends TestCase
             $generator->url('r', [$name => $value]);
             $this->fail('An address was generated');
         } catch (RouterException $e) {
-            $this->assertSame('The parameters do not fit the pattern of route "r": the address would not lead back to it', $e->getMessage());
+            $this->assertSame('The parameters do not fit the pattern of the route: the address would not lead back to it', $e->getMessage());
         }
 
         // What the cast takes goes through, in every type a value can come in
@@ -545,8 +550,8 @@ class UrlGeneratorTest extends TestCase
                 $generator->url('page', ['path' => $value]);
                 $this->fail('An address was generated for ' . $value);
             } catch (RouterException $e) {
-                $this->assertSame('The parameters do not fit the pattern of route "page": the address would not lead back to it', $e->getMessage());
-                $this->assertSame('/' . $value, $e->getDebugMessage());
+                $this->assertSame('The parameters do not fit the pattern of the route: the address would not lead back to it', $e->getMessage());
+                $this->assertSame('page: /' . $value, $e->getDebugMessage());
             }
         }
 
@@ -672,7 +677,7 @@ class UrlGeneratorTest extends TestCase
 
         // … any other slash at the end is dropped before the route is looked up
         $this->expectException(RouterException::class);
-        $this->expectExceptionMessage('The parameters do not fit the pattern of route "page"');
+        $this->expectExceptionMessage('The parameters do not fit the pattern of the route');
         $generator->url('page', ['path' => 'a/']);
     }
 
@@ -708,9 +713,9 @@ class UrlGeneratorTest extends TestCase
             $generator->url('r', $params);
             $this->fail('An address was generated');
         } catch (RouterException $e) {
-            // The message names the route, the values only show in the debug message
-            $this->assertSame('The parameters do not fit the pattern of route "r": the address would not lead back to it', $e->getMessage());
-            $this->assertSame($candidate, $e->getDebugMessage());
+            // The message names neither route nor values: both only show in the debug message
+            $this->assertSame('The parameters do not fit the pattern of the route: the address would not lead back to it', $e->getMessage());
+            $this->assertSame('r: ' . $candidate, $e->getDebugMessage());
         }
     }
 

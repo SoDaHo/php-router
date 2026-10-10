@@ -45,8 +45,8 @@ class RouteDefinitionTest extends TestCase
             'name with 33 characters' => ['/users/{' . str_repeat('a', 33) . '}', $name, '{' . str_repeat('a', 33) . '} in /users/{' . str_repeat('a', 33) . '}'],
             // The request attribute the handler's arguments travel in
             'reserved name' => ['/users/{_route_params}', $name, '{_route_params} in /users/{_route_params}'],
-            'the same name twice' => ['/a/{id}/b/{id}', 'Placeholder "id" is used twice in one route pattern', '/a/{id}/b/{id}'],
-            'the same name twice, typed' => ['/a/{id:int}/{id:slug}', 'Placeholder "id" is used twice in one route pattern', '/a/{id:int}/{id:slug}'],
+            'the same name twice' => ['/a/{id}/b/{id}', 'Placeholder is used twice in one route pattern', '{id} in /a/{id}/b/{id}'],
+            'the same name twice, typed' => ['/a/{id:int}/{id:slug}', 'Placeholder is used twice in one route pattern', '{id} in /a/{id:int}/{id:slug}'],
             // A pattern is compared with the decoded request path, and it is a path. (1.x
             // took all of these as literal text; some could be reached — '/a%2Fb' by the
             // request '/a%252Fb', a tab by '%09' — none by the address url() wrote for them.)
@@ -172,7 +172,7 @@ class RouteDefinitionTest extends TestCase
         $collector = new RouteCollector();
 
         $this->expectException(RouterException::class);
-        $this->expectExceptionMessage('Placeholder "id" is used twice in one route pattern');
+        $this->expectExceptionMessage('Placeholder is used twice in one route pattern');
 
         $collector->group('/users/{id}', function (RouteCollector $r): void {
             $r->get('/posts/{id}', 'handler');

@@ -714,8 +714,8 @@ final class RouteCollector
 
             if (isset($names[$name])) {
                 throw new RouterException(
-                    sprintf('Placeholder "%s" is used twice in one route pattern', $name),
-                    debugMessage: $pattern,
+                    'Placeholder is used twice in one route pattern',
+                    debugMessage: sprintf('{%s} in %s', $name, $pattern),
                 );
             }
             $names[$name] = true;

@@ -71,7 +71,7 @@ class HandleNeverThrowsTest extends TestCase
             'routes file with a syntax error' => [Router::create()->loadRoutes($this->routes('return function ($r) { $r->get( };')), "Unclosed '('"],
             'routes file that returns nothing to call' => [Router::create()->loadRoutes($this->routes('return 5;')), 'Route file must return callable'],
             'route table that cannot be built' => [Router::create()->loadRoutes($this->routes('return function ($r) { $r->get("/x/{id:integer}", "h"); };')), 'Route pattern uses a pattern type that is not defined'],
-            'route that cannot be registered' => [Router::create()->loadRoutes($this->routes('return function ($r) { $r->get("/x/{id}/{id}", "h"); };')), 'Placeholder "id" is used twice'],
+            'route that cannot be registered' => [Router::create()->loadRoutes($this->routes('return function ($r) { $r->get("/x/{id}/{id}", "h"); };')), 'Placeholder is used twice'],
         };
     }
 
