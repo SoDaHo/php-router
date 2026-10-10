@@ -40,7 +40,8 @@ return function (RouteCollector $r) {
 | `loadRoutes(string $file): self` | File returning `function (RouteCollector $r) {…}`. |
 | `setContainer(ContainerInterface $container): self` | PSR-11 container for classes by name. |
 | `setDebug(bool $debug): self` / `isDebug(): bool` | Debug mode, see [Security](#security). |
-| `setBasePath(string $basePath): self` / `setBaseUrl(?string $baseUrl): self` | See [Configuration](#configuration). |
+| `setBasePath(string $basePath): self` | Prefix of routes and addresses: `/api`, `/api/`, `api` alike. |
+| `setBaseUrl(?string $baseUrl): self` | Base URL of `absoluteUrl()`; `null`, `''`, `'0'`: none. |
 | `middleware(string\|array\|object $middleware): self` | Middleware for every request, first = outermost. |
 | `app(string $prefix, string $directory, array $options = []): self` | Web app folder, see [AppFolder](#appfolder). |
 | `setErrorHandler(callable $handler): self` / `on(string $event, callable $callback): static` | See below / Hooks. |
@@ -161,7 +162,8 @@ for. `handle()` takes over a `RouteMatch` this router made for the same method a
 | `notFound(?string $resource = null, string\|int\|null $identifier = null)` | 404 |
 | `unauthorized(?string $message = null)` / `forbidden(?string $message = null)` | 401 / 403 |
 | `validationError(array $errors)` / `methodNotAllowed(array $allowedMethods)` | 422 / 405 with `Allow` |
-| `tooManyRequests(int $retryAfter)` / `serverError(?string $message = null, ?array $debug = null)` | 429 / 500 |
+| `tooManyRequests(int $retryAfter)` | 429, `Retry-After` |
+| `serverError(?string $message = null, ?array $debug = null)` | 500 |
 | `html(string $content, int $status = 200)` / `text(string $content, int $status = 200)` | HTML / text, UTF-8 |
 | `json(mixed $data, int $status = 200, string $contentType = 'application/json')` | `$data`, no envelope |
 | `redirect(string $url, int $status = 302)` | `REDIRECT_STATUSES`: 301, 302, 303, 307, 308 |
@@ -226,7 +228,7 @@ details are dropped.
 | Signature | Description |
 |---|---|
 | `__construct(string $prefix, string $directory, array $options = [])` | Built by `app()`; options below. |
-| `readonly string $prefix`, `const TYPES`, `const HASHED` | Prefix (`''`: root); extension => type; bundler regex. |
+| `readonly string $prefix`, `const TYPES`/`HASHED` | No trailing slash (`''`: root); ext => type; bundler regex. |
 | `owns(string $path): bool` | Whether the path lies under the prefix. |
 | `serve(ServerRequestInterface $request, string $path): ?ResponseInterface` | The file, the start page or `null`. |
 
@@ -328,7 +330,7 @@ replace what the host set; others (`Vary`, `Cache-Control`, `Set-Cookie`, …) a
 | `app()` option | Default | Allowed | Refused |
 |---|---|---|---|
 | `index` | `'index.html'` | a file name | `/`, `\`, `:`, leading dot, control char, trailing dot or space |
-| `types` | `AppFolder::TYPES` | `ext => type`, `null` removes | no map; ext not `[a-z0-9]+`; bad type; PHP sources |
+| `types` | `TYPES`, `null` | `ext => type`, `null` removes | not array; ext not `[a-z0-9]+`; bad type; PHP sources |
 | `immutable` | `null` | regex on the path below the prefix, e.g. `AppFolder::HASHED` | no valid regex |
 | `cacheIndex` | `'no-cache'` | Cache-Control of the start page; `null`: none | empty, control char |
 | `cacheImmutable` | `'public, max-age=31536000, immutable'` | for paths `immutable` matches | as `cacheIndex` |
