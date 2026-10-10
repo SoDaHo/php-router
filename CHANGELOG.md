@@ -22,6 +22,14 @@
   character, a `.` or `..` segment, an address that begins with `//` (another host for a
   client) went out unchecked. The key, the variable and `setEncodeParams(true)` are still
   accepted with a value that means on; `setEncodeParams()` is deprecated.
+- `addPattern()` refuses a fragment with a named group (`(?P<year>…)`, `(?<year>…)`,
+  `(?'year'…)`) or a `(*…)` construct (`(*ACCEPT)`, `(*SKIP)`, `(*COMMIT)`, `(*UTF)`). A
+  named group was a parameter of every route that used the pattern — handed to the handler
+  as an argument nobody declared (a 500 for a handler that did not take it), and
+  `(?P<_route_params>…)` replaced the route's own parameter list; a verb ended or steered
+  the match of the whole route (`'a(*ACCEPT)'` matched `/files/abcd` with the value `a`).
+  Lookbehinds, groups that do not capture and groups without a name stay allowed — what
+  those capture never reaches the parameters.
 
 ## [2.1.1] - 2026-10-09
 

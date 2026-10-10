@@ -101,8 +101,121 @@ final class RouteCollector
             throw new RouterException("Pattern fragment must not contain an unescaped '#' (write \\#)", debugMessage: $name);
         }
 
+        // What a fragment names is a parameter of every route that uses it — handed to the
+        // handler as an argument nobody declared, or under '_route_params' in place of the
+        // route's own; and a verb ends or steers the match of the whole route ('a(*ACCEPT)'
+        // matched '/files/abcd'). Refused where the pattern is added.
+        $construct = self::constructOfItsOwn($regex);
+        if ($construct === 'name') {
+            throw new RouterException(
+                'Pattern fragment must not contain a named group: it may refer to the placeholders of its route by name ((?P=other)), not name one itself',
+                debugMessage: $name,
+            );
+        }
+        if ($construct === 'verb') {
+            throw new RouterException(
+                'Pattern fragment must not contain a (*...) construct: a verb such as (*ACCEPT) ends or steers the match of the whole route',
+                debugMessage: $name,
+            );
+        }
+
         $this->patterns[$name] = $regex;
         return $this;
+    }
+
+    /**
+     * The first construct in a fragment that would act beyond its own group: 'name' for a
+     * named group ((?P<n>…), (?<n>…), (?'n'…) — not a lookbehind (?<=, (?<!), 'verb' for
+     * anything that begins with '(*' ((*ACCEPT), (*SKIP), (*pla:…)), null for none.
+     *
+     * Read as PCRE reads it: what is escaped, quoted (\Q…\E) or in a character class is no
+     * parenthesis. (A comment, (?#…), never gets here: its '#' is refused before.) A group
+     * that does not capture or one without a name stays allowed — no number reaches the
+     * parameters (see Dispatcher).
+     *
+     * @return 'name'|'verb'|null
+     */
+    private static function constructOfItsOwn(string $fragment): ?string
+    {
+        $length = strlen($fragment);
+        $i = 0;
+
+        while ($i < $length) {
+            $character = $fragment[$i];
+
+            if ($character === '\\') {
+                // \Q…\E quotes everything up to \E (or the end); any other escape takes one character
+                if (($fragment[$i + 1] ?? '') === 'Q') {
+                    $end = strpos($fragment, '\E', $i + 2);
+                    $i = $end === false ? $length : $end + 2;
+
+                    continue;
+                }
+
+                $i += 2;
+
+                continue;
+            }
+
+            if ($character === '[') {
+                $i = self::endOfClass($fragment, $i);
+
+                continue;
+            }
+
+            if ($character === '(' && ($fragment[$i + 1] ?? '') === '*') {
+                return 'verb';
+            }
+
+            if ($character === '(' && preg_match('/\G\(\?(?:P<|<(?![=!])|\')/', $fragment, $match, 0, $i) === 1) {
+                return 'name';
+            }
+
+            $i++;
+        }
+
+        return null;
+    }
+
+    /**
+     * Where a character class that opens at $start ends (the position behind its ']'). A ']'
+     * right behind '[' or '[^' is a member, an escaped one as well, and so is the ']' that
+     * closes a POSIX class ([:alpha:]) inside it.
+     */
+    private static function endOfClass(string $fragment, int $start): int
+    {
+        $length = strlen($fragment);
+        $i = $start + 1;
+
+        if (($fragment[$i] ?? '') === '^') {
+            $i++;
+        }
+
+        if (($fragment[$i] ?? '') === ']') {
+            $i++;
+        }
+
+        while ($i < $length) {
+            if ($fragment[$i] === '\\') {
+                $i += 2;
+
+                continue;
+            }
+
+            if ($fragment[$i] === '[' && preg_match('/\G\[([:.=])[^]]*?\1\]/', $fragment, $match, 0, $i) === 1) {
+                $i += strlen($match[0]);
+
+                continue;
+            }
+
+            if ($fragment[$i] === ']') {
+                return $i + 1;
+            }
+
+            $i++;
+        }
+
+        return $length;
     }
 
     /**

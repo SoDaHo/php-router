@@ -178,7 +178,13 @@ The name is made of ASCII letters, digits and underscores. The fragment becomes 
 regular expression delimited by `#`: write a literal `#` as `\#`. A pattern may be added
 after the routes that use it. The fragment is a regular expression of its own — its
 parentheses pair up (`'a)|(.*'` is refused when the route table is built); it may refer to
-the placeholders of its route by name (`(?P=other)`). Keep it free of nested quantifiers
+the placeholders of its route by name (`(?P=other)`), but names nothing itself: a named
+group (`(?P<year>…)`, `(?<year>…)`, `(?'year'…)`) would be a parameter of every route that
+uses the pattern, and a `(*…)` construct (`(*ACCEPT)`, `(*SKIP)`, `(*COMMIT)`) ends or
+steers the match of the whole route — `addPattern()` refuses both. Lookbehinds
+(`(?<=…)`, `(?<!…)`), groups that do not capture and groups without a name stay allowed;
+what a group without a name captures never becomes a parameter. Refer to other
+placeholders by name, not by number: `\1` counts the groups of the whole route. Keep it free of nested quantifiers
 (`(a+)+`): where PCRE gives up on an expression (the backtrack limit, the JIT stack), the
 request is answered with 500 and the `error` hook gets a `RouterException` naming the PCRE
 error — never treated as "no match", which would hand it to the next route.
