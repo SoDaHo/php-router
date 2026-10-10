@@ -1002,7 +1002,9 @@ after the headers are out, nothing can be answered any more.
 
 A router loads its routes file once for each `loadRoutes()`. When the route table cannot
 be built — the file threw, a route was refused — every request is a 500 through the
-`error` hook, and the file is not `require`d again. Another router, or another
+`error` hook, and the file is not `require`d again; what its callable registered on the
+router itself (middleware, apps, hooks) is taken back, so that each attempt reports the
+same failure. Another router, or another
 `loadRoutes()`, requires it again, as 1.x did: a routes file that declares a function or a
 class can be used by one router per process — in a worker that builds a router per
 request, keep declarations out of it. Its closure sees the router as `$this`, as in 1.x. A

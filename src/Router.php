@@ -928,10 +928,27 @@ final class Router implements RouterInterface
             $this->collector->setPreserveTrailingSlash(true);
         }
 
-        $routes($this->collector);
+        // What the routes file registers on the router itself — middleware, apps, hooks —
+        // belongs to this attempt. A table that cannot be built leaves none of it behind:
+        // the next attempt runs the file again, and would otherwise fail at a middleware key
+        // or app prefix the first attempt took, hiding why the table cannot be built.
+        $middleware = $this->middleware;
+        $apps = $this->apps;
+        $hooks = $this->hooks;
+
+        try {
+            $routes($this->collector);
+            $data = $this->collector->getData();
+        } catch (\Throwable $e) {
+            $this->middleware = $middleware;
+            $this->apps = $apps;
+            $this->hooks = $hooks;
+
+            throw $e;
+        }
 
         $this->dispatcher = new RouteDispatcher(
-            $this->collector->getData(),
+            $data,
             $this->container,
             $this->config['basePath'],
             $this->config['trailingSlash'],

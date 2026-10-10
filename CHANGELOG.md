@@ -175,6 +175,10 @@ application.
   `false` throws.
 
 ### Fixed
+- When the route table cannot be built, what the routes file registered on the router
+  itself — middleware, apps, hooks — is taken back. The next request runs the file again,
+  and failed at the middleware key or app prefix the first attempt had taken, so that every
+  report after the first named that instead of why the table cannot be built.
 - A route handler `[$object, 'method']` is called on that object, as the callable it is.
   It was taken for `[class name, method]` and ended in a `TypeError` (a 500) with and
   without a container.
