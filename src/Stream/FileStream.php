@@ -54,6 +54,39 @@ final class FileStream implements StreamInterface
             throw new RouterException('Cannot open file for reading', debugMessage: $path);
         }
 
+        $this->adopt($handle, $path, $start, $length);
+    }
+
+    /**
+     * A stream over a handle the caller opened — and checked: AppFolder checks the file it
+     * opened against its folder before a byte of it is read, so that what is sent is the
+     * file it checked, not one put in its place a moment later. The stream takes the handle
+     * over: closing the stream closes it.
+     *
+     * @internal
+     *
+     * @param resource $handle Opened for reading
+     * @param string $path What the handle was opened from, for messages
+     *
+     * @throws RouterException As the constructor, when size or range cannot be determined
+     */
+    public static function fromHandle(mixed $handle, string $path, int $start = 0, ?int $length = null): self
+    {
+        $stream = new \ReflectionClass(self::class)->newInstanceWithoutConstructor();
+        $stream->adopt($handle, $path, $start, $length);
+
+        return $stream;
+    }
+
+    /**
+     * Take an opened handle over: its size, whether it can seek, the slice it exposes.
+     *
+     * @param resource $handle
+     *
+     * @throws RouterException When the size cannot be determined or the start not reached
+     */
+    private function adopt(mixed $handle, string $path, int $start, ?int $length): void
+    {
         $this->handle = $handle;
 
         // No size, no slice arithmetic: assuming 0 here would silently serve an empty body
@@ -77,7 +110,9 @@ final class FileStream implements StreamInterface
         $remaining = $size - $this->start;
         $this->length = $length === null ? $remaining : max(0, min($length, $remaining));
 
-        if ($this->start > 0 && (!$this->seekable || @fseek($handle, $this->start) === -1)) {
+        // From the start of the slice — also for a handle the caller read from before (an
+        // ETag over the content); one that cannot seek is read from where it stands
+        if ($this->seekable ? @fseek($handle, $this->start) === -1 : $this->start > 0) {
             fclose($handle);
             $this->handle = null;
 

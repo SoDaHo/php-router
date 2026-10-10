@@ -271,6 +271,13 @@ final class AppFolder
             return null;
         }
 
+        // Opened once and checked at the handle: what goes out — validator, length, body —
+        // is read from the file that was checked, not from one put in its place since
+        $handle = self::openWithin($root, $file);
+        if ($handle === null) {
+            return null;
+        }
+
         // The browser caches by address: what was asked for decides, not where a link led
         $cache = match (true) {
             $startPage => $this->cacheIndex,
@@ -279,22 +286,33 @@ final class AppFolder
         };
 
         // What the browser sends back to ask whether its copy still holds
-        $etag = self::etag($file);
+        try {
+            $etag = self::etag($handle, $file);
+        } catch (RouterException $e) {
+            // @codeCoverageIgnoreStart
+            // Not reachable in a test, see etag()
+            fclose($handle);
+
+            throw $e;
+            // @codeCoverageIgnoreEnd
+        }
         $headers = ($etag === null ? [] : ['ETag' => $etag]) + ($cache === null ? [] : ['Cache-Control' => $cache]);
 
         if (self::isNotModified($request, $etag)) {
+            fclose($handle);
+
             // The copy holds: the headers of the file, no body. The Content-Type is named
             // so that PHP does not put its own default there.
             return new Psr7Response(304, $headers + ['Content-Type' => $type, 'X-Content-Type-Options' => 'nosniff']);
         }
 
         // A Range is for GET only. And one that comes with an If-Range — "this piece, if the
-        // file is still the one I have" — gets the whole file: the tag is taken a moment
-        // before the file is opened, so this class cannot promise that the piece it sends
-        // belongs to the tag it compared.
+        // file is still the one I have" — gets the whole file: a large file's tag is made
+        // of its metadata (see etag()), which cannot promise that the piece belongs to the
+        // content the client compared.
         $range = $method === 'GET' && !$request->hasHeader('If-Range') ? $request->getHeaderLine('Range') : '';
 
-        $response = Response::file($file, null, $type, true, $range === '' ? null : $range)
+        $response = Response::fileFromHandle($handle, $file, basename($file), $type, true, $range === '' ? null : $range)
             ->withoutHeader('Content-Disposition');
 
         foreach ($headers as $name => $value) {
@@ -302,6 +320,70 @@ final class AppFolder
         }
 
         return $response;
+    }
+
+    /**
+     * The file opened for reading — or null where what the handle got is not the file the
+     * folder holds under that name any more.
+     *
+     * The file was resolved a moment ago (realpath(), see fileFor()), and a writer of the
+     * folder could have put a link to a file elsewhere in its place since: opened blindly,
+     * that file went out (a race between the check and fopen()). So the file is opened
+     * first and checked at the handle: its path, resolved again, is still itself inside the
+     * folder (no link on the way now), and the file under that path — the link itself
+     * where one stands there, lstat() — is the one the handle holds (device and file
+     * number). Where the system reports no file numbers only the path is compared.
+     *
+     * What this cannot rule out: a writer who swaps a directory on the way for a link and
+     * back between two of these calls — the folder has to stay out of reach of writers you
+     * do not trust. A hard link in the folder is the file it names, wherever that lies:
+     * nothing tells it apart from the file itself.
+     *
+     * @internal
+     *
+     * @param string $root The folder, resolved
+     * @param string $file A file under it, resolved
+     *
+     * @return resource|null
+     */
+    public static function openWithin(string $root, string $file): mixed
+    {
+        $handle = @fopen($file, 'rb');
+        if ($handle === false) {
+            return null;
+        }
+
+        $opened = fstat($handle);
+        clearstatcache(true);
+        $resolved = realpath($file);
+        $named = $resolved === $file ? @lstat($file) : false;
+
+        if ($opened === false
+            || $named === false
+            || !str_starts_with($file, $root . DIRECTORY_SEPARATOR)
+            || !self::isSameFile($opened, $named)) {
+            fclose($handle);
+
+            return null;
+        }
+
+        return $handle;
+    }
+
+    /**
+     * Whether two stat results describe the same file: same device and file number — or,
+     * where the system reports no file numbers (0 on both sides), nothing that says otherwise.
+     *
+     * @param array<int|string, int> $a
+     * @param array<int|string, int> $b
+     */
+    private static function isSameFile(array $a, array $b): bool
+    {
+        if ($a['ino'] === 0 && $b['ino'] === 0) {
+            return true;
+        }
+
+        return $a['dev'] === $b['dev'] && $a['ino'] === $b['ino'];
     }
 
     /**
@@ -319,25 +401,29 @@ final class AppFolder
      *
      * No Last-Modified goes out: a date cannot tell two such start pages apart either.
      *
-     * @throws RouterException When the file went away between the check and now
+     * Read through the handle that is sent afterwards: what it says about size and content
+     * belongs to the bytes that go out. The handle is read from its start; the response
+     * seeks back before it sends (FileStream).
+     *
+     * @param resource $handle
+     *
+     * @throws RouterException When the file cannot be read
      */
-    private static function etag(string $file): ?string
+    private static function etag(mixed $handle, string $file): ?string
     {
-        // Asked through one open handle: what it says about size and content belongs
-        // together, and a file that went away in this moment is an exception here, not a
-        // warning for the application's error handler.
-        try {
-            $handle = new \SplFileObject($file, 'rb');
-            $stat = $handle->fstat();
-            $kind = self::validatorOf($stat['size'], $stat['ino']);
-            $content = $kind === 'content' && $stat['size'] > 0 ? $handle->fread($stat['size']) : '';
-            // @codeCoverageIgnoreStart
-        } catch (\RuntimeException | \LogicException $e) {
-            // Not reachable in a test: the file was there and readable a moment ago. (A
-            // directory in its place is a LogicException of SplFileObject.)
-            throw new RouterException('Cannot read file', 0, $e, $file);
+        $stat = fstat($handle);
+        // @codeCoverageIgnoreStart
+        // Not reachable in a test: a plain file that was just opened has a size
+        if ($stat === false) {
+            throw new RouterException('Cannot read file', debugMessage: $file);
         }
+        // @codeCoverageIgnoreEnd
+
+        $kind = self::validatorOf($stat['size'], $stat['ino']);
+        $content = $kind === 'content' && $stat['size'] > 0 ? stream_get_contents($handle, $stat['size'], 0) : '';
+
         // A read that fails or comes short is not the end of the file
+        // @codeCoverageIgnoreStart
         if ($content === false || ($kind === 'content' && strlen($content) !== $stat['size'])) {
             throw new RouterException('Cannot read file', debugMessage: $file);
         }

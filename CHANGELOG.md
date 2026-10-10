@@ -45,6 +45,19 @@
   made PHP drop the status line and send its own 200, a 403 went out as a 200. `run()`
   answers 500 and the `error` hook gets the `RouterException`, `emit()` throws it.
 
+- A web app folder (`Router::app()`) opens a file before it reads anything of it, and
+  checks the open file: its path still resolves to itself inside the folder, and the file
+  under that path is the one that was opened (device and file number). A writer of the
+  folder who put a link to a file outside in place of a file between the check (realpath)
+  and the open had that file sent — a race that a test with a second process swapping the
+  file wins about 150 times in 3000 requests against 2.1.1, and never against this. ETag,
+  length and body come from the one open file. What PHP cannot rule out (a directory on the
+  way swapped for a link and back between two checks) is in the README; the folder stays
+  trusted, writable for the deployment only.
+- `Response::file()` takes `Content-Length` and the range from the file it opened
+  (`fstat()`), not from `filesize()` before it opens it: a file replaced in between went out
+  under the length of the other one — a corrupt download.
+
 ### Changed
 - With `implicitHead` (the default) a static GET route wins over a dynamic HEAD route, as
   a static route wins over a dynamic one for every method: `HEAD /users/me` is answered by

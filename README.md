@@ -1069,6 +1069,16 @@ it, not to its own path, and a folder that is a link is followed (deployments sw
 releases that way). Whoever can write into the folder, replace it, or rename a directory
 above it decides what is served — keep all of that writable for the deployment only.
 
+A file is resolved, then opened — and checked once more at the open file: its path still
+resolves to itself inside the folder, and the file under that path is the one that was
+opened (device and file number, where the system has them). Validator, length and body all
+come from that one open file. A writer who puts a link to a file elsewhere in place of a
+file of the folder between the two steps gets a 404 (up to 2.1.1 that file was sent).
+What this cannot rule out, without system calls PHP does not have: a writer who swaps a
+directory on the way for a link and back between two of the checks — another reason to
+keep the folder writable for the deployment only. A hard link is the file it names, as
+above.
+
 **Caching:** the start page goes out with `Cache-Control: no-cache`, and so does every
 other file — until you say which files never change. The router does not guess: a file
 that is wrongly cached for a year cannot be called back.

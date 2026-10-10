@@ -412,8 +412,8 @@ final class Response
         ?string $range = null,
         ?int $maxChunk = null,
     ): ResponseInterface {
-        // is_file() before filesize(): a directory reports a size, opens on some platforms
-        // and only blows up on the first read — long after the headers went out.
+        // is_file() before the file is opened: a directory opens on some platforms and only
+        // blows up on the first read — long after the headers went out.
         if (!is_file($path) || !is_readable($path)) {
             throw new RouterException('Cannot read file', debugMessage: $path);
         }
@@ -422,18 +422,52 @@ final class Response
             throw new RouterException('maxChunk must be at least 1');
         }
 
-        $size = filesize($path);
+        $handle = @fopen($path, 'rb');
         // @codeCoverageIgnoreStart
-        // Not reachable in a test: is_file() above filled PHP's stat cache, and filesize()
-        // answers from it. Kept for wrappers that stat without a size.
-        if ($size === false) {
-            throw new RouterException('Cannot determine size of file', debugMessage: $path);
+        // Not reachable in a test: is_readable() said yes a moment ago
+        if ($handle === false) {
+            throw new RouterException('Cannot read file', debugMessage: $path);
         }
         // @codeCoverageIgnoreEnd
 
+        return self::fileFromHandle($handle, $path, $filename ?? basename($path), $contentType, $inline, $range, $maxChunk);
+    }
+
+    /**
+     * The response of file() for a handle that is open already. Length, range and body all
+     * come from that one handle — measured with fstat() — so that Content-Length and
+     * Content-Range describe the bytes that go out, also where the file is replaced on disk
+     * meanwhile. AppFolder hands in the handle it checked against its folder.
+     *
+     * @internal
+     *
+     * @param resource $handle Opened for reading; taken over (the body closes it, a 416 closes it at once)
+     *
+     * @throws RouterException When the size of the file cannot be determined
+     */
+    public static function fileFromHandle(
+        mixed $handle,
+        string $path,
+        string $filename,
+        string $contentType,
+        bool $inline,
+        ?string $range,
+        ?int $maxChunk = null,
+    ): ResponseInterface {
+        $stat = fstat($handle);
+        // @codeCoverageIgnoreStart
+        // Not reachable in a test: a plain file has a size. Kept for wrappers that stat without one.
+        if ($stat === false) {
+            fclose($handle);
+
+            throw new RouterException('Cannot determine size of file', debugMessage: $path);
+        }
+        // @codeCoverageIgnoreEnd
+        $size = (int) $stat['size'];
+
         $headers = [
             'Content-Type' => $contentType,
-            'Content-Disposition' => self::contentDisposition($filename ?? basename($path), $inline),
+            'Content-Disposition' => self::contentDisposition($filename, $inline),
             'Accept-Ranges' => 'bytes',
             'X-Content-Type-Options' => 'nosniff',
         ];
@@ -441,16 +475,16 @@ final class Response
         $parsed = $range === null ? null : self::parseRange($range, $size);
 
         if ($parsed === null) {
-            return new Psr7Response(
-                200,
-                $headers + ['Content-Length' => (string) $size],
-                new FileStream($path),
-            );
+            $body = FileStream::fromHandle($handle, $path);
+
+            return new Psr7Response(200, $headers + ['Content-Length' => (string) $body->getSize()], $body);
         }
 
         // Unsatisfiable range (RFC 9110): answer 416 and name the current length. No
         // Content-Type/Disposition — they would describe a body that is not there.
         if ($parsed === false) {
+            fclose($handle);
+
             return new Psr7Response(
                 416,
                 [
@@ -474,7 +508,7 @@ final class Response
                 'Content-Range' => sprintf('bytes %d-%d/%d', $start, $end, $size),
                 'Content-Length' => (string) $length,
             ],
-            new FileStream($path, $start, $length),
+            FileStream::fromHandle($handle, $path, $start, $length),
         );
     }
 
