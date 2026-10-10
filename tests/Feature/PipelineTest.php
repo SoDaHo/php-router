@@ -80,7 +80,6 @@ class PipelineTest extends TestCase
      */
     private function router(array $config = []): Router
     {
-        /** @phpstan-ignore argument.type */
         return Router::create($config + ['debug' => false])->loadRoutes($this->routesFile);
     }
 
@@ -597,7 +596,7 @@ class PipelineTest extends TestCase
     public function testErrorHandlerThatReturnsSomethingElseCountsAsFailed(): void
     {
         $hook = [];
-        /** @phpstan-ignore argument.type */
+        /** @phpstan-ignore argument.type (an error handler that returns no response, on purpose) */
         $router = $this->router()->setErrorHandler(fn () => 'not a response');
         $router->on('error', function (array $data) use (&$hook): void {
             $hook[] = $data['exception']::class;

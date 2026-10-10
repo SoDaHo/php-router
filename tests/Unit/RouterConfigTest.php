@@ -91,7 +91,6 @@ class RouterConfigTest extends TestCase
      */
     private function router(array $config = []): Router
     {
-        /** @phpstan-ignore argument.type */
         return Router::create($config)->loadRoutes($this->routesFile);
     }
 
@@ -102,7 +101,6 @@ class RouterConfigTest extends TestCase
      */
     private function routerFromEnv(array $config = []): Router
     {
-        /** @phpstan-ignore argument.type */
         return Router::fromEnv($config)->loadRoutes($this->routesFile);
     }
 
@@ -356,7 +354,6 @@ class RouterConfigTest extends TestCase
     {
         foreach (['create', 'fromEnv'] as $factory) {
             try {
-                /** @phpstan-ignore argument.type */
                 Router::$factory($config);
                 $this->fail("{$factory}() accepted it");
             } catch (RouterException $e) { // @phpstan-ignore catch.neverThrown (a variable static call PHPStan does not follow)
@@ -492,7 +489,6 @@ class RouterConfigTest extends TestCase
         $this->expectException(RouterException::class);
         $this->expectExceptionMessage("Config 'debug' must be a boolean, got {$type}");
 
-        /** @phpstan-ignore argument.type */
         Router::create(['debug' => $value]);
     }
 
@@ -784,7 +780,6 @@ class RouterConfigTest extends TestCase
         $this->expectException(RouterException::class);
         $this->expectExceptionMessage("Config 'trailingSlash' must be 'strict' or 'ignore'");
 
-        /** @phpstan-ignore argument.type */
         Router::create(['trailingSlash' => $value]);
     }
 
@@ -989,7 +984,7 @@ class RouterConfigTest extends TestCase
     {
         foreach ([['https://example.org'], 5, true, 1.5] as $value) {
             try {
-                /** @phpstan-ignore argument.type */
+                /** @phpstan-ignore argument.type (a type the config refuses, on purpose) */
                 Router::create(['baseUrl' => $value]);
                 $this->fail('Accepted ' . var_export($value, true));
             } catch (RouterException $e) {
@@ -1145,7 +1140,6 @@ class RouterConfigTest extends TestCase
         $this->expectException(RouterException::class);
         $this->expectExceptionMessage("Config 'emitChunkSize' must be an integer between 1024 and 16777216");
 
-        /** @phpstan-ignore argument.type */
         Router::create(['emitChunkSize' => $value]);
     }
 

@@ -1,10 +1,9 @@
 # The tests, on a level of their own: level 8. Level max (src, phpstan.neon) would ask for
 # a type behind every value a test decodes from a response body (mixed) — some 450 places
-# at the time of 2.2.0, left for a release of their own. A few annotations in the tests mark
-# those places already; on this level they match nothing, which is not reported.
+# at the time of 2.2.0, left for a release of their own. Every ignore in the tests names its
+# identifier and its reason.
 parameters:
     level: 8
     paths:
         - tests
     tmpDir: .phpstan.cache
-    reportUnmatchedIgnoredErrors: false

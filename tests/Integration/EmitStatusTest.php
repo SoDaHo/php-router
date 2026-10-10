@@ -66,7 +66,6 @@ class EmitStatusTest extends TestCase
         $_SERVER['SERVER_PROTOCOL'] = 'HTTP/1.1';
 
         ob_start();
-        /** @phpstan-ignore argument.type */
         Router::create($config + ['debug' => false])->loadRoutes($this->routesFile)->run();
 
         return (string) ob_get_clean();
@@ -188,7 +187,6 @@ class EmitStatusTest extends TestCase
             return 'x';
         });
 
-        /** @phpstan-ignore argument.type */
         $router = Router::create($config + ['debug' => false]);
 
         ob_start();

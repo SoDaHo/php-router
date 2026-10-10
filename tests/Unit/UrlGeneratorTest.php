@@ -519,7 +519,6 @@ class UrlGeneratorTest extends TestCase
         $name = (string) array_column(RouteCollector::parts($pattern), 'name')[1];
 
         try {
-            /** @phpstan-ignore argument.type */
             $generator->url('r', [$name => $value]);
             $this->fail('An address was generated');
         } catch (RouterException $e) {
@@ -637,7 +636,6 @@ class UrlGeneratorTest extends TestCase
     {
         $generator = new UrlGenerator([new Route(['GET'], $pattern, 'handler', [], 'r')], $patterns);
 
-        /** @phpstan-ignore argument.type */
         $this->assertSame($address, $generator->url('r', $params));
     }
 
@@ -707,7 +705,6 @@ class UrlGeneratorTest extends TestCase
         $generator = new UrlGenerator([new Route(['GET'], $pattern, 'handler', [], 'r')]);
 
         try {
-            /** @phpstan-ignore argument.type */
             $generator->url('r', $params);
             $this->fail('An address was generated');
         } catch (RouterException $e) {
@@ -753,7 +750,7 @@ class UrlGeneratorTest extends TestCase
         $generator = new UrlGenerator(['p' => '/p/{a}/{b}']);
 
         try {
-            /** @phpstan-ignore argument.type */
+            /** @phpstan-ignore argument.type (null is no value: what is refused, on purpose) */
             $generator->url('p', ['a' => 'x', 'b' => null]);
             $this->fail('An address was generated');
         } catch (RouterException $e) {

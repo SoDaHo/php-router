@@ -64,7 +64,6 @@ class RouteMatchTest extends TestCase
      */
     private function router(array $config = []): Router
     {
-        /** @phpstan-ignore argument.type */
         return Router::create($config + ['debug' => false])->loadRoutes($this->routesFile);
     }
 

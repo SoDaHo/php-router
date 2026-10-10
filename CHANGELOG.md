@@ -168,7 +168,8 @@ application.
 - PHPStan analyses the tests as well, on level 8 (`phpstan.tests.neon`; `composer analyse`
   runs both): `src` stays on level max. Level max over `tests` asks for a type behind every
   value a test decodes from a response body — about 450 places, more than this release
-  should carry; the tests' few ignores name their identifier and reason.
+  should carry. Every ignore in the tests names its identifier and its reason; the ones
+  without a reason that matched nothing on this level are gone.
 - New public methods marked `@internal` (not part of the contract, used inside the
   library): `Route::freeze()`, `Route::addMiddleware()`, `RouteCollector::assertNamesOnce()`,
   `FileStream::fromHandle()`, `Response::fileFromHandle()`, `AppFolder::openWithin()`.

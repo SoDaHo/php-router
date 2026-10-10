@@ -128,7 +128,6 @@ class AppFolderTest extends TestCase
      */
     private function router(array $config = []): Router
     {
-        /** @phpstan-ignore argument.type */
         return Router::create($config + ['debug' => false])->loadRoutes($this->routesFile)->app('/login', $this->app);
     }
 
@@ -1457,7 +1456,6 @@ class AppFolderTest extends TestCase
         };
 
         try {
-            /** @phpstan-ignore argument.type */
             Router::create()->app($prefix, $directory, $options);
             $this->fail('The registration was accepted');
         } catch (RouterException $e) {
