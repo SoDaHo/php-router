@@ -1107,15 +1107,19 @@ final class Router implements RouterInterface
      * type 'emit'). Fields that exist once per message replace what the host set, all other
      * fields add up.
      *
-     * @param bool $withBody False for a HEAD request: the body is not read at all
+     * @param bool $withBody False for a HEAD request: the body is not read at all — and
+     *                       must be, for an answer to HEAD that keeps the Content-Length of
+     *                       the GET: emit() cannot tell it from a body that is missing
      *
      * @throws RouterException If the body cannot be read, the reason phrase has a control
      *                         character other than a tab, the protocol version is no
-     *                         version, or a header line is none — before anything is sent;
-     *                         and after the headers, when the body gives no byte for
-     *                         'emitIdleTimeout' seconds before its end, ends short of its
-     *                         Content-Length after a first byte, or goes beyond it (what
-     *                         goes beyond is not sent)
+     *                         version, a header line is none, the response carries a
+     *                         Transfer-Encoding, a Content-Length that is not one value of
+     *                         digits, or one above 0 for a body that is empty — before
+     *                         anything is sent; and after the headers, when the body gives
+     *                         no byte for 'emitIdleTimeout' seconds before its end, ends
+     *                         short of its Content-Length, or goes beyond it (what goes
+     *                         beyond is not sent)
      */
     public function emit(ResponseInterface $response, bool $withBody = true): void
     {
@@ -1168,11 +1172,13 @@ final class Router implements RouterInterface
      *
      * @throws RouterException If the response body cannot be read (closed or detached), the
      *                         reason phrase has a control character other than a tab, the
-     *                         protocol version is no version (a digit, a dot and a digit), or
-     *                         a header has a name that is no token or a value with a control
-     *                         character other than a tab
+     *                         protocol version is no version (a digit, a dot and a digit), a
+     *                         header has a name that is no token or a value with a control
+     *                         character other than a tab, or the framing fields say nothing
+     *                         one can rely on (see framing()), or a Content-Length above 0
+     *                         stands in front of a body that is empty
      *
-     * @return array{status: string, code: int, headers: array<int|string, array<string>>, body: StreamInterface}
+     * @return array{status: string, code: int, headers: array<int|string, array<string>>, body: StreamInterface, length: ?int}
      */
     private function prepare(ResponseInterface $response, bool $withBody): array
     {
@@ -1242,6 +1248,21 @@ final class Router implements RouterInterface
             }
         }
 
+        $length = self::framing($headers);
+        $code = $response->getStatusCode();
+
+        // A Content-Length above 0 in front of a body that is empty promises bytes that
+        // never come — a kept-alive client waits for them, or reads the next response as
+        // this one's body. Known before anything is sent where the body knows its size (a
+        // body of unknown size is held to it while it is sent, see transmit()). The answer to
+        // HEAD keeps the GET's Content-Length: it goes out with $withBody false.
+        if ($withBody && $length !== null && $length > 0 && !self::bodiless($code) && $body->getSize() === 0) {
+            throw new RouterException(
+                'Response body is empty, but its Content-Length is not (an answer to HEAD is emitted with withBody false)',
+                debugMessage: sprintf('Content-Length %d', $length),
+            );
+        }
+
         // For string bodies the emitted bytes are identical to the previous `echo
         // $response->getBody()`: Nyholm's __toString() rewound the stream and returned
         // everything, which is exactly what transmit() does piecewise.
@@ -1249,11 +1270,71 @@ final class Router implements RouterInterface
             $body->rewind();
         }
 
-        return ['status' => $statusLine, 'code' => $response->getStatusCode(), 'headers' => $headers, 'body' => $body];
+        return ['status' => $statusLine, 'code' => $code, 'headers' => $headers, 'body' => $body, 'length' => $length];
     }
 
     /**
-     * @param array{status: string, code: int, headers: array<int|string, array<string>>, body: StreamInterface} $prepared
+     * The Content-Length a response's body is held to, null for none — once the fields that
+     * say where a body ends (RFC 9112, 6) are known to say one thing. The emitter applies no
+     * transfer coding and sends the body as it is: a Transfer-Encoding of the response's own
+     * would announce a framing the bytes do not have (with a Content-Length next to it, two
+     * framings a sender must not combine). A Content-Length is one value of digits: two of
+     * them ('3' and '5', or '3, 3' in one line), or one that is no number, used to be
+     * treated as no length at all — and sent as it was, a body of any length behind it.
+     *
+     * @param array<int|string, array<string>> $headers
+     *
+     * @throws RouterException If the response has a Transfer-Encoding, or a Content-Length
+     *                         that is not exactly one value of digits (up to 18 of them)
+     */
+    private static function framing(array $headers): ?int
+    {
+        $lengths = [];
+
+        // By name in any case: a PSR-7 object of another make may keep 'content-length' and
+        // 'Content-Length' as two fields
+        foreach ($headers as $name => $values) {
+            $field = strtolower((string) $name);
+
+            if ($field === 'transfer-encoding') {
+                throw new RouterException(
+                    'Response must not carry a Transfer-Encoding: the emitter applies no transfer coding, the body goes out as it is',
+                    debugMessage: (string) json_encode($values, JSON_INVALID_UTF8_SUBSTITUTE),
+                );
+            }
+
+            if ($field === 'content-length') {
+                array_push($lengths, ...$values);
+            }
+        }
+
+        if ($lengths === []) {
+            return null;
+        }
+
+        // Digits only, one value — and no more than PHP counts to: 19 digits and more would
+        // be cut to PHP_INT_MAX
+        if (count($lengths) !== 1 || preg_match('/^\d+$/D', $lengths[0]) !== 1 || strlen(ltrim($lengths[0], '0')) > 18) {
+            throw new RouterException(
+                'Response Content-Length must be exactly one value of digits',
+                debugMessage: (string) json_encode($lengths, JSON_INVALID_UTF8_SUBSTITUTE),
+            );
+        }
+
+        return (int) $lengths[0];
+    }
+
+    /**
+     * Whether a response of this status has no content, whatever its headers say (RFC 9110,
+     * 6.4.1): a 1xx, 204 or 304.
+     */
+    private static function bodiless(int $code): bool
+    {
+        return $code < 200 || $code === 204 || $code === 304;
+    }
+
+    /**
+     * @param array{status: string, code: int, headers: array<int|string, array<string>>, body: StreamInterface, length: ?int} $prepared
      */
     private function transmit(array $prepared, bool $withBody): void
     {
@@ -1301,11 +1382,10 @@ final class Router implements RouterInterface
         // without a byte — which still guards against a stream that never reports eof — and
         // then said: the client got less than the response promised, which must not look
         // like an answer that went out whole.
-        $expected = self::contentLength($prepared['headers']);
+        $expected = $prepared['length'];
         // A 1xx, 204 or 304 has no body whatever its Content-Length says (RFC 9110, 8.6): no
         // length is held against what such a response sends
-        $code = $prepared['code'];
-        $bodiless = $code < 200 || $code === 204 || $code === 304;
+        $bodiless = self::bodiless($prepared['code']);
         $sent = 0;
         $pause = 0;
         // When the wait for the next byte ends, in seconds of the monotonic clock: set by the
@@ -1355,31 +1435,14 @@ final class Router implements RouterInterface
             echo $chunk;
         }
 
-        // So must a body that ended short of its Content-Length — once it sent a byte: one
-        // that sent none is a response without a body (the answer to HEAD keeps the
-        // Content-Length of the GET, and emit() cannot know it answers HEAD)
-        if ($expected !== null && $sent > 0 && $sent < $expected && !$bodiless) {
+        // So must a body that ended short of its Content-Length — also one that sent no byte
+        // at all: a body of unknown size that turns out empty is no answer without a body
+        // (an answer to HEAD is emitted with $withBody false, see prepare())
+        if ($expected !== null && $sent < $expected && !$bodiless) {
             throw new RouterException(
                 'Response body ended before its Content-Length',
                 debugMessage: sprintf('%d of %d bytes sent', $sent, $expected),
             );
         }
-    }
-
-    /**
-     * The Content-Length a response names — one value of digits — or null for none (or one
-     * that is no length: the body decides then).
-     *
-     * @param array<int|string, array<string>> $headers
-     */
-    private static function contentLength(array $headers): ?int
-    {
-        foreach ($headers as $name => $values) {
-            if (strtolower((string) $name) === 'content-length' && count($values) === 1 && preg_match('/^\d+$/D', $values[0]) === 1) {
-                return (int) $values[0];
-            }
-        }
-
-        return null;
     }
 }

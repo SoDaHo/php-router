@@ -69,6 +69,16 @@ from SemVer by the owner's decision of 2026-10-10. See "Upgrading from
   object that does not check, Nyholm's does — failed only in `header()`, after the lines in
   front of it went out: a `Location` there had made PHP's status a 302, and an intended 403
   was lost.
+- `run()` and `emit()` refuse framing fields that say nothing one can rely on, before
+  anything is sent: a `Content-Length` that is not exactly one value of digits (`abc`,
+  `3, 3`, two fields `3` and `5`, one under two spellings of its name, a sign, a blank, 19
+  digits or more) and any `Transfer-Encoding` of the response's own — the emitter applies
+  no transfer coding, and one next to a `Content-Length` is two framings a sender must not
+  combine (RFC 9112, 6). Such a length was treated as no length and sent as it was, with a
+  body of any length behind it, and `Transfer-Encoding: chunked` went out in front of raw
+  bytes: a kept-alive client or a proxy could read the rest as the next response. A
+  `Content-Length` above 0 in front of a body that is empty is refused as well (see
+  "Changed").
 
 ### Changed
 - URL encoding can no longer be turned off. `'urlEncoding' => false` (or `0`, `'off'`,
@@ -182,13 +192,16 @@ from SemVer by the owner's decision of 2026-10-10. See "Upgrading from
   most), and a body that gives no byte for `emitIdleTimeout` seconds (30, counted from the
   first read that gave nothing; the brake against a stream that never reports its end) —
   a byte that comes later, after a pause or from a read that blocked, is too late and
-  winds no clock back —, or ends short of its `Content-Length` after a first byte, ends in a
+  winds no clock back —, or ends short of its `Content-Length`, ends in a
   `RouterException`: `run()` reports it to the `error` hook with the status that went out,
-  `emit()` throws it. A body that sent no byte (the answer to `HEAD`, which keeps the
-  `Content-Length` of the `GET`, also through `emit()` without `withBody: false`) and the
-  body of a 1xx, 204 or 304 are no short bodies (RFC 9110, 8.6). A body longer than its
-  `Content-Length` went out whole — a kept-alive client read the rest as the start of the
-  next response; it is sent up to the length now, never beyond, and ends the same way.
+  `emit()` throws it. A body that sends no byte under a `Content-Length` above 0 is a short
+  one too — refused before anything is sent where the body says its size is 0 (`run()`
+  answers 500 then). So the answer to `HEAD`, which keeps the `Content-Length` of the `GET`,
+  goes out through `emit($response, withBody: false)` — `emit()` cannot tell it from a body
+  that is missing; `run()` does this itself. The body of a 1xx, 204 or 304 is no short body (RFC 9110, 8.6).
+  A body longer than its `Content-Length` went out whole — a kept-alive client read the
+  rest as the start of the next response; it is sent up to the length now, never beyond,
+  and ends the same way.
 
 - `basePath` and `routesFile` in the config take a string (or `null` for their default;
   `basePath` also `false`, what `getenv()` gives without the variable, as `baseUrl` does);
@@ -348,12 +361,21 @@ look at:
   now: `absoluteUrl()` throws then (2.1.1 gave a relative address).
 - **`RfcResponder`**: `type`, `title` and `status` in the details are dropped.
 - **`emit()`** can throw after the headers went out: when the body gives no byte for
-  `emitIdleTimeout` seconds (30), ends short of its `Content-Length` after a first byte, or
-  is longer than it — sent up to it, not beyond (`run()` reports it instead). 2.1.1 stopped silently at the third empty read in a row; a
-  body that pauses longer than 30 seconds needs a higher `emitIdleTimeout`.
+  `emitIdleTimeout` seconds (30), ends short of its `Content-Length` (also without a byte),
+  or is longer than it — sent up to it, not beyond (`run()` reports it instead). 2.1.1
+  stopped silently at the third empty read in a row; a body that pauses longer than 30
+  seconds needs a higher `emitIdleTimeout`.
+- **The answer to `HEAD` through `emit()`** needs `withBody: false`
+  (`$router->emit($response, withBody: $request->getMethod() !== 'HEAD')`): it keeps the
+  `Content-Length` of the `GET` with an empty body, which `emit($response)` refuses now
+  before anything is sent — the README showed `emit($response)` alone for it. `run()`
+  is not affected.
 - **A response's protocol version** has to be a version (`1.1`, `2`), and every header line
   a token name and a value without control characters other than a tab — a response that
-  breaks this gets the router's 500 from `run()`, an exception from `emit()`.
+  breaks this gets the router's 500 from `run()`, an exception from `emit()`. So does a
+  response with a `Transfer-Encoding` of its own, or a `Content-Length` that is not exactly
+  one value of digits: drop the `Transfer-Encoding` (the web server applies one where it
+  needs one) and set one `Content-Length` or none.
 - **PHPStan:** `Route::$middleware` is `array<string|object>`; the three route properties
   have `set` hooks (no writes into them in place).
 

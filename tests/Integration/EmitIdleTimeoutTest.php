@@ -18,8 +18,9 @@ use Sodaho\Router\Router;
  * A body that has not ended may give '' while its next bytes are on their way (PSR-7).
  * 2.1.1 stopped silently at the third empty read in a row, and the first 2.2.0 candidate
  * threw there — both cut 'A', '', '', '', 'B' short. emit() waits now, with a growing pause,
- * and gives up only after 'emitIdleTimeout' seconds without a byte. A body that sent no
- * byte, or belongs to a 1xx, 204 or 304, is no short body whatever its Content-Length says.
+ * and gives up only after 'emitIdleTimeout' seconds without a byte. The body of a 1xx, 204
+ * or 304 is no short body whatever its Content-Length says; a body that sends no byte is
+ * one (see EmitFramingTest), and the answer to HEAD goes out with withBody false.
  */
 #[RunTestsInSeparateProcesses]
 class EmitIdleTimeoutTest extends TestCase
@@ -175,8 +176,6 @@ class EmitIdleTimeoutTest extends TestCase
     public static function responsesThatAreNoShortBody(): array
     {
         return [
-            // The answer to HEAD keeps the GET's Content-Length, and emit() cannot know it is one
-            'no byte at all' => [200, ''],
             '304 with a body object' => [304, 'abc'],
             '204 with a body object' => [204, 'abc'],
             '1xx with a body object' => [103, 'abc'],
@@ -209,11 +208,21 @@ class EmitIdleTimeoutTest extends TestCase
         }
         $this->assertSame('3', $response->getHeaderLine('Content-Length'));
 
-        // As README shows it: emit() without withBody false
+        // As README shows it: emit() with withBody false for HEAD. Without it, emit() cannot
+        // tell the answer to HEAD (the GET's Content-Length, no body) from a body that is
+        // missing — and refuses it before anything is sent
         $level = ob_get_level();
         ob_start();
         try {
-            $router->emit($response);
+            $router->emit($response, withBody: false);
+            $this->assertSame('', ob_get_contents());
+
+            try {
+                $router->emit($response);
+                $this->fail('An empty body went out under a Content-Length of 3');
+            } catch (RouterException $e) {
+                $this->assertSame('Response body is empty, but its Content-Length is not (an answer to HEAD is emitted with withBody false)', $e->getMessage());
+            }
             $this->assertSame('', ob_get_contents());
         } finally {
             while (ob_get_level() > $level) {

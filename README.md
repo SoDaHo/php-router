@@ -913,8 +913,9 @@ $router->run();
 $request = $serverRequestFactory->fromGlobals();
 $response = $router->handle($request);  // Returns ResponseInterface
 
-// Emit it — with the router's emitter or any other PSR-7 emitter
-$router->emit($response);
+// Emit it — with the router's emitter or any other PSR-7 emitter. withBody false for HEAD:
+// its answer keeps the GET's Content-Length without a body, which emit() cannot tell
+// from a body that is missing
 $router->emit($response, withBody: $request->getMethod() !== 'HEAD');
 ```
 
@@ -932,21 +933,25 @@ is no version (a digit, and a dot and a digit for a minor one: `1.1`, `1.0`, `2`
 name that is no token (RFC 9110) and a header value with a control character other than a
 tab are refused — PHP would drop such a status line and send its own 200, and refuse such a
 header line only after the lines in front of it went out (a `Location` among them makes
-the status a 302). `run()` answers 500 then (the `error`
+the status a 302). So are the fields that say where the body ends, where they say nothing
+one can rely on: a `Content-Length` that is not exactly one value of digits (`abc`, `3, 3`,
+two of them) and any `Transfer-Encoding` — the emitter applies no transfer coding, the body
+goes out as it is (the web server frames it). A `Content-Length` above 0 in front of a body
+whose size is 0 is refused too. `run()` answers 500 then (the `error`
 hook gets the `RouterException`), `emit()` throws it. A read that gives `''` before the end
 of the body is waited past (PSR-7 allows it while the next bytes are on their way), with a
 pause that grows to 50 ms and never reaches past the deadline; a body that gives no byte
 for `emitIdleTimeout` seconds (30) — counted from the first read that gave nothing; a byte
-that comes after that is too late —, or ends short of its `Content-Length` after a first
-byte, is given up on with a
+that comes after that is too late —, or ends short of its `Content-Length` (also without a
+byte), is given up on with a
 `RouterException` once the headers are out: `run()` reports it to the `error` hook (with the
 status that went out), `emit()` throws it — the client got less than the response promised.
 A body longer than its `Content-Length` is sent up to it, never beyond (a kept-alive client
-would read the rest as the next response), and ends the same way.
-A body that sent no byte is no short one (the answer to `HEAD` keeps the `Content-Length` of
-the `GET`, also through `emit($response)` as above), nor is that of a 1xx, 204 or 304. If
-output has already started, nothing can be sent any more: the `error` hook is called with
-`type: 'emit'`.
+would read the rest as the next response), and ends the same way. The answer to `HEAD`
+keeps the `Content-Length` of the `GET` without a body: `run()` sends it without reading the
+body, `emit()` with `withBody: false` as above. The body of a 1xx, 204 or 304 is no short
+one. If output has already started, nothing can be sent any more: the `error` hook is
+called with `type: 'emit'`.
 
 ## Dependency Injection
 
@@ -1040,7 +1045,7 @@ where the log is yours alone; show neither to a client.
 
 | Exception | When |
 |-----------|------|
-| `RouterException` | Everything the router refuses: a route, pattern, fragment of `addPattern()`, middleware key or redirect target where it is written; a config value; a change to a route once the table is built; a placeholder named like an attribute of the request, a container entry that is no middleware, a redirect rendering that would change scheme or host or make a dot segment, a status line or header line that is none, a body that gives no byte for `emitIdleTimeout` seconds, ends short of its `Content-Length` or goes beyond it — while a request is handled each of these goes to the `error` hook, as a 500 where nothing was sent yet |
+| `RouterException` | Everything the router refuses: a route, pattern, fragment of `addPattern()`, middleware key or redirect target where it is written; a config value; a change to a route once the table is built; a placeholder named like an attribute of the request, a container entry that is no middleware, a redirect rendering that would change scheme or host or make a dot segment, a status line or header line that is none, a `Transfer-Encoding` or a `Content-Length` that is not one value of digits, a body that gives no byte for `emitIdleTimeout` seconds, ends short of its `Content-Length` or goes beyond it — while a request is handled each of these goes to the `error` hook, as a 500 where nothing was sent yet |
 | `NotFoundException` | Never thrown by the router (it answers 404 itself); for your own code |
 | `MethodNotAllowedException` | Never thrown by the router (it answers 405 itself); for your own code |
 | `RouteNotFoundException` | Named route doesn't exist (URL generation); `getDebugMessage()` lists every route name |
