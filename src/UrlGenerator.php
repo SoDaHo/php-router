@@ -187,6 +187,9 @@ final class UrlGenerator
      * @param array<string, string|int|float|bool> $params Route parameters
      *
      * @throws RouteNotFoundException If route name does not exist
+     * @throws RouterException If the parameters do not lead back to the route, or the address
+     *                         — base path included — would be no path on this site (a '.' or
+     *                         '..' segment, a backslash, '//' in front)
      *
      * @return string Generated URL
      */
@@ -194,6 +197,18 @@ final class UrlGenerator
     {
         $pattern = $this->getPatternByName($name);
         $address = self::encodeLiteral($this->basePath) . $this->replaceParameters($name, $pattern, $params);
+
+        // A '.' or '..' segment never arrives: a client resolves it before it asks (the
+        // encoded forms too). Looked for in the finished address, base path included —
+        // '/tenant/..' in front of '/login' made '/tenant/../login', which a client reads as
+        // '/login', outside the base path. '/dl/{name}.json' with the value '..' has none,
+        // '/x/{a}.' with a value that the pattern lets be '.' has one.
+        if (preg_match('#(?:^|/)\.\.?(?:/|$)#D', $address) === 1) {
+            throw new RouterException(
+                'The address would contain a "." or ".." path segment, which a client resolves before it asks',
+                debugMessage: $address,
+            );
+        }
 
         // What goes out has the form of a path on this site: one slash in front and no
         // backslash (a client reads it as a slash). Parameter values cannot break that
@@ -216,7 +231,7 @@ final class UrlGenerator
      * @param array<string, string|int|float|bool> $params Route parameters
      *
      * @throws RouteNotFoundException If route name does not exist
-     * @throws RouterException If baseUrl is not configured
+     * @throws RouterException If baseUrl is not configured, or as url()
      *
      * @return string Generated absolute URL
      */
@@ -391,18 +406,9 @@ final class UrlGenerator
             ),
         );
 
-        // A '.' or '..' segment never arrives: a client resolves it before it asks (the
-        // encoded forms too). Looked for in the finished address — '/dl/{name}.json' with
-        // the value '..' has none, '/x/{a}.' with a value that the pattern lets be '.' has one.
-        if (preg_match('#(?:^|/)\.\.?(?:/|$)#D', $url) === 1) {
-            throw new RouterException(
-                'The address would contain a "." or ".." path segment, which a client resolves before it asks',
-                debugMessage: $url,
-            );
-        }
-
-        // Nor does one that begins with '//': a client reads what follows as another host.
-        // ('/{path:any}' with the value '/evil.example/x' — 1.x wrote '/%2Fevil.example%2Fx'.)
+        // An address that begins with '//' is none of this site: a client reads what follows
+        // as another host. ('/{path:any}' with the value '/evil.example/x' — 1.x wrote
+        // '/%2Fevil.example%2Fx'.)
         if (str_starts_with($url, '//')) {
             throw new RouterException(
                 'The address would begin with "//", which a client reads as another host',

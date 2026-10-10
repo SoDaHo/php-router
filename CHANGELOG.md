@@ -50,6 +50,13 @@ from SemVer by the owner's decision of 2026-10-10. See "Upgrading from
   a rendering that would change scheme or host. A `..` the target writes itself
   (`'../{x}'`) and dots that make no segment of their own (`'/dl/{x}.json'` with `..`) go
   out as before.
+- `url()` and `absoluteUrl()` look for a `.` or `..` segment in the finished address, base
+  path included. They looked in what the route made of its values only, and the base path
+  was put in front afterwards: a `UrlGenerator` built by hand with `setBasePath('/tenant/..')`
+  wrote `/tenant/../login` for `/login`, which a client reads as `/login` — outside the
+  base path a callback or logout address was meant to stay under (README and the class
+  promised no such segment). Such an address is refused with a `RouterException` now. The
+  router's `basePath` refused such a path where it is configured already.
 - `RedirectHandler` refuses in its constructor what `RouteCollector::redirect()` refused for
   it: a target with a control character other than a tab, a placeholder that is not
   `{name}` or one where scheme or host belong (`'{a}:{b}'`, `'https:{path}'`,
@@ -368,6 +375,9 @@ look at:
   parser takes, a port of digits (not an empty one), no user information or backslash —
   also for `UrlGenerator::setBaseUrl()` on a generator built by hand, where `''` means none
   now: `absoluteUrl()` throws then (2.1.1 gave a relative address).
+- **A `UrlGenerator` built by hand** whose base path has a `.` or `..` segment
+  (`setBasePath('/tenant/..')`) gave an address with it; `url()` and `absoluteUrl()` throw
+  now. Write the base path without such a segment.
 - **`RfcResponder`**: `type`, `title` and `status` in the details are dropped.
 - **`emit()`** can throw after the headers went out: when the body gives no byte for
   `emitIdleTimeout` seconds (30), ends short of its `Content-Length` (also without a byte),
