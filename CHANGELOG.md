@@ -36,6 +36,12 @@
   of a route of your own — got none of these checks; `'{a}:{b}'` was caught only as the
   redirect went out.
 
+- `run()` and `emit()` refuse a protocol version that is no version — a digit, and a dot
+  and a digit for a minor one (`1.1`, `1.0`, `2`) — before anything is sent, as they refuse
+  a reason phrase with a control character: `withProtocolVersion("1.1\r\nX-Injected: 1")`
+  made PHP drop the status line and send its own 200, a 403 went out as a 200. `run()`
+  answers 500 and the `error` hook gets the `RouterException`, `emit()` throws it.
+
 ### Changed
 - Two routes with the same name are refused with a `DuplicateRouteException` when the route
   table is built (and by `new UrlGenerator()` for a list of `Route` objects): the first

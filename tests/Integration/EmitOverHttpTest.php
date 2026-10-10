@@ -94,6 +94,10 @@ class EmitOverHttpTest extends TestCase
                     \$r->get('/phrase-control', fn() => Response::text('teapot')->withStatus(418, "Bad\\x01Phrase"));
                     \$r->get('/phrase-beyond-ascii', fn() => Response::accepted(['job' => 7])->withStatus(202, 'Akzeptiert ä'));
                     \$r->get('/phrase-tab', fn() => Response::text('tab')->withStatus(200, "All\\tright"));
+                    \$r->get('/version-line-break', fn() => Response::forbidden()->withProtocolVersion("1.1\\r\\nX-Injected: 1"));
+                    \$r->get('/version-with-a-status', fn() => Response::forbidden()->withProtocolVersion('1.1 200'));
+                    \$r->get('/version-two', fn() => Response::forbidden()->withProtocolVersion('2'));
+                    \$r->get('/version-one-zero', fn() => Response::forbidden()->withProtocolVersion('1.0'));
                     \$r->get('/early-broken', fn() => new class extends \\Nyholm\\Psr7\\Response {
                         public function getProtocolVersion(): string { throw new \\RuntimeException('protocol failed'); }
                     });
@@ -430,6 +434,37 @@ class EmitOverHttpTest extends TestCase
                 (string) file_get_contents(self::$docroot . '/error.log'),
                 $path
             );
+        }
+    }
+
+    /**
+     * The protocol version stands in the same status line, unchecked by the PSR-7 objects:
+     * "1.1\r\nX-Injected: 1" made PHP drop the line and send its own 200 — a 403 went out
+     * as a 200. Refused before anything is sent; a version such as "2" or "1.0" goes out.
+     */
+    public function testProtocolVersionThatIsNoVersionIsA500(): void
+    {
+        $versions = [
+            '/version-line-break' => '"1.1\r\nX-Injected: 1"',
+            '/version-with-a-status' => '"1.1 200"',
+        ];
+
+        foreach ($versions as $path => $debug) {
+            @unlink(self::$docroot . '/error.log');
+
+            $response = $this->request('GET', $path);
+
+            $this->assertSame('HTTP/1.1 500 Internal Server Error', $response['status'], $path);
+            $this->assertSame([], self::valuesOf($response['headers'], 'X-Injected'));
+            $this->assertSame(
+                "-|Response protocol version must be a digit, with a dot and a digit for a minor version (1.1, 2)|{$debug}|500\n",
+                (string) file_get_contents(self::$docroot . '/error.log'),
+                $path
+            );
+        }
+
+        foreach (['/version-two', '/version-one-zero'] as $path) {
+            $this->assertStringEndsWith(' 403 Forbidden', $this->request('GET', $path)['status'], $path);
         }
     }
 

@@ -1006,8 +1006,9 @@ final class Router implements RouterInterface
      *
      * @param bool $withBody False for a HEAD request: the body is not read at all
      *
-     * @throws RouterException If the body cannot be read, or the reason phrase has a control
-     *                         character other than a tab — before anything is sent
+     * @throws RouterException If the body cannot be read, the reason phrase has a control
+     *                         character other than a tab, or the protocol version is no
+     *                         version — before anything is sent
      */
     public function emit(ResponseInterface $response, bool $withBody = true): void
     {
@@ -1058,8 +1059,9 @@ final class Router implements RouterInterface
      * run() can still answer with a 500.
      *
      *
-     * @throws RouterException If the response body cannot be read (closed or detached), or
-     *                         the reason phrase has a control character other than a tab
+     * @throws RouterException If the response body cannot be read (closed or detached), the
+     *                         reason phrase has a control character other than a tab, or the
+     *                         protocol version is no version (a digit, a dot and a digit)
      *
      * @return array{status: string, headers: array<int|string, array<string>>, body: StreamInterface}
      */
@@ -1092,9 +1094,20 @@ final class Router implements RouterInterface
             );
         }
 
+        // The protocol version goes into the same line, and the PSR-7 objects do not check
+        // it either: "1.1\r\nX-Injected: 1" turned a 403 into PHP's 200 as well. A version
+        // is a digit, and a dot and a digit where it has a minor one ("1.1", "2").
+        $protocolVersion = $response->getProtocolVersion();
+        if (preg_match('/^\d(?:\.\d)?\z/', $protocolVersion) !== 1) {
+            throw new RouterException(
+                'Response protocol version must be a digit, with a dot and a digit for a minor version (1.1, 2)',
+                debugMessage: (string) json_encode($protocolVersion, JSON_INVALID_UTF8_SUBSTITUTE),
+            );
+        }
+
         $statusLine = sprintf(
             'HTTP/%s %d %s',
-            $response->getProtocolVersion(),
+            $protocolVersion,
             $response->getStatusCode(),
             $reasonPhrase
         );
